@@ -1,0 +1,53 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: NIST-800-53-CP-2
+  name: contingency-plan
+  title: A current incident response runbook with named owner exists
+  framework: nist-800-53
+  category: Contingency Planning
+  severity: high
+  tags:
+    - incident-response
+    - documentation
+  owners:
+    - team: security
+
+spec:
+  description: |
+    NIST 800-53 Rev 5 CP-2 requires the organization to develop a
+    contingency plan for the information system that identifies essential
+    missions, recovery objectives, and is reviewed and updated regularly.
+
+  rationale: |
+    Reuses the SOC2-CC7.2 evidence + Rego. The IR runbook with named
+    on-call owner and yearly review cadence satisfies CP-2's
+    "documented and current contingency plan" requirement.
+
+  evidence:
+    - id: ir_runbooks
+      source: github
+      type: file_glob
+      fixture: ../soc2/tests/fixtures/cc7.2-runbook-pass.json
+      params:
+        repo: ${env.CONCORD_REPO}
+
+  policy:
+    engine: rego
+    package: concord.soc2.cc7_2
+    file: ../soc2/policies/cc7_2.rego
+
+  mappings:
+    nist_800_53:
+      - "CP-2"
+      - "IR-8"
+    soc2:
+      - "CC7.2"
+      - "CC7.4"
+    iso27001:
+      - "A.5.24"
+      - "A.5.29"
+
+  status: stable
+  blocking: true

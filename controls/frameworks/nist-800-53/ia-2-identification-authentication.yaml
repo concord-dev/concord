@@ -1,0 +1,57 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: NIST-800-53-IA-2
+  name: identification-and-authentication
+  title: All organizational users are uniquely identified and MFA-enrolled
+  framework: nist-800-53
+  category: Identification and Authentication
+  severity: critical
+  tags:
+    - identity
+    - mfa
+  owners:
+    - team: security
+
+spec:
+  description: |
+    NIST 800-53 Rev 5 IA-2 requires the organization to uniquely identify
+    and authenticate organizational users. Subcontrol IA-2(1) requires
+    multi-factor authentication for privileged accounts; IA-2(2)
+    extends this to non-privileged accounts.
+
+  rationale: |
+    Reuses the SOC2-CC6.1 evidence + Rego. The "every active IdP user
+    has strong MFA enrolled" invariant satisfies IA-2(1) + IA-2(2).
+    Weak factors (SMS, call, security questions) are excluded from
+    "strong MFA" so this also covers IA-2(11) cryptographic MFA.
+
+  evidence:
+    - id: okta_users
+      source: okta
+      type: users_mfa
+      fixture: ../soc2/tests/fixtures/cc6.1-okta-pass.json
+      params:
+        org_url: ${env.OKTA_ORG_URL}
+
+  policy:
+    engine: rego
+    package: concord.soc2.cc6_1
+    file: ../soc2/policies/cc6_1.rego
+
+  mappings:
+    nist_800_53:
+      - "IA-2"
+      - "IA-2(1)"
+      - "IA-2(2)"
+      - "IA-2(11)"
+    soc2:
+      - "CC6.1"
+    iso27001:
+      - "A.5.17"
+    cis_aws_v2:
+      - "1.10"
+
+  status: stable
+  blocking: true

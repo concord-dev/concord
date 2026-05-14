@@ -1,0 +1,53 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: NIST-800-53-SC-28
+  name: protection-of-information-at-rest
+  title: All S3 buckets have server-side encryption configured
+  framework: nist-800-53
+  category: System and Communications Protection
+  severity: high
+  tags:
+    - encryption-at-rest
+    - aws
+    - s3
+  owners:
+    - team: platform
+
+spec:
+  description: |
+    NIST 800-53 Rev 5 SC-28 requires the organization to protect the
+    confidentiality and integrity of information at rest. Subcontrol
+    SC-28(1) calls for cryptographic mechanisms specifically.
+
+  rationale: |
+    Reuses the CIS-AWS-2.1.1 evidence + Rego. The "every S3 bucket has
+    server-side encryption enabled" invariant (with a KMS preference)
+    satisfies SC-28 and SC-28(1) for object storage.
+
+  evidence:
+    - id: s3_buckets
+      source: aws
+      type: s3_bucket_encryption
+      fixture: ../cis-aws/tests/fixtures/s3-pass.json
+      params:
+        region: ${env.AWS_REGION}
+
+  policy:
+    engine: rego
+    package: concord.cis_aws.s3_encryption
+    file: ../cis-aws/policies/s3_encryption.rego
+
+  mappings:
+    nist_800_53:
+      - "SC-28"
+      - "SC-28(1)"
+      - "SC-13"
+    cis_aws_v2:
+      - "2.1.1"
+    iso27001:
+      - "A.8.24"
+
+  status: stable
+  blocking: true

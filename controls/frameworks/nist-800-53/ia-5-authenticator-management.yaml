@@ -1,0 +1,53 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: NIST-800-53-IA-5
+  name: authenticator-management
+  title: Password authenticators meet length, complexity, and rotation minimums
+  framework: nist-800-53
+  category: Identification and Authentication
+  severity: high
+  tags:
+    - identity
+    - password-policy
+    - aws
+  owners:
+    - team: platform
+
+spec:
+  description: |
+    NIST 800-53 Rev 5 IA-5 requires the organization to manage information
+    system authenticators by establishing minimum strength requirements,
+    rotation cadence, and reuse-prevention. Subcontrol IA-5(1) targets
+    password-based authenticators specifically.
+
+  rationale: |
+    Reuses the CIS-AWS-1.16 evidence + Rego. The IAM account password
+    policy minimums (length ≥ 14, complexity, rotation ≤ 90 days,
+    reuse-prevention ≥ 24) satisfy IA-5(1) for the AWS console.
+
+  evidence:
+    - id: password_policy
+      source: aws
+      type: iam_password_policy
+      fixture: ../cis-aws/tests/fixtures/iam-password-policy-pass.json
+
+  policy:
+    engine: rego
+    package: concord.cis_aws.iam_password_policy
+    file: ../cis-aws/policies/iam_password_policy.rego
+
+  mappings:
+    nist_800_53:
+      - "IA-5"
+      - "IA-5(1)"
+    cis_aws_v2:
+      - "1.16"
+    soc2:
+      - "CC6.1"
+    iso27001:
+      - "A.5.17"
+
+  status: stable
+  blocking: true

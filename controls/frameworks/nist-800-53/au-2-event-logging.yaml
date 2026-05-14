@@ -1,0 +1,53 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: NIST-800-53-AU-2
+  name: event-logging
+  title: Audit logging captures account activity across every region
+  framework: nist-800-53
+  category: Audit and Accountability
+  severity: high
+  tags:
+    - audit
+    - logging
+    - aws
+  owners:
+    - team: security
+
+spec:
+  description: |
+    NIST 800-53 Rev 5 AU-2 requires the organization to identify the
+    events the information system is capable of logging and ensure
+    those events are logged consistently. Concord verifies the AWS-side
+    requirement by checking that at least one CloudTrail trail logs
+    every region with log-file validation enabled.
+
+  rationale: |
+    Reuses the CIS-AWS-3.1 evidence + Rego. The CloudTrail multi-region
+    + log-file-validation invariant directly satisfies AU-2 ("event
+    logging is complete and tamper-evident") for AWS-resident systems.
+
+  evidence:
+    - id: cloudtrail
+      source: aws
+      type: cloudtrail_trails
+      fixture: ../cis-aws/tests/fixtures/cloudtrail-pass.json
+
+  policy:
+    engine: rego
+    package: concord.cis_aws.cloudtrail_multi_region
+    file: ../cis-aws/policies/cloudtrail.rego
+
+  mappings:
+    nist_800_53:
+      - "AU-2"
+      - "AU-3"
+      - "AU-12"
+    cis_aws_v2:
+      - "3.1"
+    iso27001:
+      - "A.8.15"
+
+  status: stable
+  blocking: true

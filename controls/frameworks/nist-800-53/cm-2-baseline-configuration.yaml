@@ -1,0 +1,52 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: NIST-800-53-CM-2
+  name: baseline-configuration
+  title: A baseline configuration of implemented controls is maintained
+  framework: nist-800-53
+  category: Configuration Management
+  severity: medium
+  tags:
+    - configuration-management
+    - documentation
+  owners:
+    - team: security
+
+spec:
+  description: |
+    NIST 800-53 Rev 5 CM-2 requires the organization to develop and
+    maintain a baseline configuration of the information system. In
+    Concord's worldview, the baseline is the control-activities register
+    — the documented inventory of every implemented control, its owner,
+    and its review status.
+
+  rationale: |
+    Reuses the SOC2-CC5.1 evidence + Rego. The control-activities
+    register satisfies the "documented inventory of implemented
+    controls" prong of CM-2.
+
+  evidence:
+    - id: control_register
+      source: github
+      type: file_glob
+      fixture: ../soc2/tests/fixtures/cc5.1-register-pass.json
+      params:
+        repo: ${env.CONCORD_REPO}
+
+  policy:
+    engine: rego
+    package: concord.soc2.cc5_1
+    file: ../soc2/policies/cc5_1.rego
+
+  mappings:
+    nist_800_53:
+      - "CM-2"
+    soc2:
+      - "CC5.1"
+    iso27001:
+      - "A.8.9"
+
+  status: stable
+  blocking: true
