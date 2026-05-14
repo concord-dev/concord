@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -251,55 +252,61 @@ func TestControl_GetByID_CaseInsensitive(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
-func TestCheck_PersistsRunAndIsRetrievable(t *testing.T) {
+func TestCheck_ReturnsAcceptedThenPollSucceeds(t *testing.T) {
 	h := newHarness(t)
 
 	resp, body := h.do(t, "POST", "/v1/check", "", h.tokenPlain)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.Equal(t, http.StatusAccepted, resp.StatusCode, string(body))
+	assert.Equal(t, "/v1/runs/", resp.Header.Get("Location")[:9])
 
-	var got struct {
-		RunID    string            `json:"run_id"`
-		Summary  map[string]int    `json:"summary"`
-		Findings []apiv1.Finding   `json:"findings"`
+	var enq struct {
+		RunID    string `json:"run_id"`
+		Status   string `json:"status"`
+		PollURL  string `json:"poll_url"`
 	}
-	require.NoError(t, json.Unmarshal(body, &got))
-	assert.NotEmpty(t, got.RunID)
-	assert.Equal(t, len(h.c.Controls), len(got.Findings))
-	assert.Equal(t, len(h.c.Controls), got.Summary["pass"])
+	require.NoError(t, json.Unmarshal(body, &enq))
+	assert.NotEmpty(t, enq.RunID)
+	assert.Equal(t, "pending", enq.Status)
 
-	// /v1/findings should now return the same data.
-	resp2, body2 := h.do(t, "GET", "/v1/findings", "", h.tokenPlain)
-	require.Equal(t, http.StatusOK, resp2.StatusCode, string(body2))
+	// Poll the run until it completes.
+	var detail map[string]any
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		resp2, body2 := h.do(t, "GET", "/v1/runs/"+enq.RunID, "", h.tokenPlain)
+		require.Equal(t, http.StatusOK, resp2.StatusCode)
+		require.NoError(t, json.Unmarshal(body2, &detail))
+		if detail["status"] != "pending" && detail["status"] != "running" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	require.Equal(t, "succeeded", detail["status"], "run never succeeded within 15s")
+
+	// /v1/findings now returns the persisted run's data.
+	resp3, body3 := h.do(t, "GET", "/v1/findings", "", h.tokenPlain)
+	require.Equal(t, http.StatusOK, resp3.StatusCode)
 	var second struct {
 		Findings []apiv1.Finding `json:"findings"`
 		RunID    string          `json:"run_id"`
 	}
-	require.NoError(t, json.Unmarshal(body2, &second))
-	assert.Equal(t, got.RunID, second.RunID)
-	assert.Equal(t, len(got.Findings), len(second.Findings))
+	require.NoError(t, json.Unmarshal(body3, &second))
+	assert.Equal(t, enq.RunID, second.RunID)
+	assert.Equal(t, len(h.c.Controls), len(second.Findings))
 
-	// /v1/runs lists the run.
-	resp3, body3 := h.do(t, "GET", "/v1/runs", "", h.tokenPlain)
-	require.Equal(t, http.StatusOK, resp3.StatusCode)
+	// /v1/runs lists the run as succeeded.
+	resp4, body4 := h.do(t, "GET", "/v1/runs", "", h.tokenPlain)
+	require.Equal(t, http.StatusOK, resp4.StatusCode)
 	var runs []map[string]any
-	require.NoError(t, json.Unmarshal(body3, &runs))
+	require.NoError(t, json.Unmarshal(body4, &runs))
 	require.NotEmpty(t, runs)
 	assert.Equal(t, "succeeded", runs[0]["status"])
-
-	// /v1/runs/{id} fetches detail.
-	resp4, body4 := h.do(t, "GET", "/v1/runs/"+got.RunID, "", h.tokenPlain)
-	require.Equal(t, http.StatusOK, resp4.StatusCode)
-	var detail map[string]any
-	require.NoError(t, json.Unmarshal(body4, &detail))
-	assert.Equal(t, "succeeded", detail["status"])
-	assert.NotNil(t, detail["completed_at"])
 }
 
 func TestRuns_CannotCrossTenant(t *testing.T) {
 	h := newHarness(t)
-	// h's tenant runs one check.
+	// h's tenant kicks off one check.
 	resp, body := h.do(t, "POST", "/v1/check", "", h.tokenPlain)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, http.StatusAccepted, resp.StatusCode)
 	var first struct{ RunID string `json:"run_id"` }
 	require.NoError(t, json.Unmarshal(body, &first))
 
@@ -343,6 +350,56 @@ func TestBearer_CaseInsensitive(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestCheck_QueueFullReturns503(t *testing.T) {
+	// Build a server with a 0-capacity queue and a single worker so the second
+	// concurrent enqueue is guaranteed to fail.
+	st := openStore(t)
+	c, err := server.NewConcord(server.Options{
+		ControlsDir:  repoControlsDir(t),
+		ConfigPath:   filepath.Join(t.TempDir(), "x.yaml"),
+		FixturesOnly: true,
+		Store:        st,
+		AdminToken:   testAdminToken,
+		Version:      "test",
+		Worker:       server.WorkerOpts{PoolSize: 1, QueueSize: 1},
+	})
+	require.NoError(t, err)
+	ts := httptest.NewServer(c.Router())
+	t.Cleanup(ts.Close)
+
+	tenant, _ := st.CreateTenant(context.Background(), "QFull", "qfull-"+uuid.NewString()[:8])
+	_, tok, _ := st.CreateToken(context.Background(), tenant.ID, "ci")
+
+	// Fire enough concurrent requests that one is guaranteed to hit the
+	// queue-full path. With pool=1 + queue=1, the 3rd in-flight enqueue must 503.
+	statuses := make(chan int, 5)
+	var wg sync.WaitGroup
+	for range 5 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req, _ := http.NewRequest("POST", ts.URL+"/v1/check", nil)
+			req.Header.Set("Authorization", "Bearer "+tok)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				statuses <- 0
+				return
+			}
+			_ = resp.Body.Close()
+			statuses <- resp.StatusCode
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+	sawQueueFull := false
+	for s := range statuses {
+		if s == http.StatusServiceUnavailable {
+			sawQueueFull = true
+		}
+	}
+	assert.True(t, sawQueueFull, "with pool=1 + queue=1 some of the 5 concurrent requests must 503")
 }
 
 func TestNewConcord_RequiresStore(t *testing.T) {

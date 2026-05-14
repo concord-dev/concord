@@ -22,9 +22,7 @@ import (
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
 	"github.com/concord-dev/concord/internal/evidence"
-	"github.com/concord-dev/concord/internal/policy"
 	"github.com/concord-dev/concord/internal/report"
-	"github.com/concord-dev/concord/internal/runner"
 	"github.com/concord-dev/concord/internal/store"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
@@ -40,7 +38,9 @@ type Concord struct {
 	AdminToken string
 	Version    string
 
-	mu sync.Mutex // serializes per-tenant run lifecycle inside this process
+	worker *Worker
+
+	mu sync.Mutex // reserved for future per-instance coordination
 }
 
 // Options is what the cmd-side wiring passes in to construct a server.
@@ -52,6 +52,7 @@ type Options struct {
 	Store        *store.Store
 	AdminToken   string
 	Version      string
+	Worker       WorkerOpts // zero value → sensible defaults
 }
 
 // NewConcord loads controls + config and wires the supplied Store.
@@ -86,14 +87,23 @@ func NewConcord(opts Options) (*Concord, error) {
 		}
 	}
 
-	return &Concord{
+	c := &Concord{
 		Controls:   loaded,
 		Config:     cfg,
 		Registry:   reg,
 		Store:      opts.Store,
 		AdminToken: opts.AdminToken,
 		Version:    opts.Version,
-	}, nil
+	}
+	c.worker = NewWorker(c, opts.Worker)
+	c.worker.Start()
+	return c, nil
+}
+
+// Shutdown drains the background worker. Call from the HTTP server's
+// shutdown path so in-flight runs finish before the process exits.
+func (c *Concord) Shutdown(ctx context.Context) error {
+	return c.worker.Shutdown(ctx)
 }
 
 // Router wires every endpoint plus the auth middleware. Returned handler is
@@ -370,45 +380,33 @@ func (c *Concord) handleControl(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotFound, fmt.Sprintf("no control with id %q", id))
 }
 
-// handleCheck runs every control synchronously, persists a run row for the
-// authenticated tenant, and returns a JSONReport + run_id. Async runs (202
-// + /v1/runs/{id} polling) land in a follow-up — this synchronous form is
-// adequate for the fixture-only run shape we have today.
+// handleCheck creates a run, enqueues it on the background worker, and
+// responds 202 Accepted with the run id. Clients poll GET /v1/runs/{id}
+// to retrieve findings once the status reaches "succeeded" or "failed".
 func (c *Concord) handleCheck(w http.ResponseWriter, r *http.Request) {
 	tenant, ok := TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "tenant missing from context")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
-	defer cancel()
-
-	run, err := c.Store.CreateRun(ctx, tenant.ID)
+	run, err := c.Store.CreateRun(r.Context(), tenant.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "creating run: "+err.Error())
 		return
 	}
-	if err := c.Store.MarkRunRunning(ctx, run.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "marking run running: "+err.Error())
+	if err := c.worker.Enqueue(runJob{TenantID: tenant.ID, RunID: run.ID}); err != nil {
+		// Mark the run failed so it doesn't sit forever in `pending` and
+		// surface 503 so the client backs off.
+		_ = c.Store.FailRun(context.Background(), run.ID, err.Error())
+		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-
-	rn := runner.New(policy.New(), c.Registry).SetParams(c.Config.Controls.Params)
-	findings := rn.RunAll(ctx, c.Controls)
-	summary := report.Summarize(findings)
-
-	summaryJSON, _ := json.Marshal(summary)
-	findingsJSON, _ := json.Marshal(findings)
-	if err := c.Store.CompleteRun(ctx, run.ID, summaryJSON, findingsJSON); err != nil {
-		_ = c.Store.FailRun(ctx, run.ID, err.Error())
-		writeError(w, http.StatusInternalServerError, "persisting run: "+err.Error())
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"run_id":   run.ID,
-		"summary":  summary,
-		"findings": findings,
+	w.Header().Set("Location", "/v1/runs/"+run.ID.String())
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"run_id":    run.ID,
+		"status":    string(store.RunPending),
+		"poll_url":  "/v1/runs/" + run.ID.String(),
+		"started_at": run.StartedAt,
 	})
 }
 

@@ -109,7 +109,14 @@ func run() error {
 		fmt.Fprintln(os.Stderr, "shutting down…")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+		// Stop accepting new HTTP requests first, then drain in-flight jobs.
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			fmt.Fprintln(os.Stderr, "http shutdown:", err)
+		}
+		if err := c.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("worker drain: %w", err)
+		}
+		return nil
 	}
 }
 
