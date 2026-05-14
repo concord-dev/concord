@@ -12,6 +12,7 @@ import (
 
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
+	"github.com/concord-dev/concord/internal/notify"
 	"github.com/concord-dev/concord/internal/policy"
 	"github.com/concord-dev/concord/internal/runner"
 	"github.com/concord-dev/concord/internal/watcher"
@@ -20,12 +21,14 @@ import (
 
 func newWatchCmd() *cobra.Command {
 	var (
-		controlsDir  string
-		configPath   string
-		fixturesOnly bool
-		interval     time.Duration
-		outputDir    string
-		once         bool
+		controlsDir   string
+		configPath    string
+		fixturesOnly  bool
+		interval      time.Duration
+		outputDir     string
+		once          bool
+		slackWebhook  string
+		genericHook   string
 	)
 	cmd := &cobra.Command{
 		Use:   "watch",
@@ -59,10 +62,19 @@ for an always-on agent.`,
 				return r.RunAll(ctx, loaded), nil
 			}
 
+			sinks := []notify.Sink{notify.Stderr(os.Stderr)}
+			if slackWebhook != "" {
+				sinks = append(sinks, notify.Slack(slackWebhook, nil, os.Stderr))
+			}
+			if genericHook != "" {
+				sinks = append(sinks, notify.Webhook(genericHook, nil, os.Stderr))
+			}
+
 			w := watcher.New(check, watcher.Options{
 				Interval:  interval,
 				OutputDir: outputDir,
 				Once:      once,
+				EventSink: notify.Multi(sinks...),
 			})
 
 			ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
@@ -76,5 +88,7 @@ for an always-on agent.`,
 	cmd.Flags().DurationVar(&interval, "interval", time.Hour, "Time between runs (e.g. 30m, 1h, 24h)")
 	cmd.Flags().StringVar(&outputDir, "output-dir", ".concord", "Directory to persist last-run.json")
 	cmd.Flags().BoolVar(&once, "once", false, "Run a single iteration and exit (suitable for cron)")
+	cmd.Flags().StringVar(&slackWebhook, "slack-webhook", "", "Slack incoming-webhook URL to receive state-change events")
+	cmd.Flags().StringVar(&genericHook, "webhook", "", "Generic HTTP endpoint to receive each event as JSON")
 	return cmd
 }
