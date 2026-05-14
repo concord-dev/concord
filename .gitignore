@@ -1,0 +1,12 @@
+bin/
+concord
+concord-server
+concordd
+*.test
+*.out
+coverage.out
+vendor/
+.idea/
+.vscode/
+*.swp
+.DS_Store

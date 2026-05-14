@@ -1,0 +1,58 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: SOC2-CC8.1
+  name: change-management-default-branch-protected
+  title: Default branch is protected and requires reviewed changes
+  framework: soc2
+  category: Change Management
+  severity: high
+  tags:
+    - source-control
+    - change-management
+  owners:
+    - team: platform
+
+spec:
+  description: |
+    SOC 2 CC8.1 requires that changes to production systems are authorized,
+    tested, and approved before deployment. For source-controlled systems
+    this means the default branch must be protected, require pull-request
+    review by at least one peer, require status checks to pass, and forbid
+    force-pushes and deletions.
+
+  rationale: |
+    Without enforced branch protection a single developer can ship to
+    production unilaterally, defeating segregation of duties and removing
+    the auditor's evidence chain for code changes.
+
+  evidence:
+    - id: branch_protection
+      source: github
+      type: api
+      fixture: ./tests/fixtures/cc8.1-pass.json
+      params:
+        endpoint: /repos/{owner}/{repo}/branches/{branch}/protection
+
+  policy:
+    engine: rego
+    package: concord.soc2.cc8_1
+    file: ./policies/cc8_1.rego
+
+  remediation:
+    runbook: docs/remediation/soc2-cc8.1.md
+    auto_fix: false
+    estimated_effort: 30m
+
+  mappings:
+    iso27001:
+      - A.8.32
+      - A.8.30
+    nist_csf:
+      - PR.IP-3
+    cis_controls:
+      - "16.7"
+
+  status: stable
+  blocking: true
