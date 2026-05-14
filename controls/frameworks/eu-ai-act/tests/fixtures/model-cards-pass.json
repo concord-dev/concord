@@ -1,0 +1,12 @@
+{
+  "scanned_paths": ["docs/ai/model-cards"],
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "docs": [
+    {
+      "path": "docs/ai/model-cards/fraud-detector.md",
+      "model": "fraud-detector",
+      "intended_use": "Detect fraudulent payment patterns in real-time.",
+      "limitations": "Performance degrades on transaction patterns from regions not represented in training data."
+    }
+  ]
+}

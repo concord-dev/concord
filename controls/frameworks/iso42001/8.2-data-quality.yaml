@@ -1,0 +1,64 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: ISO42001-8.2
+  name: ai-data-quality-documentation
+  title: Every production model has linked dataset documentation
+  framework: iso42001
+  category: Do
+  severity: high
+  tags:
+    - ai
+    - data-quality
+    - data-governance
+  owners:
+    - team: ml-platform
+
+spec:
+  description: |
+    ISO 42001 §8.2 (and EU AI Act Article 10) require providers to
+    document the data sets used for training, validation, and testing.
+    Concord enforces this by requiring every production model in the
+    registry to carry a `dataset_card_url` MLflow tag pointing at a
+    retrievable dataset documentation artifact.
+
+  rationale: |
+    The dataset is half the model — its provenance, licensing, known
+    biases, and version determine whether the model is fit for its
+    declared purpose. Auditors cannot accept a model into a high-risk
+    production environment without documented data lineage and
+    quality criteria, and ISO/EU make this explicit.
+
+  evidence:
+    - id: model_registry
+      source: mlflow
+      type: model_registry
+      fixture: ./tests/fixtures/data-quality-pass.json
+      params:
+        tracking_uri: ${env.MLFLOW_TRACKING_URI}
+
+  policy:
+    engine: rego
+    package: concord.iso42001.data_quality
+    file: ./policies/data_quality.rego
+
+  remediation:
+    runbook: docs/remediation/iso42001-8.2.md
+    auto_fix: false
+    estimated_effort: 3h
+
+  mappings:
+    iso42001:
+      - "8.2"
+    eu_ai_act:
+      - "Article-10"
+      - "Annex-IV-2"
+    nist_ai_rmf:
+      - "MAP-2.3"
+      - "MEASURE-2.10"
+    soc2:
+      - "CC1.4"
+
+  status: stable
+  blocking: true

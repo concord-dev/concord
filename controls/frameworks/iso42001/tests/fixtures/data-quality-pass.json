@@ -1,0 +1,25 @@
+{
+  "tracking_uri": "https://mlflow.example.com",
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "models": [
+    {
+      "name": "fraud-detector",
+      "version": "5",
+      "production": true,
+      "eu_ai_act_tier": "high",
+      "dataset_card_url": "https://concord.example.com/datasets/fraud-detector-v3",
+      "dataset_version": "3.2.0",
+      "dataset_quality_assessment": "s3://concord-reports/fraud-detector-data-quality-2026-04-01.pdf",
+      "owner": "ml-platform"
+    },
+    {
+      "name": "spam-classifier",
+      "version": "2",
+      "production": true,
+      "eu_ai_act_tier": "limited",
+      "dataset_card_url": "https://concord.example.com/datasets/spam-2025",
+      "dataset_version": "1.0.0",
+      "owner": "trust-and-safety"
+    }
+  ]
+}

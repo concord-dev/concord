@@ -1,0 +1,15 @@
+{
+  "scanned_paths": ["docs/ai/oversight"],
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "docs": [
+    {
+      "path": "docs/ai/oversight/fraud-detector.md",
+      "model": "fraud-detector",
+      "overseer_roles": "Fraud Ops L2 reviews every transaction over $5,000 flagged by the model.",
+      "capabilities": "Catches ~91% of fraudulent transactions matching trained patterns.",
+      "limitations": "May misclassify legitimate transactions from unfamiliar regions; ineffective against new fraud patterns.",
+      "kill_switch": "Set feature flag `fraud-detector.enabled=false` in LaunchDarkly — full rollback in <60s.",
+      "approver": "carol@example.com"
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: EU-AIAct-Article13
+  name: transparency-model-card
+  title: Every high-risk AI system publishes a deployer-facing model card
+  framework: eu-ai-act
+  category: Provider obligations
+  severity: high
+  tags:
+    - ai
+    - eu-ai-act
+    - transparency
+    - model-card
+  owners:
+    - team: ai-governance
+
+spec:
+  description: |
+    EU AI Act Article 13 requires high-risk AI systems to be designed
+    and developed so that their operation is sufficiently transparent
+    to enable deployers to interpret outputs. Concord enforces this
+    by requiring every high-risk production model to expose a model
+    card, either as an MLflow tag `public_model_card_url` or as a
+    Git-versioned markdown file at docs/ai/model-cards/<model>.md.
+
+  rationale: |
+    The model card is the canonical transparency artifact: it tells
+    downstream deployers about intended use, performance, limitations,
+    and known biases. Without it, deployers cannot satisfy their own
+    Article 26 obligations. We accept either an externally hosted
+    card (via tag) or an internally maintained Git-tracked one.
+
+  evidence:
+    - id: model_registry
+      source: mlflow
+      type: model_registry
+      fixture: ./tests/fixtures/models-with-high-risk.json
+      params:
+        tracking_uri: ${env.MLFLOW_TRACKING_URI}
+
+    - id: model_cards
+      source: github
+      type: file_glob
+      fixture: ./tests/fixtures/model-cards-pass.json
+      params:
+        repo: ${env.CONCORD_REPO}
+        paths:
+          - "docs/ai/model-cards/*.md"
+        parse: frontmatter
+
+  policy:
+    engine: rego
+    package: concord.eu_ai_act.article_13
+    file: ./policies/article_13.rego
+
+  remediation:
+    runbook: docs/remediation/eu-ai-act-article-13.md
+    auto_fix: false
+    estimated_effort: 4h
+
+  mappings:
+    eu_ai_act:
+      - "Article-13"
+    iso42001:
+      - "8.4"
+      - "9.4"
+    nist_ai_rmf:
+      - "GOVERN-1.3"
+      - "MAP-4.1"
+      - "MEASURE-3.3"
+
+  status: stable
+  blocking: true

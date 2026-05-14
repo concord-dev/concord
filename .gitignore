@@ -1,5 +1,4 @@
 bin/
-concord
 concord-server
 concordd
 *.test

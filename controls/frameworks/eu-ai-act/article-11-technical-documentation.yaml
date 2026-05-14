@@ -1,0 +1,76 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: EU-AIAct-Article11
+  name: technical-documentation-high-risk
+  title: Every high-risk AI system has Annex IV technical documentation
+  framework: eu-ai-act
+  category: Provider obligations
+  severity: high
+  tags:
+    - ai
+    - eu-ai-act
+    - technical-documentation
+    - annex-iv
+  owners:
+    - team: ai-governance
+
+spec:
+  description: |
+    EU AI Act Article 11 requires providers of high-risk AI systems to
+    draw up technical documentation conforming to Annex IV before
+    placing the system on the market. Concord checks every production
+    model classified as eu_ai_act_tier=high has a corresponding
+    technical-documentation markdown file with reviewer + reviewed_at
+    frontmatter so the doc is auditable, not merely present.
+
+  rationale: |
+    Annex IV requires nine categories of documentation (system
+    description, design, development, validation, risk management,
+    changes, accuracy metrics, cybersecurity, post-market monitoring).
+    Maintaining these as Git-versioned markdown lets Concord prove
+    not just existence but freshness — auditors care that the doc
+    matches the deployed system, not a frozen snapshot from launch.
+
+  evidence:
+    - id: model_registry
+      source: mlflow
+      type: model_registry
+      fixture: ./tests/fixtures/models-with-high-risk.json
+      params:
+        tracking_uri: ${env.MLFLOW_TRACKING_URI}
+
+    - id: technical_docs
+      source: github
+      type: file_glob
+      fixture: ./tests/fixtures/tech-docs-pass.json
+      params:
+        repo: ${env.CONCORD_REPO}
+        paths:
+          - "docs/ai/technical-documentation/*.md"
+        parse: frontmatter
+
+  policy:
+    engine: rego
+    package: concord.eu_ai_act.article_11
+    file: ./policies/article_11.rego
+
+  remediation:
+    runbook: docs/remediation/eu-ai-act-article-11.md
+    auto_fix: false
+    estimated_effort: 1d
+
+  mappings:
+    eu_ai_act:
+      - "Article-11"
+      - "Annex-IV"
+    iso42001:
+      - "7.5.3"
+      - "8.4"
+    nist_ai_rmf:
+      - "GOVERN-1.6"
+      - "MAP-4.1"
+
+  status: stable
+  blocking: true

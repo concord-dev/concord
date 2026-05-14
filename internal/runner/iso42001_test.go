@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	iso42001Path     = "controls/frameworks/iso42001/6.1-ai-risk-assessment.yaml"
-	iso42001EvalPath = "controls/frameworks/iso42001/7.4-model-evaluation.yaml"
+	iso42001Path        = "controls/frameworks/iso42001/6.1-ai-risk-assessment.yaml"
+	iso42001EvalPath    = "controls/frameworks/iso42001/7.4-model-evaluation.yaml"
+	iso42001DataQltPath = "controls/frameworks/iso42001/8.2-data-quality.yaml"
 )
 
 func TestRunISO42001Pass(t *testing.T) {
@@ -84,6 +85,29 @@ func TestRunISO42001_ModelEval_Stale(t *testing.T) {
 func runISO42001Eval(t *testing.T, fixture string) apiv1.Finding {
 	t.Helper()
 	controlPath := filepath.Join(repoRoot(t), iso42001EvalPath)
+	c, err := controls.LoadFile(controlPath)
+	require.NoError(t, err)
+	c.Spec.Evidence[0].Fixture = "./tests/fixtures/" + fixture
+	r := New(policy.New(), evidence.NewFileCollector())
+	return r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
+}
+
+// --- ISO 42001 §8.2: Data Quality ---
+
+func TestRunISO42001_DataQuality_Pass(t *testing.T) {
+	f := runISO42001DataQuality(t, "data-quality-pass.json")
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
+}
+
+func TestRunISO42001_DataQuality_MissingTagFails(t *testing.T) {
+	f := runISO42001DataQuality(t, "data-quality-missing.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, `production model "fraud-detector" has no dataset_card_url tag`)
+}
+
+func runISO42001DataQuality(t *testing.T, fixture string) apiv1.Finding {
+	t.Helper()
+	controlPath := filepath.Join(repoRoot(t), iso42001DataQltPath)
 	c, err := controls.LoadFile(controlPath)
 	require.NoError(t, err)
 	c.Spec.Evidence[0].Fixture = "./tests/fixtures/" + fixture

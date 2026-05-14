@@ -91,9 +91,12 @@ func normalizeMLflowModel(rm mlflowRegisteredModel) map[string]any {
 			model["run_id"] = prodVersion.RunID
 		}
 	}
-	for _, key := range []string{"eu_ai_act_tier", "evaluation_report", "last_evaluated_at", "owner"} {
-		if v, ok := tags[key]; ok {
-			model[key] = v
+	// Promote every tag to a top-level field so Rego can read any of them
+	// directly. Fixed model fields above (name, production, version, etc.)
+	// always win over tags with conflicting keys.
+	for k, v := range tags {
+		if _, exists := model[k]; !exists {
+			model[k] = v
 		}
 	}
 	return model

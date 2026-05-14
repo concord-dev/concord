@@ -1,0 +1,15 @@
+{
+  "scanned_paths": ["docs/ai/technical-documentation"],
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "docs": [
+    {
+      "path": "docs/ai/technical-documentation/fraud-detector.md",
+      "model": "fraud-detector",
+      "version": "5",
+      "reviewer": "alice@example.com",
+      "reviewed_at": "2026-04-01T00:00:00Z",
+      "accuracy_metrics": "Precision 0.94 / Recall 0.91 on validation set.",
+      "cybersecurity_assessment": "Threat model documented in SECURITY.md."
+    }
+  ]
+}
