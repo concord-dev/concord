@@ -120,7 +120,8 @@ func (w *Worker) loop() {
 }
 
 // execute is the actual work of one job. Failures are recorded on the run
-// row; we never panic out of the worker loop.
+// row; we never panic out of the worker loop. Lifecycle events are emitted
+// on the Concord bus so SSE subscribers see transitions in real time.
 func (w *Worker) execute(job runJob) {
 	ctx, cancel := context.WithTimeout(context.Background(), w.timeout)
 	defer cancel()
@@ -129,11 +130,19 @@ func (w *Worker) execute(job runJob) {
 		fmt.Fprintf(os.Stderr, "worker: marking run %s running: %v\n", job.RunID, err)
 		return
 	}
+	w.c.bus.Publish(Event{
+		Kind: EventRunStarted, TenantID: job.TenantID, RunID: job.RunID,
+		At: time.Now().UTC(), Status: string(store.RunRunning),
+	})
 
 	defer func() {
 		if rec := recover(); rec != nil {
 			msg := fmt.Sprintf("panic: %v", rec)
 			_ = w.c.Store.FailRun(context.Background(), job.RunID, msg)
+			w.c.bus.Publish(Event{
+				Kind: EventRunFailed, TenantID: job.TenantID, RunID: job.RunID,
+				At: time.Now().UTC(), Error: msg,
+			})
 			fmt.Fprintf(os.Stderr, "worker: %s\n", msg)
 		}
 	}()
@@ -146,8 +155,17 @@ func (w *Worker) execute(job runJob) {
 	findingsJSON, _ := json.Marshal(findings)
 	if err := w.c.Store.CompleteRun(ctx, job.RunID, summaryJSON, findingsJSON); err != nil {
 		_ = w.c.Store.FailRun(context.Background(), job.RunID, err.Error())
+		w.c.bus.Publish(Event{
+			Kind: EventRunFailed, TenantID: job.TenantID, RunID: job.RunID,
+			At: time.Now().UTC(), Error: err.Error(),
+		})
 		fmt.Fprintf(os.Stderr, "worker: persisting run %s: %v\n", job.RunID, err)
+		return
 	}
+	w.c.bus.Publish(Event{
+		Kind: EventRunCompleted, TenantID: job.TenantID, RunID: job.RunID,
+		At: time.Now().UTC(), Status: string(store.RunSucceeded), Summary: summaryJSON,
+	})
 }
 
 // --- Test helpers ---

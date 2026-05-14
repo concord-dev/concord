@@ -352,6 +352,154 @@ func TestBearer_CaseInsensitive(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
+func TestEvents_StreamsRunLifecycle(t *testing.T) {
+	h := newHarness(t)
+
+	// Subscribe first so we don't miss the run.started event.
+	req, _ := http.NewRequest("GET", h.srv.URL+"/v1/events", nil)
+	req.Header.Set("Authorization", "Bearer "+h.tokenPlain)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req = req.WithContext(ctx)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
+
+	// Give the subscription a beat to register on the bus before we publish.
+	require.Eventually(t, func() bool {
+		return h.c.Bus().SubscriberCount(h.tenant.ID) > 0
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// Kick off a run via the HTTP API.
+	respCheck, _ := h.do(t, "POST", "/v1/check", "", h.tokenPlain)
+	require.Equal(t, http.StatusAccepted, respCheck.StatusCode)
+
+	// Stream the SSE response onto a channel so the test can deadline reads.
+	// The reader goroutine exits when the response body closes (cancel()).
+	frames := make(chan sseFrame, 32)
+	go func() {
+		defer close(frames)
+		readSSEFrames(resp.Body, frames)
+	}()
+
+	var sawStarted, sawCompleted bool
+	deadline := time.After(15 * time.Second)
+loop:
+	for !sawCompleted {
+		select {
+		case f, ok := <-frames:
+			if !ok {
+				break loop
+			}
+			switch f.Event {
+			case "run.started":
+				sawStarted = true
+			case "run.completed":
+				sawCompleted = true
+				assert.Contains(t, f.Data, "run.completed")
+				assert.Contains(t, f.Data, "succeeded")
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for SSE frames; sawStarted=%v sawCompleted=%v", sawStarted, sawCompleted)
+		}
+	}
+	assert.True(t, sawStarted, "run.started should arrive before run.completed")
+}
+
+func TestEvents_RequiresAuth(t *testing.T) {
+	h := newHarness(t)
+	resp, _ := h.do(t, "GET", "/v1/events", "", "")
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestEvents_NoCrossTenantLeak(t *testing.T) {
+	h := newHarness(t)
+
+	// Subscribe as tenant A.
+	reqA, _ := http.NewRequest("GET", h.srv.URL+"/v1/events", nil)
+	reqA.Header.Set("Authorization", "Bearer "+h.tokenPlain)
+	ctxA, cancelA := context.WithCancel(context.Background())
+	defer cancelA()
+	respA, err := http.DefaultClient.Do(reqA.WithContext(ctxA))
+	require.NoError(t, err)
+	defer respA.Body.Close()
+	require.Eventually(t, func() bool {
+		return h.c.Bus().SubscriberCount(h.tenant.ID) > 0
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// Create tenant B and have it run a check.
+	other, _ := h.st.CreateTenant(context.Background(), "Other", "other-"+uuid.NewString()[:8])
+	_, otherTok, _ := h.st.CreateToken(context.Background(), other.ID, "ci")
+	resp, _ := h.do(t, "POST", "/v1/check", "", otherTok)
+	require.Equal(t, http.StatusAccepted, resp.StatusCode)
+
+	// Tenant A's stream must NOT receive tenant B's events. Drain for 1s;
+	// if any frame arrives on A's stream during that window, fail.
+	frames := make(chan sseFrame, 16)
+	go func() {
+		defer close(frames)
+		readSSEFrames(respA.Body, frames)
+	}()
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case f, ok := <-frames:
+			if !ok {
+				return
+			}
+			t.Fatalf("tenant A received leaked event %q (data=%q)", f.Event, f.Data)
+		case <-deadline:
+			// expected — nothing leaked
+			return
+		}
+	}
+}
+
+// sseFrame is one parsed Server-Sent Event frame.
+type sseFrame struct {
+	Event string
+	Data  string
+}
+
+// readSSEFrames parses an io.Reader as a stream of SSE frames and forwards
+// each non-comment frame on out. Comment-only frames (prelude, heartbeats) are
+// dropped. The function returns when the reader closes.
+func readSSEFrames(r io.Reader, out chan<- sseFrame) {
+	buf := make([]byte, 0, 4096)
+	tmp := make([]byte, 1024)
+	for {
+		n, err := r.Read(tmp)
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+			for {
+				idx := strings.Index(string(buf), "\n\n")
+				if idx < 0 {
+					break
+				}
+				raw := string(buf[:idx])
+				buf = buf[idx+2:]
+				var f sseFrame
+				for _, line := range strings.Split(raw, "\n") {
+					switch {
+					case strings.HasPrefix(line, "event: "):
+						f.Event = strings.TrimPrefix(line, "event: ")
+					case strings.HasPrefix(line, "data: "):
+						f.Data = strings.TrimPrefix(line, "data: ")
+					}
+				}
+				if f.Event != "" {
+					out <- f
+				}
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
 func TestCheck_QueueFullReturns503(t *testing.T) {
 	// Build a server with a 0-capacity queue and a single worker so the second
 	// concurrent enqueue is guaranteed to fail.

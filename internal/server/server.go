@@ -39,6 +39,7 @@ type Concord struct {
 	Version    string
 
 	worker *Worker
+	bus    *Bus
 
 	mu sync.Mutex // reserved for future per-instance coordination
 }
@@ -94,11 +95,16 @@ func NewConcord(opts Options) (*Concord, error) {
 		Store:      opts.Store,
 		AdminToken: opts.AdminToken,
 		Version:    opts.Version,
+		bus:        NewBus(),
 	}
 	c.worker = NewWorker(c, opts.Worker)
 	c.worker.Start()
 	return c, nil
 }
+
+// Bus returns the event bus for callers (the watcher's run loop and the SSE
+// handler) that need to publish or subscribe.
+func (c *Concord) Bus() *Bus { return c.bus }
 
 // Shutdown drains the background worker. Call from the HTTP server's
 // shutdown path so in-flight runs finish before the process exits.
@@ -130,6 +136,7 @@ func (c *Concord) Router() http.Handler {
 	mux.Handle("GET /v1/findings", c.requireTenant(http.HandlerFunc(c.handleFindings)))
 	mux.Handle("GET /v1/runs", c.requireTenant(http.HandlerFunc(c.handleListRuns)))
 	mux.Handle("GET /v1/runs/{id}", c.requireTenant(http.HandlerFunc(c.handleGetRun)))
+	mux.Handle("GET /v1/events", c.requireTenant(http.HandlerFunc(c.handleEvents)))
 
 	return logging(mux)
 }
@@ -499,6 +506,67 @@ func writeFindingsEnvelope(w http.ResponseWriter, run store.Run) {
 	})
 }
 
+// handleEvents streams Server-Sent Events for the authenticated tenant.
+// One subscriber per HTTP connection. The handler returns when the client
+// disconnects or the server flushes a pending close.
+//
+// Wire format (per SSE):
+//
+//	event: <kind>
+//	data: <event JSON>
+//	(blank line)
+//
+// A 15s heartbeat keeps proxy idle timeouts at bay.
+func (c *Concord) handleEvents(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := TenantFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "tenant missing from context")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming unsupported by the underlying ResponseWriter")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // disable nginx response buffering
+	w.WriteHeader(http.StatusOK)
+
+	ch, unsub := c.bus.Subscribe(tenant.ID, 32)
+	defer unsub()
+
+	// Opening prelude so the client knows the stream is live even before the
+	// first event lands.
+	fmt.Fprint(w, ": connected\n\n")
+	flusher.Flush()
+
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case e, ok := <-ch:
+			if !ok {
+				return
+			}
+			payload, err := json.Marshal(e)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.Kind, payload)
+			flusher.Flush()
+		case <-heartbeat.C:
+			fmt.Fprint(w, ": heartbeat\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
 // --- Tiny HTTP helpers ---
 
 func writeJSON(w http.ResponseWriter, code int, body any) {
@@ -531,4 +599,14 @@ type statusRecorder struct {
 func (s *statusRecorder) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
+}
+
+// Flush delegates to the wrapped ResponseWriter so the SSE handler's
+// w.(http.Flusher) type assertion still passes after logging() wraps the
+// response. Without this, type-assertion goes against statusRecorder itself
+// rather than the underlying writer, and SSE 500s.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
