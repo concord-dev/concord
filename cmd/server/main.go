@@ -1,7 +1,8 @@
-// concord-server is the v0 multi-tenant HTTP API for Concord. It loads a
-// controls library + concord.yaml at startup and exposes a small REST surface
-// over them. Designed to run behind a reverse proxy (Caddy, ALB, Cloudflare)
-// that terminates TLS and adds auth.
+// concord-server is the multi-tenant HTTP API for Concord. It loads a
+// controls library + concord.yaml at startup, connects to Postgres for tenant
+// + run persistence, and exposes a REST surface guarded by API tokens.
+// Designed to run behind a reverse proxy (Caddy, ALB, Cloudflare) that
+// terminates TLS.
 package main
 
 import (
@@ -15,10 +16,10 @@ import (
 	"time"
 
 	"github.com/concord-dev/concord/internal/server"
+	"github.com/concord-dev/concord/internal/store"
 )
 
-// version is set at build time via -ldflags "-X main.version=<sha>". Defaults
-// to "dev" so a plain `go run ./cmd/server` still surfaces a value.
+// version is set at build time via -ldflags "-X main.version=<sha>".
 var version = "dev"
 
 func main() {
@@ -33,21 +34,45 @@ func run() error {
 		listenAddr   string
 		controlsDir  string
 		configPath   string
-		outputDir    string
 		fixturesOnly bool
+		databaseURL  string
+		adminToken   string
+		skipMigrate  bool
 	)
-	flag.StringVar(&listenAddr, "listen", ":8080", "Listen address (host:port)")
-	flag.StringVar(&controlsDir, "controls", "./controls", "Path to controls directory")
-	flag.StringVar(&configPath, "config", "./concord.yaml", "Path to concord.yaml")
-	flag.StringVar(&outputDir, "output-dir", ".concord", "Where last-run.json is persisted")
-	flag.BoolVar(&fixturesOnly, "fixtures", true, "Force fixture-only mode (v0 default: true — live collectors land via env later)")
+	flag.StringVar(&listenAddr, "listen", envOr("LISTEN_ADDR", ":8080"), "Listen address (host:port)")
+	flag.StringVar(&controlsDir, "controls", envOr("CONCORD_CONTROLS_DIR", "./controls"), "Path to controls directory")
+	flag.StringVar(&configPath, "config", envOr("CONCORD_CONFIG", "./concord.yaml"), "Path to concord.yaml")
+	flag.BoolVar(&fixturesOnly, "fixtures", true, "Force fixture-only mode (v0 default: true)")
+	flag.StringVar(&databaseURL, "database-url", os.Getenv("DATABASE_URL"), "Postgres DSN (or set DATABASE_URL)")
+	flag.StringVar(&adminToken, "admin-token", os.Getenv("CONCORD_ADMIN_TOKEN"), "Admin token for /admin/v1/* (or set CONCORD_ADMIN_TOKEN)")
+	flag.BoolVar(&skipMigrate, "skip-migrate", false, "Don't run schema migrations on startup")
 	flag.Parse()
+
+	if databaseURL == "" {
+		return fmt.Errorf("DATABASE_URL is required (e.g. postgres://concord:dev@localhost:5432/concord?sslmode=disable)")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	st, err := store.Open(ctx, databaseURL)
+	if err != nil {
+		return fmt.Errorf("opening store: %w", err)
+	}
+	defer st.Close()
+
+	if !skipMigrate {
+		if err := st.Migrate(ctx); err != nil {
+			return fmt.Errorf("running migrations: %w", err)
+		}
+	}
 
 	c, err := server.NewConcord(server.Options{
 		ControlsDir:  controlsDir,
 		ConfigPath:   configPath,
-		OutputDir:    outputDir,
 		FixturesOnly: fixturesOnly,
+		Store:        st,
+		AdminToken:   adminToken,
 		Version:      version,
 	})
 	if err != nil {
@@ -59,10 +84,13 @@ func run() error {
 		Handler:           c.Router(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      11 * time.Minute, // accommodate /v1/check's 10m budget + headroom
+		WriteTimeout:      11 * time.Minute,
 		IdleTimeout:       120 * time.Second,
 	}
 
+	if adminToken == "" {
+		fmt.Fprintln(os.Stderr, "warning: CONCORD_ADMIN_TOKEN not set; /admin/v1/* will refuse every request")
+	}
 	fmt.Fprintf(os.Stderr, "concord-server %s listening on %s (%d controls loaded)\n",
 		version, listenAddr, len(c.Controls))
 
@@ -74,8 +102,6 @@ func run() error {
 		close(errCh)
 	}()
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	select {
 	case err := <-errCh:
 		return err
@@ -85,4 +111,12 @@ func run() error {
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
 	}
+}
+
+// envOr returns the named environment variable or a fallback when unset.
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
