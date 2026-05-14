@@ -226,7 +226,10 @@ func TestGitHubCollector_FileGlob_MissingPaths(t *testing.T) {
 	assert.Contains(t, err.Error(), "paths")
 }
 
-func TestGitHubCollector_FileGlob_DirectoryNotFound(t *testing.T) {
+func TestGitHubCollector_FileGlob_DirectoryNotFoundReturnsEmpty(t *testing.T) {
+	// A missing directory must NOT propagate as an error — it should return
+	// an empty docs array so the policy's "no docs found" deny rule fires
+	// with a clear audit-grade message instead of a raw HTTP 404.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/owner/repo/contents/nope", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -236,15 +239,17 @@ func TestGitHubCollector_FileGlob_DirectoryNotFound(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := evidence.NewGitHubCollector("t").SetBaseURL(srv.URL)
-	_, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{
+	v, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{
 		Source: "github", Type: "file_glob",
 		Params: map[string]any{
 			"repo":  "owner/repo",
 			"paths": []any{"nope/*.md"},
 		},
 	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "404")
+	require.NoError(t, err)
+	docs, ok := v.(map[string]any)["docs"].([]map[string]any)
+	require.True(t, ok)
+	assert.Empty(t, docs, "missing directory must yield zero docs, not an error")
 }
 
 func TestGitHubCollector_FileGlob_MalformedFrontmatter(t *testing.T) {

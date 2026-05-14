@@ -162,6 +162,12 @@ func (c *GitHubCollector) collectFileGlob(ref apiv1.EvidenceRef) (any, error) {
 
 		listing, err := c.getJSON(ctx, fmt.Sprintf("/repos/%s/contents/%s", repo, dir))
 		if err != nil {
+			// 404 on a doc directory means "no documents here yet" — fall
+			// through with an empty listing so the policy's "no docs" deny
+			// rule fires cleanly instead of surfacing a raw HTTP error.
+			if isGitHubNotFound(err) {
+				continue
+			}
 			return nil, fmt.Errorf("listing %s: %w", dir, err)
 		}
 		entries, ok := listing.([]any)
@@ -242,6 +248,12 @@ func decodeContent(obj map[string]any) ([]byte, error) {
 	}
 	cleaned := strings.ReplaceAll(raw, "\n", "")
 	return base64.StdEncoding.DecodeString(cleaned)
+}
+
+// isGitHubNotFound returns true when the error wraps a 404 from the GitHub API.
+// Errors from getJSON include the response body which contains "returned 404" — we sniff that.
+func isGitHubNotFound(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "returned 404")
 }
 
 func parseFrontmatter(content []byte) (map[string]any, error) {
