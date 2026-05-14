@@ -328,6 +328,25 @@ func TestRunCC5_1_TooFewEntriesFails(t *testing.T) {
 	assert.Contains(t, f.Warnings, `control register entry "docs/control-activities/branch-protection.md" is ad_hoc — consider formalizing for audit`)
 }
 
+// --- CIS-AWS-1.10 — Console MFA ---
+
+const cisAws110Path = "controls/frameworks/cis-aws/1.10-console-mfa.yaml"
+
+func TestRunCISAWS1_10_Pass(t *testing.T) {
+	f := runSingleEv(t, cisAws110Path, "credentials-pass.json")
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
+}
+
+func TestRunCISAWS1_10_ConsoleUserWithoutMFAFails(t *testing.T) {
+	f := runSingleEv(t, cisAws110Path, "credentials-console-no-mfa.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, `user "console-only-bob" has a console password but no MFA device — enroll an MFA factor or disable console login`)
+	// Root with mfa_active=true but password_enabled=false must NOT fire.
+	for _, m := range f.Messages {
+		assert.NotContains(t, m, "<root_account>", "root MFA is handled by CIS-AWS-1.5, not 1.10")
+	}
+}
+
 // --- SOC2-CC7.1-snyk — Snyk-tracked vulnerabilities ---
 
 const cc71SnykPath = "controls/frameworks/soc2/cc7.1-vulnerability-management-snyk.yaml"
