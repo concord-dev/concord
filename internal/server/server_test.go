@@ -27,7 +27,6 @@ import (
 const defaultTestDSN = "postgres://concord:concord-dev@localhost:5432/concord?sslmode=disable"
 const testAdminToken = "test-admin-token-fixed"
 
-// repoControlsDir resolves the bundled controls library.
 func repoControlsDir(t *testing.T) string {
 	t.Helper()
 	abs, err := filepath.Abs("../../controls")
@@ -35,9 +34,7 @@ func repoControlsDir(t *testing.T) string {
 	return abs
 }
 
-// openStore opens a Store against the configured Postgres or skips. Same
-// pattern as internal/store/store_test.go so the suite stays usable on
-// developer machines without Docker.
+// openStore opens a Store against the configured Postgres or skips.
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
 	dsn := os.Getenv("CONCORD_TEST_DATABASE_URL")
@@ -46,25 +43,23 @@ func openStore(t *testing.T) *store.Store {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s, err := store.Open(ctx, dsn)
+	s, err := store.Open(ctx, dsn, store.PoolOptions{MaxConns: 4, MinConns: 1})
 	if err != nil {
 		t.Skipf("skipping: Postgres not reachable at %s (run `docker compose up -d postgres`): %v", dsn, err)
 	}
 	require.NoError(t, s.Migrate(ctx))
-	t.Cleanup(func() { _ = s.Close() })
+	t.Cleanup(s.Close)
 	return s
 }
 
 type harness struct {
-	srv       *httptest.Server
-	c         *server.Concord
-	st        *store.Store
-	tenant    store.Tenant
+	srv        *httptest.Server
+	c          *server.Concord
+	st         *store.Store
+	org        store.Organization
 	tokenPlain string
 }
 
-// newHarness spins up a server with admin auth wired, creates a fresh tenant
-// + token, and returns a ready-to-call client surface.
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	st := openStore(t)
@@ -80,12 +75,12 @@ func newHarness(t *testing.T) *harness {
 	ts := httptest.NewServer(c.Router())
 	t.Cleanup(ts.Close)
 
-	tenant, err := st.CreateTenant(context.Background(), "Test Tenant", "test-"+uuid.NewString()[:8])
+	org, err := st.CreateOrganization(context.Background(), "Test Org", "test-"+uuid.NewString()[:8])
 	require.NoError(t, err)
-	_, plain, err := st.CreateToken(context.Background(), tenant.ID, "test")
+	_, plain, err := st.CreateToken(context.Background(), org.ID, "test", nil)
 	require.NoError(t, err)
 
-	return &harness{srv: ts, c: c, st: st, tenant: tenant, tokenPlain: plain}
+	return &harness{srv: ts, c: c, st: st, org: org, tokenPlain: plain}
 }
 
 func (h *harness) do(t *testing.T, method, path, body, auth string) (*http.Response, []byte) {
@@ -129,26 +124,25 @@ func TestVersion_NoAuthRequired(t *testing.T) {
 
 // --- Auth ---
 
-func TestTenantRoutes_RequireBearerToken(t *testing.T) {
+func TestOrgRoutes_RequireBearerToken(t *testing.T) {
 	h := newHarness(t)
-	for _, p := range []string{"/v1/frameworks", "/v1/controls", "/v1/runs"} {
+	for _, p := range []string{"/v1/frameworks", "/v1/controls", "/v1/runs", "/v1/me"} {
 		resp, body := h.do(t, "GET", p, "", "")
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, p)
 		assert.Contains(t, string(body), "missing Authorization")
 	}
 }
 
-func TestTenantRoutes_RejectInvalidToken(t *testing.T) {
+func TestOrgRoutes_RejectInvalidToken(t *testing.T) {
 	h := newHarness(t)
 	resp, body := h.do(t, "GET", "/v1/frameworks", "", "concord_bogus")
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	assert.Contains(t, string(body), "invalid token")
 }
 
-func TestAdminRoutes_RequireAdminToken(t *testing.T) {
+func TestAdminRoutes_RejectTenantToken(t *testing.T) {
 	h := newHarness(t)
-	// Using the tenant token must be rejected for admin paths.
-	resp, body := h.do(t, "GET", "/admin/v1/tenants", "", h.tokenPlain)
+	resp, body := h.do(t, "GET", "/admin/v1/orgs", "", h.tokenPlain)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	assert.Contains(t, string(body), "invalid admin token")
 }
@@ -163,29 +157,28 @@ func TestAdminRoutes_DisabledWhenAdminTokenUnset(t *testing.T) {
 	ts := httptest.NewServer(c.Router())
 	t.Cleanup(ts.Close)
 
-	req, _ := http.NewRequest("GET", ts.URL+"/admin/v1/tenants", nil)
+	req, _ := http.NewRequest("GET", ts.URL+"/admin/v1/orgs", nil)
 	req.Header.Set("Authorization", "Bearer anything")
 	resp, _ := http.DefaultClient.Do(req)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
 }
 
-// --- Admin CRUD ---
+// --- Admin: orgs + users + memberships ---
 
-func TestAdmin_CreateTenantAndToken_HappyPath(t *testing.T) {
+func TestAdmin_CreateOrgAndToken_HappyPath(t *testing.T) {
 	h := newHarness(t)
 
 	slug := "admin-flow-" + uuid.NewString()[:8]
 	body := fmt.Sprintf(`{"name":"Admin Flow","slug":%q}`, slug)
-	resp, raw := h.do(t, "POST", "/admin/v1/tenants", body, testAdminToken)
+	resp, raw := h.do(t, "POST", "/admin/v1/orgs", body, testAdminToken)
 	require.Equal(t, http.StatusCreated, resp.StatusCode, string(raw))
 
-	var tenant store.Tenant
-	require.NoError(t, json.Unmarshal(raw, &tenant))
-	assert.Equal(t, slug, tenant.Slug)
+	var org store.Organization
+	require.NoError(t, json.Unmarshal(raw, &org))
+	assert.Equal(t, slug, org.Slug)
 
-	// Mint a token for the new tenant.
-	resp2, raw2 := h.do(t, "POST", "/admin/v1/tenants/"+slug+"/tokens", `{"name":"ci"}`, testAdminToken)
+	resp2, raw2 := h.do(t, "POST", "/admin/v1/orgs/"+slug+"/tokens", `{"name":"ci"}`, testAdminToken)
 	require.Equal(t, http.StatusCreated, resp2.StatusCode, string(raw2))
 
 	var tok struct {
@@ -195,44 +188,120 @@ func TestAdmin_CreateTenantAndToken_HappyPath(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw2, &tok))
 	assert.True(t, strings.HasPrefix(tok.Token, "concord_"))
 
-	// The plain token must now work against /v1/*.
-	resp3, _ := h.do(t, "GET", "/v1/frameworks", "", tok.Token)
-	assert.Equal(t, http.StatusOK, resp3.StatusCode)
-
-	// Listing tokens must include the new one.
-	respL, rawL := h.do(t, "GET", "/admin/v1/tenants/"+slug+"/tokens", "", testAdminToken)
-	require.Equal(t, http.StatusOK, respL.StatusCode)
-	var toks []store.Token
-	require.NoError(t, json.Unmarshal(rawL, &toks))
-	assert.Len(t, toks, 1)
-	assert.Equal(t, "ci", toks[0].Name)
+	// The minted token must now work against /v1/me — and report the org.
+	resp3, raw3 := h.do(t, "GET", "/v1/me", "", tok.Token)
+	require.Equal(t, http.StatusOK, resp3.StatusCode)
+	var me struct {
+		Organization store.Organization `json:"organization"`
+	}
+	require.NoError(t, json.Unmarshal(raw3, &me))
+	assert.Equal(t, slug, me.Organization.Slug)
 
 	// Delete the token; subsequent use must 401.
-	resp4, _ := h.do(t, "DELETE", "/admin/v1/tenants/"+slug+"/tokens/"+tok.ID, "", testAdminToken)
-	assert.Equal(t, http.StatusNoContent, resp4.StatusCode)
-	resp5, _ := h.do(t, "GET", "/v1/frameworks", "", tok.Token)
-	assert.Equal(t, http.StatusUnauthorized, resp5.StatusCode)
+	respDel, _ := h.do(t, "DELETE", "/admin/v1/orgs/"+slug+"/tokens/"+tok.ID, "", testAdminToken)
+	assert.Equal(t, http.StatusNoContent, respDel.StatusCode)
+	respDeleted, _ := h.do(t, "GET", "/v1/me", "", tok.Token)
+	assert.Equal(t, http.StatusUnauthorized, respDeleted.StatusCode)
 }
 
-func TestAdmin_CreateTenant_DuplicateSlugConflicts(t *testing.T) {
+func TestAdmin_CreateOrg_DuplicateSlugConflicts(t *testing.T) {
 	h := newHarness(t)
 	slug := "dup-" + uuid.NewString()[:8]
 	body := fmt.Sprintf(`{"name":"A","slug":%q}`, slug)
-	resp, _ := h.do(t, "POST", "/admin/v1/tenants", body, testAdminToken)
+	resp, _ := h.do(t, "POST", "/admin/v1/orgs", body, testAdminToken)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
-
-	resp2, _ := h.do(t, "POST", "/admin/v1/tenants", body, testAdminToken)
+	resp2, _ := h.do(t, "POST", "/admin/v1/orgs", body, testAdminToken)
 	assert.Equal(t, http.StatusConflict, resp2.StatusCode)
 }
 
-func TestAdmin_CreateTokenForUnknownTenantIs404(t *testing.T) {
+func TestAdmin_CreateTokenForUnknownOrgIs404(t *testing.T) {
 	h := newHarness(t)
-	resp, body := h.do(t, "POST", "/admin/v1/tenants/nope/tokens", `{"name":"x"}`, testAdminToken)
+	resp, body := h.do(t, "POST", "/admin/v1/orgs/nope/tokens", `{"name":"x"}`, testAdminToken)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
-	assert.Contains(t, string(body), "no tenant")
+	assert.Contains(t, string(body), "no organization")
 }
 
-// --- Tenant API ---
+func TestAdmin_CreateUser_RoundTrip(t *testing.T) {
+	h := newHarness(t)
+	email := fmt.Sprintf("alice+%s@example.com", uuid.NewString()[:8])
+	resp, raw := h.do(t, "POST", "/admin/v1/users",
+		fmt.Sprintf(`{"email":%q,"name":"Alice"}`, email), testAdminToken)
+	require.Equal(t, http.StatusCreated, resp.StatusCode, string(raw))
+
+	var u store.User
+	require.NoError(t, json.Unmarshal(raw, &u))
+	assert.Equal(t, email, u.Email)
+
+	// List users includes Alice.
+	respL, rawL := h.do(t, "GET", "/admin/v1/users", "", testAdminToken)
+	require.Equal(t, http.StatusOK, respL.StatusCode)
+	var users []store.User
+	require.NoError(t, json.Unmarshal(rawL, &users))
+	found := false
+	for _, x := range users {
+		if x.Email == email {
+			found = true
+		}
+	}
+	assert.True(t, found, "Alice must appear in /admin/v1/users")
+}
+
+func TestAdmin_AddMember_ByEmail_AndList(t *testing.T) {
+	h := newHarness(t)
+
+	// Create user via API.
+	email := fmt.Sprintf("bob+%s@example.com", uuid.NewString()[:8])
+	respU, _ := h.do(t, "POST", "/admin/v1/users",
+		fmt.Sprintf(`{"email":%q,"name":"Bob"}`, email), testAdminToken)
+	require.Equal(t, http.StatusCreated, respU.StatusCode)
+
+	// Attach to harness's org as admin.
+	body := fmt.Sprintf(`{"email":%q,"role":"admin"}`, email)
+	resp, raw := h.do(t, "POST", "/admin/v1/orgs/"+h.org.Slug+"/members", body, testAdminToken)
+	require.Equal(t, http.StatusCreated, resp.StatusCode, string(raw))
+
+	// List members.
+	respL, rawL := h.do(t, "GET", "/admin/v1/orgs/"+h.org.Slug+"/members", "", testAdminToken)
+	require.Equal(t, http.StatusOK, respL.StatusCode)
+	var members []store.OrgMember
+	require.NoError(t, json.Unmarshal(rawL, &members))
+	require.Len(t, members, 1)
+	assert.Equal(t, email, members[0].User.Email)
+	assert.Equal(t, store.RoleAdmin, members[0].Role)
+}
+
+func TestAdmin_AddMember_InvalidRoleRejected(t *testing.T) {
+	h := newHarness(t)
+	resp, body := h.do(t, "POST", "/admin/v1/orgs/"+h.org.Slug+"/members",
+		`{"email":"x@example.com","role":"superuser"}`, testAdminToken)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(body), "owner|admin|member|viewer")
+}
+
+func TestAdmin_RemoveMember(t *testing.T) {
+	h := newHarness(t)
+	u, err := h.st.CreateUser(context.Background(), uniqueEmail("rm"), "Rm")
+	require.NoError(t, err)
+	_, err = h.st.AddMember(context.Background(), u.ID, h.org.ID, store.RoleMember)
+	require.NoError(t, err)
+
+	resp, _ := h.do(t, "DELETE",
+		"/admin/v1/orgs/"+h.org.Slug+"/members/"+u.ID.String(), "", testAdminToken)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+
+	// Removing twice returns 404.
+	resp2, _ := h.do(t, "DELETE",
+		"/admin/v1/orgs/"+h.org.Slug+"/members/"+u.ID.String(), "", testAdminToken)
+	assert.Equal(t, http.StatusNotFound, resp2.StatusCode)
+}
+
+func TestAdmin_BadJSONReturns400(t *testing.T) {
+	h := newHarness(t)
+	resp, _ := h.do(t, "POST", "/admin/v1/orgs", `{not json}`, testAdminToken)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// --- Org API ---
 
 func TestControls_ListAndFilter(t *testing.T) {
 	h := newHarness(t)
@@ -260,15 +329,14 @@ func TestCheck_ReturnsAcceptedThenPollSucceeds(t *testing.T) {
 	assert.Equal(t, "/v1/runs/", resp.Header.Get("Location")[:9])
 
 	var enq struct {
-		RunID    string `json:"run_id"`
-		Status   string `json:"status"`
-		PollURL  string `json:"poll_url"`
+		RunID   string `json:"run_id"`
+		Status  string `json:"status"`
+		PollURL string `json:"poll_url"`
 	}
 	require.NoError(t, json.Unmarshal(body, &enq))
 	assert.NotEmpty(t, enq.RunID)
 	assert.Equal(t, "pending", enq.Status)
 
-	// Poll the run until it completes.
 	var detail map[string]any
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -280,9 +348,8 @@ func TestCheck_ReturnsAcceptedThenPollSucceeds(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	require.Equal(t, "succeeded", detail["status"], "run never succeeded within 15s")
+	require.Equal(t, "succeeded", detail["status"])
 
-	// /v1/findings now returns the persisted run's data.
 	resp3, body3 := h.do(t, "GET", "/v1/findings", "", h.tokenPlain)
 	require.Equal(t, http.StatusOK, resp3.StatusCode)
 	var second struct {
@@ -293,7 +360,6 @@ func TestCheck_ReturnsAcceptedThenPollSucceeds(t *testing.T) {
 	assert.Equal(t, enq.RunID, second.RunID)
 	assert.Equal(t, len(h.c.Controls), len(second.Findings))
 
-	// /v1/runs lists the run as succeeded.
 	resp4, body4 := h.do(t, "GET", "/v1/runs", "", h.tokenPlain)
 	require.Equal(t, http.StatusOK, resp4.StatusCode)
 	var runs []map[string]any
@@ -302,23 +368,21 @@ func TestCheck_ReturnsAcceptedThenPollSucceeds(t *testing.T) {
 	assert.Equal(t, "succeeded", runs[0]["status"])
 }
 
-func TestRuns_CannotCrossTenant(t *testing.T) {
+func TestRuns_CannotCrossOrg(t *testing.T) {
 	h := newHarness(t)
-	// h's tenant kicks off one check.
 	resp, body := h.do(t, "POST", "/v1/check", "", h.tokenPlain)
 	require.Equal(t, http.StatusAccepted, resp.StatusCode)
-	var first struct{ RunID string `json:"run_id"` }
+	var first struct {
+		RunID string `json:"run_id"`
+	}
 	require.NoError(t, json.Unmarshal(body, &first))
 
-	// Create a second tenant + token, and try to fetch the first tenant's run.
-	other, err := h.st.CreateTenant(context.Background(), "Other", "other-"+uuid.NewString()[:8])
-	require.NoError(t, err)
-	_, otherTok, err := h.st.CreateToken(context.Background(), other.ID, "ci")
-	require.NoError(t, err)
+	other, _ := h.st.CreateOrganization(context.Background(), "Other", "other-"+uuid.NewString()[:8])
+	_, otherTok, _ := h.st.CreateToken(context.Background(), other.ID, "ci", nil)
 
 	resp2, _ := h.do(t, "GET", "/v1/runs/"+first.RunID, "", otherTok)
 	assert.Equal(t, http.StatusNotFound, resp2.StatusCode,
-		"tenant B must NOT see tenant A's runs")
+		"org B must NOT see org A's runs")
 }
 
 func TestFindings_BeforeAnyCheckReturns404(t *testing.T) {
@@ -334,14 +398,6 @@ func TestGetRun_InvalidIDReturns400(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
-func TestAdmin_BadJSONReturns400(t *testing.T) {
-	h := newHarness(t)
-	resp, _ := h.do(t, "POST", "/admin/v1/tenants", `{not json}`, testAdminToken)
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-}
-
-// Quick guard: the test fixture for Bearer parsing must accept "bearer "
-// case-insensitively, matching RFC 6750.
 func TestBearer_CaseInsensitive(t *testing.T) {
 	h := newHarness(t)
 	req, _ := http.NewRequest("GET", h.srv.URL+"/v1/frameworks", bytes.NewReader(nil))
@@ -352,10 +408,20 @@ func TestBearer_CaseInsensitive(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
+func TestNewConcord_RequiresStore(t *testing.T) {
+	_, err := server.NewConcord(server.Options{
+		ControlsDir: repoControlsDir(t),
+		ConfigPath:  filepath.Join(t.TempDir(), "x.yaml"),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Store is required")
+}
+
+// --- SSE ---
+
 func TestEvents_StreamsRunLifecycle(t *testing.T) {
 	h := newHarness(t)
 
-	// Subscribe first so we don't miss the run.started event.
 	req, _ := http.NewRequest("GET", h.srv.URL+"/v1/events", nil)
 	req.Header.Set("Authorization", "Bearer "+h.tokenPlain)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -367,17 +433,14 @@ func TestEvents_StreamsRunLifecycle(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
 
-	// Give the subscription a beat to register on the bus before we publish.
+	// Wait for the bus to register the subscriber before we publish.
 	require.Eventually(t, func() bool {
-		return h.c.Bus().SubscriberCount(h.tenant.ID) > 0
+		return h.c.Bus().SubscriberCount(h.org.ID) > 0
 	}, 2*time.Second, 10*time.Millisecond)
 
-	// Kick off a run via the HTTP API.
 	respCheck, _ := h.do(t, "POST", "/v1/check", "", h.tokenPlain)
 	require.Equal(t, http.StatusAccepted, respCheck.StatusCode)
 
-	// Stream the SSE response onto a channel so the test can deadline reads.
-	// The reader goroutine exits when the response body closes (cancel()).
 	frames := make(chan sseFrame, 32)
 	go func() {
 		defer close(frames)
@@ -402,10 +465,10 @@ loop:
 				assert.Contains(t, f.Data, "succeeded")
 			}
 		case <-deadline:
-			t.Fatalf("timed out waiting for SSE frames; sawStarted=%v sawCompleted=%v", sawStarted, sawCompleted)
+			t.Fatalf("timed out; sawStarted=%v sawCompleted=%v", sawStarted, sawCompleted)
 		}
 	}
-	assert.True(t, sawStarted, "run.started should arrive before run.completed")
+	assert.True(t, sawStarted)
 }
 
 func TestEvents_RequiresAuth(t *testing.T) {
@@ -414,10 +477,9 @@ func TestEvents_RequiresAuth(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
-func TestEvents_NoCrossTenantLeak(t *testing.T) {
+func TestEvents_NoCrossOrgLeak(t *testing.T) {
 	h := newHarness(t)
 
-	// Subscribe as tenant A.
 	reqA, _ := http.NewRequest("GET", h.srv.URL+"/v1/events", nil)
 	reqA.Header.Set("Authorization", "Bearer "+h.tokenPlain)
 	ctxA, cancelA := context.WithCancel(context.Background())
@@ -426,17 +488,14 @@ func TestEvents_NoCrossTenantLeak(t *testing.T) {
 	require.NoError(t, err)
 	defer respA.Body.Close()
 	require.Eventually(t, func() bool {
-		return h.c.Bus().SubscriberCount(h.tenant.ID) > 0
+		return h.c.Bus().SubscriberCount(h.org.ID) > 0
 	}, 2*time.Second, 10*time.Millisecond)
 
-	// Create tenant B and have it run a check.
-	other, _ := h.st.CreateTenant(context.Background(), "Other", "other-"+uuid.NewString()[:8])
-	_, otherTok, _ := h.st.CreateToken(context.Background(), other.ID, "ci")
+	other, _ := h.st.CreateOrganization(context.Background(), "Other", "other-"+uuid.NewString()[:8])
+	_, otherTok, _ := h.st.CreateToken(context.Background(), other.ID, "ci", nil)
 	resp, _ := h.do(t, "POST", "/v1/check", "", otherTok)
 	require.Equal(t, http.StatusAccepted, resp.StatusCode)
 
-	// Tenant A's stream must NOT receive tenant B's events. Drain for 1s;
-	// if any frame arrives on A's stream during that window, fail.
 	frames := make(chan sseFrame, 16)
 	go func() {
 		defer close(frames)
@@ -449,23 +508,68 @@ func TestEvents_NoCrossTenantLeak(t *testing.T) {
 			if !ok {
 				return
 			}
-			t.Fatalf("tenant A received leaked event %q (data=%q)", f.Event, f.Data)
+			t.Fatalf("org A received leaked event %q", f.Event)
 		case <-deadline:
-			// expected — nothing leaked
 			return
 		}
 	}
 }
 
-// sseFrame is one parsed Server-Sent Event frame.
+// --- Worker / queue ---
+
+func TestCheck_QueueFullReturns503(t *testing.T) {
+	st := openStore(t)
+	c, err := server.NewConcord(server.Options{
+		ControlsDir:  repoControlsDir(t),
+		ConfigPath:   filepath.Join(t.TempDir(), "x.yaml"),
+		FixturesOnly: true,
+		Store:        st,
+		AdminToken:   testAdminToken,
+		Version:      "test",
+		Worker:       server.WorkerOpts{PoolSize: 1, QueueSize: 1},
+	})
+	require.NoError(t, err)
+	ts := httptest.NewServer(c.Router())
+	t.Cleanup(ts.Close)
+
+	org, _ := st.CreateOrganization(context.Background(), "QFull", "qfull-"+uuid.NewString()[:8])
+	_, tok, _ := st.CreateToken(context.Background(), org.ID, "ci", nil)
+
+	statuses := make(chan int, 5)
+	var wg sync.WaitGroup
+	for range 5 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req, _ := http.NewRequest("POST", ts.URL+"/v1/check", nil)
+			req.Header.Set("Authorization", "Bearer "+tok)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				statuses <- 0
+				return
+			}
+			_ = resp.Body.Close()
+			statuses <- resp.StatusCode
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+	sawQueueFull := false
+	for s := range statuses {
+		if s == http.StatusServiceUnavailable {
+			sawQueueFull = true
+		}
+	}
+	assert.True(t, sawQueueFull, "with pool=1 + queue=1 some of the 5 concurrent requests must 503")
+}
+
+// --- SSE helpers ---
+
 type sseFrame struct {
 	Event string
 	Data  string
 }
 
-// readSSEFrames parses an io.Reader as a stream of SSE frames and forwards
-// each non-comment frame on out. Comment-only frames (prelude, heartbeats) are
-// dropped. The function returns when the reader closes.
 func readSSEFrames(r io.Reader, out chan<- sseFrame) {
 	buf := make([]byte, 0, 4096)
 	tmp := make([]byte, 1024)
@@ -500,61 +604,6 @@ func readSSEFrames(r io.Reader, out chan<- sseFrame) {
 	}
 }
 
-func TestCheck_QueueFullReturns503(t *testing.T) {
-	// Build a server with a 0-capacity queue and a single worker so the second
-	// concurrent enqueue is guaranteed to fail.
-	st := openStore(t)
-	c, err := server.NewConcord(server.Options{
-		ControlsDir:  repoControlsDir(t),
-		ConfigPath:   filepath.Join(t.TempDir(), "x.yaml"),
-		FixturesOnly: true,
-		Store:        st,
-		AdminToken:   testAdminToken,
-		Version:      "test",
-		Worker:       server.WorkerOpts{PoolSize: 1, QueueSize: 1},
-	})
-	require.NoError(t, err)
-	ts := httptest.NewServer(c.Router())
-	t.Cleanup(ts.Close)
-
-	tenant, _ := st.CreateTenant(context.Background(), "QFull", "qfull-"+uuid.NewString()[:8])
-	_, tok, _ := st.CreateToken(context.Background(), tenant.ID, "ci")
-
-	// Fire enough concurrent requests that one is guaranteed to hit the
-	// queue-full path. With pool=1 + queue=1, the 3rd in-flight enqueue must 503.
-	statuses := make(chan int, 5)
-	var wg sync.WaitGroup
-	for range 5 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			req, _ := http.NewRequest("POST", ts.URL+"/v1/check", nil)
-			req.Header.Set("Authorization", "Bearer "+tok)
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				statuses <- 0
-				return
-			}
-			_ = resp.Body.Close()
-			statuses <- resp.StatusCode
-		}()
-	}
-	wg.Wait()
-	close(statuses)
-	sawQueueFull := false
-	for s := range statuses {
-		if s == http.StatusServiceUnavailable {
-			sawQueueFull = true
-		}
-	}
-	assert.True(t, sawQueueFull, "with pool=1 + queue=1 some of the 5 concurrent requests must 503")
-}
-
-func TestNewConcord_RequiresStore(t *testing.T) {
-	_, err := server.NewConcord(server.Options{
-		ControlsDir: repoControlsDir(t),
-		ConfigPath:  filepath.Join(t.TempDir(), "x.yaml"),
-	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Store is required")
+func uniqueEmail(prefix string) string {
+	return fmt.Sprintf("%s+%s@example.com", prefix, uuid.NewString()[:8])
 }

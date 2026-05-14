@@ -55,7 +55,12 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	st, err := store.Open(ctx, databaseURL)
+	st, err := store.Open(ctx, databaseURL, store.PoolOptions{
+		MaxConns:        20,
+		MinConns:        2,
+		MaxConnLifetime: 30 * time.Minute,
+		MaxConnIdleTime: 5 * time.Minute,
+	})
 	if err != nil {
 		return fmt.Errorf("opening store: %w", err)
 	}

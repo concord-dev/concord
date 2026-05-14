@@ -21,16 +21,16 @@ const (
 
 // Event is the wire shape pushed over SSE to subscribed clients.
 type Event struct {
-	Kind     EventKind       `json:"kind"`
-	TenantID uuid.UUID       `json:"tenant_id"`
-	RunID    uuid.UUID       `json:"run_id"`
-	At       time.Time       `json:"at"`
-	Status   string          `json:"status,omitempty"`
-	Summary  json.RawMessage `json:"summary,omitempty"`
-	Error    string          `json:"error,omitempty"`
+	Kind    EventKind       `json:"kind"`
+	OrgID   uuid.UUID       `json:"org_id"`
+	RunID   uuid.UUID       `json:"run_id"`
+	At      time.Time       `json:"at"`
+	Status  string          `json:"status,omitempty"`
+	Summary json.RawMessage `json:"summary,omitempty"`
+	Error   string          `json:"error,omitempty"`
 }
 
-// Bus is the in-process fan-out for per-tenant events. Subscribers are
+// Bus is the in-process fan-out for per-org events. Subscribers are
 // non-blocking: a slow consumer is dropped rather than holding back the
 // publisher. Multi-instance fan-out (Redis pub/sub, NATS, pg-notify) lands
 // when concord-server itself goes horizontal.
@@ -48,31 +48,31 @@ func NewBus() *Bus {
 	return &Bus{subs: make(map[uuid.UUID]map[*subscription]struct{})}
 }
 
-// Subscribe registers a per-tenant subscriber and returns its receive channel
+// Subscribe registers a per-org subscriber and returns its receive channel
 // plus an unsubscribe func. bufSize is the per-subscriber buffer; events
 // beyond the buffer are dropped (never block the publisher).
 //
 // Note: the returned channel is intentionally NOT closed by the unsub func.
 // Closing would race with concurrent Publish sends; instead, callers signal
 // "I'm done" via context cancellation in their select loop.
-func (b *Bus) Subscribe(tenantID uuid.UUID, bufSize int) (<-chan Event, func()) {
+func (b *Bus) Subscribe(orgID uuid.UUID, bufSize int) (<-chan Event, func()) {
 	if bufSize <= 0 {
 		bufSize = 16
 	}
 	sub := &subscription{ch: make(chan Event, bufSize)}
 	b.mu.Lock()
-	if b.subs[tenantID] == nil {
-		b.subs[tenantID] = make(map[*subscription]struct{})
+	if b.subs[orgID] == nil {
+		b.subs[orgID] = make(map[*subscription]struct{})
 	}
-	b.subs[tenantID][sub] = struct{}{}
+	b.subs[orgID][sub] = struct{}{}
 	b.mu.Unlock()
 
 	unsub := func() {
 		b.mu.Lock()
-		if set, ok := b.subs[tenantID]; ok {
+		if set, ok := b.subs[orgID]; ok {
 			delete(set, sub)
 			if len(set) == 0 {
-				delete(b.subs, tenantID)
+				delete(b.subs, orgID)
 			}
 		}
 		b.mu.Unlock()
@@ -81,14 +81,14 @@ func (b *Bus) Subscribe(tenantID uuid.UUID, bufSize int) (<-chan Event, func()) 
 }
 
 // Publish fans the event to every subscriber registered to the event's
-// TenantID. Subscribers whose buffer is full are skipped (and a warning is
+// OrgID. Subscribers whose buffer is full are skipped (and a warning is
 // logged to stderr) so a single slow client cannot stall the worker.
 //
 // The subscriber list is snapshotted under the lock so concurrent
 // Subscribe/Unsubscribe calls don't race with the fan-out iteration.
 func (b *Bus) Publish(e Event) {
 	b.mu.RLock()
-	set := b.subs[e.TenantID]
+	set := b.subs[e.OrgID]
 	subs := make([]*subscription, 0, len(set))
 	for s := range set {
 		subs = append(subs, s)
@@ -99,15 +99,15 @@ func (b *Bus) Publish(e Event) {
 		select {
 		case sub.ch <- e:
 		default:
-			fmt.Fprintf(os.Stderr, "bus: subscriber for tenant %s is full, dropping %s\n",
-				e.TenantID, e.Kind)
+			fmt.Fprintf(os.Stderr, "bus: subscriber for org %s is full, dropping %s\n",
+				e.OrgID, e.Kind)
 		}
 	}
 }
 
 // SubscriberCount is exposed for tests + diagnostics.
-func (b *Bus) SubscriberCount(tenantID uuid.UUID) int {
+func (b *Bus) SubscriberCount(orgID uuid.UUID) int {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return len(b.subs[tenantID])
+	return len(b.subs[orgID])
 }

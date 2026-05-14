@@ -21,7 +21,7 @@ import (
 // information to update the corresponding run row; the actual control library
 // + registry are looked up off the Worker's Concord pointer.
 type runJob struct {
-	TenantID uuid.UUID
+	OrgID uuid.UUID
 	RunID    uuid.UUID
 }
 
@@ -131,7 +131,7 @@ func (w *Worker) execute(job runJob) {
 		return
 	}
 	w.c.bus.Publish(Event{
-		Kind: EventRunStarted, TenantID: job.TenantID, RunID: job.RunID,
+		Kind: EventRunStarted, OrgID: job.OrgID, RunID: job.RunID,
 		At: time.Now().UTC(), Status: string(store.RunRunning),
 	})
 
@@ -140,7 +140,7 @@ func (w *Worker) execute(job runJob) {
 			msg := fmt.Sprintf("panic: %v", rec)
 			_ = w.c.Store.FailRun(context.Background(), job.RunID, msg)
 			w.c.bus.Publish(Event{
-				Kind: EventRunFailed, TenantID: job.TenantID, RunID: job.RunID,
+				Kind: EventRunFailed, OrgID: job.OrgID, RunID: job.RunID,
 				At: time.Now().UTC(), Error: msg,
 			})
 			fmt.Fprintf(os.Stderr, "worker: %s\n", msg)
@@ -156,14 +156,14 @@ func (w *Worker) execute(job runJob) {
 	if err := w.c.Store.CompleteRun(ctx, job.RunID, summaryJSON, findingsJSON); err != nil {
 		_ = w.c.Store.FailRun(context.Background(), job.RunID, err.Error())
 		w.c.bus.Publish(Event{
-			Kind: EventRunFailed, TenantID: job.TenantID, RunID: job.RunID,
+			Kind: EventRunFailed, OrgID: job.OrgID, RunID: job.RunID,
 			At: time.Now().UTC(), Error: err.Error(),
 		})
 		fmt.Fprintf(os.Stderr, "worker: persisting run %s: %v\n", job.RunID, err)
 		return
 	}
 	w.c.bus.Publish(Event{
-		Kind: EventRunCompleted, TenantID: job.TenantID, RunID: job.RunID,
+		Kind: EventRunCompleted, OrgID: job.OrgID, RunID: job.RunID,
 		At: time.Now().UTC(), Status: string(store.RunSucceeded), Summary: summaryJSON,
 	})
 }
@@ -172,9 +172,9 @@ func (w *Worker) execute(job runJob) {
 
 // waitForRun polls the store until run reaches a terminal state or ctx fires.
 // Test-only; production callers should poll the HTTP endpoint instead.
-func waitForRun(ctx context.Context, st *store.Store, tenantID, runID uuid.UUID) (store.Run, error) {
+func waitForRun(ctx context.Context, st *store.Store, orgID, runID uuid.UUID) (store.Run, error) {
 	for {
-		r, err := st.GetRun(ctx, tenantID, runID)
+		r, err := st.GetRun(ctx, orgID, runID)
 		if err != nil {
 			return store.Run{}, err
 		}

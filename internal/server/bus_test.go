@@ -22,7 +22,7 @@ func TestBus_PublishFansOutToSameTenant(t *testing.T) {
 	defer unsubB()
 	assert.Equal(t, 2, b.SubscriberCount(tenant))
 
-	evt := Event{Kind: EventRunStarted, TenantID: tenant, RunID: uuid.New(), At: time.Now()}
+	evt := Event{Kind: EventRunStarted, OrgID: tenant, RunID: uuid.New(), At: time.Now()}
 	b.Publish(evt)
 
 	for _, ch := range []<-chan Event{chA, chB} {
@@ -46,7 +46,7 @@ func TestBus_NoCrossTenantLeak(t *testing.T) {
 	chB, unsubB := b.Subscribe(bnt, 4)
 	defer unsubB()
 
-	b.Publish(Event{Kind: EventRunCompleted, TenantID: a, RunID: uuid.New()})
+	b.Publish(Event{Kind: EventRunCompleted, OrgID: a, RunID: uuid.New()})
 
 	select {
 	case got := <-chA:
@@ -75,7 +75,7 @@ func TestBus_UnsubscribeDeregisters(t *testing.T) {
 	assert.Equal(t, 0, b.SubscriberCount(tenant))
 
 	// After unsubscribe, future publishes must not be delivered.
-	b.Publish(Event{Kind: EventRunStarted, TenantID: tenant, RunID: uuid.New()})
+	b.Publish(Event{Kind: EventRunStarted, OrgID: tenant, RunID: uuid.New()})
 	select {
 	case got, ok := <-ch:
 		if ok {
@@ -99,7 +99,7 @@ func TestBus_SlowSubscriberIsDroppedNotBlocking(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for range 1000 {
-			b.Publish(Event{Kind: EventRunStarted, TenantID: tenant, RunID: uuid.New()})
+			b.Publish(Event{Kind: EventRunStarted, OrgID: tenant, RunID: uuid.New()})
 		}
 		close(done)
 	}()
@@ -157,7 +157,7 @@ func TestBus_ConcurrentPublishersAndSubscribers(t *testing.T) {
 		go func(ids []uuid.UUID) {
 			defer pubWG.Done()
 			for _, id := range ids {
-				b.Publish(Event{Kind: EventRunStarted, TenantID: tenant, RunID: id})
+				b.Publish(Event{Kind: EventRunStarted, OrgID: tenant, RunID: id})
 			}
 		}(runIDs[i])
 	}
