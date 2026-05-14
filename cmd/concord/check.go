@@ -30,14 +30,14 @@ func newCheckCmd() *cobra.Command {
 		Use:   "check",
 		Short: "Evaluate compliance controls against collected evidence",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			renderer, err := report.RendererFor(format)
-			if err != nil {
-				return err
-			}
-
 			cfg, err := config.Load(configPath)
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
+			}
+
+			renderer, err := report.RendererFor(format, report.Opts{OrgName: cfg.Metadata.Name})
+			if err != nil {
+				return err
 			}
 
 			loaded, err := controls.Load(controlsDir)
@@ -77,7 +77,7 @@ func newCheckCmd() *cobra.Command {
 	cmd.Flags().StringVar(&controlsDir, "controls", "./controls", "Path to controls directory")
 	cmd.Flags().StringVar(&configPath, "config", "./concord.yaml", "Path to concord.yaml")
 	cmd.Flags().BoolVar(&fixturesOnly, "fixtures", false, "Force fixture-only mode (skip live collectors)")
-	cmd.Flags().StringVar(&format, "format", "text", "Output format: text|json|oscal|markdown")
+	cmd.Flags().StringVar(&format, "format", "text", "Output format: text|json|oscal|markdown|trust-portal")
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Write findings to this file (default: stdout)")
 	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress prelude (Mode + Checking lines)")
 	return cmd
@@ -86,6 +86,11 @@ func newCheckCmd() *cobra.Command {
 func openOutput(path string) (io.Writer, func(), error) {
 	if path == "" {
 		return os.Stdout, func() {}, nil
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, nil, fmt.Errorf("creating output dir: %w", err)
+		}
 	}
 	f, err := os.Create(path)
 	if err != nil {

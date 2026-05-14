@@ -282,6 +282,21 @@ func TestRunCC2_1_MissingPoliciesFails(t *testing.T) {
 	assert.Contains(t, f.Messages, `policy "docs/policies/data-protection.md" is missing required field "approved_by"`)
 }
 
+// --- SOC2-CC3.1 — Risk assessment process ---
+
+const cc31Path = "controls/frameworks/soc2/cc3.1-risk-assessment-process.yaml"
+
+func TestRunCC3_1_Pass(t *testing.T) {
+	f := runSingleEv(t, cc31Path, "cc3.1-process-pass.json")
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
+}
+
+func TestRunCC3_1_MissingProcessFails(t *testing.T) {
+	f := runSingleEv(t, cc31Path, "cc3.1-process-empty.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, "no risk-assessment process documented at docs/policies/risk-assessment-process.md")
+}
+
 // --- SOC2-CC4.1 — Monitoring strategy ---
 
 const cc41Path = "controls/frameworks/soc2/cc4.1-monitoring-strategy.yaml"

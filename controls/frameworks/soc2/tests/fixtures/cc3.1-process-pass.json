@@ -1,0 +1,16 @@
+{
+  "scanned_paths": ["docs/policies"],
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "docs": [
+    {
+      "path": "docs/policies/risk-assessment-process.md",
+      "title": "Concord risk assessment process",
+      "process_owner": "head-of-security@example.com",
+      "methodology": "hybrid",
+      "review_cadence": "Quarterly review of register entries; annual review of methodology itself.",
+      "rating_scale": "5-point scale (low/medium/high/critical/catastrophic) × likelihood (rare/unlikely/possible/likely/almost-certain); product determines treatment priority.",
+      "scope": "All production systems, AI models, third-party data processors, and HR-touching systems.",
+      "last_reviewed_at": "2026-02-15T00:00:00Z"
+    }
+  ]
+}

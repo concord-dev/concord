@@ -54,16 +54,65 @@ func TestSummarize(t *testing.T) {
 }
 
 func TestRendererFor_UnknownFormatErrors(t *testing.T) {
-	_, err := report.RendererFor("yaml")
+	_, err := report.RendererFor("yaml", report.Opts{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown format")
 }
 
 func TestRendererFor_AcceptsAliases(t *testing.T) {
-	for _, f := range []string{"", "text", "json", "oscal", "markdown", "md"} {
-		_, err := report.RendererFor(f)
+	for _, f := range []string{"", "text", "json", "oscal", "markdown", "md", "trust-portal"} {
+		_, err := report.RendererFor(f, report.Opts{})
 		require.NoError(t, err, "format %q", f)
 	}
+}
+
+// TestTrustPortal_DoesNotLeakInternalEvidence is the security-critical test
+// for the trust portal. The page is public — it MUST NOT include deny messages
+// (which contain internal names, emails, bucket names, model IDs, etc.).
+func TestTrustPortal_DoesNotLeakInternalEvidence(t *testing.T) {
+	var buf bytes.Buffer
+	r := report.TrustPortalRenderer{OrgName: "Concord Inc."}
+	_, err := r.Render(&buf, sampleFindings())
+	require.NoError(t, err)
+
+	out := buf.String()
+	// Org name and public control metadata must appear.
+	assert.Contains(t, out, "Concord Inc.")
+	assert.Contains(t, out, "SOC 2 Type I")
+	assert.Contains(t, out, "SOC2-CC8.1")
+	assert.Contains(t, out, "Compliant")
+	assert.Contains(t, out, "Gap identified")
+
+	// CRITICAL: deny messages (with internal details) must NOT appear.
+	for _, sensitive := range []string{
+		"fraud-detector",                 // from f.Messages
+		"production model",               // from f.Messages
+		"collector blew up",              // from f.Messages on error finding
+		"high-risk model has no eval",    // from f.Warnings
+	} {
+		assert.NotContains(t, out, sensitive, "internal evidence leaked into trust portal: %q", sensitive)
+	}
+}
+
+func TestTrustPortal_FallsBackOnEmptyOrgName(t *testing.T) {
+	var buf bytes.Buffer
+	r := report.TrustPortalRenderer{} // OrgName left blank
+	_, err := r.Render(&buf, sampleFindings())
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Your Organization")
+}
+
+func TestTrustPortal_ProducesValidHTML(t *testing.T) {
+	var buf bytes.Buffer
+	r := report.TrustPortalRenderer{OrgName: "Test"}
+	_, err := r.Render(&buf, sampleFindings())
+	require.NoError(t, err)
+	out := buf.String()
+	// Basic structural assertions — full HTML validation would need a parser.
+	assert.True(t, strings.HasPrefix(out, "<!DOCTYPE html>"), "must start with doctype")
+	assert.Contains(t, out, "<html")
+	assert.Contains(t, out, "</html>")
+	assert.Contains(t, out, "<title>")
 }
 
 func TestTextRenderer(t *testing.T) {

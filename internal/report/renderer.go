@@ -38,9 +38,16 @@ type Renderer interface {
 	Render(w io.Writer, findings []apiv1.Finding) (Summary, error)
 }
 
+// Opts carries renderer configuration that doesn't fit on the Renderer interface
+// itself (e.g., org name for the public trust portal).
+type Opts struct {
+	OrgName string
+}
+
 // RendererFor returns the renderer for the named format.
-// "" / "text" → coloured TTY output; "json" / "oscal" / "markdown" / "md" → machine or doc output.
-func RendererFor(format string) (Renderer, error) {
+// "" / "text" → coloured TTY output; "json" / "oscal" / "markdown" / "md" →
+// machine or doc output; "trust-portal" → public-facing HTML page.
+func RendererFor(format string, opts Opts) (Renderer, error) {
 	switch format {
 	case "", "text":
 		return TextRenderer{}, nil
@@ -50,7 +57,9 @@ func RendererFor(format string) (Renderer, error) {
 		return OSCALRenderer{}, nil
 	case "markdown", "md":
 		return MarkdownRenderer{}, nil
+	case "trust-portal":
+		return TrustPortalRenderer{OrgName: opts.OrgName}, nil
 	default:
-		return nil, fmt.Errorf("unknown format %q (want one of text|json|oscal|markdown)", format)
+		return nil, fmt.Errorf("unknown format %q (want one of text|json|oscal|markdown|trust-portal)", format)
 	}
 }
