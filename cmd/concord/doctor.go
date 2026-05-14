@@ -197,6 +197,15 @@ func (d *doctor) runCollectors() {
 	} else {
 		d.warn("wandb", "WANDB_API_KEY not set — controls using source=wandb will fall back to fixtures")
 	}
+
+	// HuggingFace Hub — only probe when explicitly configured to avoid
+	// firing a public-network request on every doctor run.
+	if tok := os.Getenv("HUGGINGFACE_TOKEN"); tok != "" {
+		c := evidence.NewHuggingFaceCollector(os.Getenv("HUGGINGFACE_BASE_URL"), tok)
+		d.probe("huggingface", c, "verify HUGGINGFACE_TOKEN at huggingface.co/settings/tokens")
+	} else {
+		d.warn("huggingface", "HUGGINGFACE_TOKEN not set — anonymous reads still work, but rate-limited")
+	}
 }
 
 func (d *doctor) probe(name string, p prober, hint string) {

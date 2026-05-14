@@ -127,10 +127,9 @@ func buildRegistry(fixturesOnly bool) *evidence.Registry {
 	if key := os.Getenv("WANDB_API_KEY"); key != "" {
 		reg.Register("wandb", evidence.NewWandbCollector(os.Getenv("WANDB_BASE_URL"), key))
 	}
-	if hfToken := os.Getenv("HUGGINGFACE_TOKEN"); true {
-		// Register unconditionally — public Hub reads work without a token.
-		reg.Register("huggingface", evidence.NewHuggingFaceCollector(os.Getenv("HUGGINGFACE_BASE_URL"), hfToken))
-	}
+	// HuggingFace is always registered — anonymous reads of the public Hub
+	// work without a token. HUGGINGFACE_TOKEN unlocks private repos + higher rate limits.
+	reg.Register("huggingface", evidence.NewHuggingFaceCollector(os.Getenv("HUGGINGFACE_BASE_URL"), os.Getenv("HUGGINGFACE_TOKEN")))
 	return reg
 }
 
