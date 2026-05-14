@@ -2,11 +2,17 @@ package evidence
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"path"
+	"sort"
+	"strings"
 	"time"
+
+	"sigs.k8s.io/yaml"
 
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
@@ -38,6 +44,8 @@ func (c *GitHubCollector) Collect(cctx Context, ref apiv1.EvidenceRef) (any, err
 	switch ref.Type {
 	case "branch_protection":
 		return c.collectBranchProtection(ref)
+	case "file_glob":
+		return c.collectFileGlob(ref)
 	case "":
 		return nil, fmt.Errorf("github collector requires evidence type")
 	default:
@@ -83,8 +91,135 @@ func (c *GitHubCollector) collectBranchProtection(ref apiv1.EvidenceRef) (any, e
 	return result, nil
 }
 
-func (c *GitHubCollector) getJSON(ctx context.Context, path string) (any, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+func (c *GitHubCollector) collectFileGlob(ref apiv1.EvidenceRef) (any, error) {
+	repo := StringParam(ref.Params, "repo", "")
+	if repo == "" {
+		return nil, fmt.Errorf("missing required param %q", "repo")
+	}
+	globs := StringSliceParam(ref.Params, "paths")
+	if len(globs) == 0 {
+		return nil, fmt.Errorf("missing required param %q (expected list of globs)", "paths")
+	}
+	parse := StringParam(ref.Params, "parse", "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	docs := []map[string]any{}
+	scannedPaths := []string{}
+
+	for _, glob := range globs {
+		dir := path.Dir(glob)
+		pattern := path.Base(glob)
+		scannedPaths = append(scannedPaths, dir)
+
+		listing, err := c.getJSON(ctx, fmt.Sprintf("/repos/%s/contents/%s", repo, dir))
+		if err != nil {
+			return nil, fmt.Errorf("listing %s: %w", dir, err)
+		}
+		entries, ok := listing.([]any)
+		if !ok {
+			return nil, fmt.Errorf("expected directory listing at %s; got non-array response", dir)
+		}
+
+		for _, e := range entries {
+			entry, ok := e.(map[string]any)
+			if !ok {
+				continue
+			}
+			if t, _ := entry["type"].(string); t != "file" {
+				continue
+			}
+			name, _ := entry["name"].(string)
+			matched, _ := path.Match(pattern, name)
+			if !matched {
+				continue
+			}
+			filePath, _ := entry["path"].(string)
+
+			doc, err := c.fetchAndParseFile(ctx, repo, filePath, parse)
+			if err != nil {
+				return nil, err
+			}
+			docs = append(docs, doc)
+		}
+	}
+
+	sort.SliceStable(docs, func(i, j int) bool {
+		pi, _ := docs[i]["path"].(string)
+		pj, _ := docs[j]["path"].(string)
+		return pi < pj
+	})
+
+	return map[string]any{
+		"scanned_paths": scannedPaths,
+		"docs":          docs,
+	}, nil
+}
+
+func (c *GitHubCollector) fetchAndParseFile(ctx context.Context, repo, filePath, parse string) (map[string]any, error) {
+	resp, err := c.getJSON(ctx, fmt.Sprintf("/repos/%s/contents/%s", repo, filePath))
+	if err != nil {
+		return nil, fmt.Errorf("fetching %s: %w", filePath, err)
+	}
+	obj, ok := resp.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected file response shape for %s", filePath)
+	}
+	content, err := decodeContent(obj)
+	if err != nil {
+		return nil, fmt.Errorf("decoding %s: %w", filePath, err)
+	}
+
+	var doc map[string]any
+	switch parse {
+	case "frontmatter":
+		doc, err = parseFrontmatter(content)
+		if err != nil {
+			return nil, fmt.Errorf("parsing frontmatter from %s: %w", filePath, err)
+		}
+	case "":
+		doc = map[string]any{"content": string(content)}
+	default:
+		return nil, fmt.Errorf("unknown parse mode %q for %s", parse, filePath)
+	}
+	doc["path"] = filePath
+	return doc, nil
+}
+
+func decodeContent(obj map[string]any) ([]byte, error) {
+	enc, _ := obj["encoding"].(string)
+	raw, _ := obj["content"].(string)
+	if enc != "base64" {
+		return nil, fmt.Errorf("unsupported content encoding %q (expected base64)", enc)
+	}
+	cleaned := strings.ReplaceAll(raw, "\n", "")
+	return base64.StdEncoding.DecodeString(cleaned)
+}
+
+func parseFrontmatter(content []byte) (map[string]any, error) {
+	s := strings.ReplaceAll(string(content), "\r\n", "\n")
+	if !strings.HasPrefix(s, "---\n") {
+		return nil, fmt.Errorf("file does not start with frontmatter delimiter ---")
+	}
+	rest := s[4:]
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return nil, fmt.Errorf("no closing frontmatter delimiter ---")
+	}
+	fm := rest[:end]
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(fm), &doc); err != nil {
+		return nil, fmt.Errorf("yaml: %w", err)
+	}
+	if doc == nil {
+		doc = map[string]any{}
+	}
+	return doc, nil
+}
+
+func (c *GitHubCollector) getJSON(ctx context.Context, apiPath string) (any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+apiPath, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +239,7 @@ func (c *GitHubCollector) getJSON(ctx context.Context, path string) (any, error)
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, fmt.Errorf("github %s returned %d: %s", path, resp.StatusCode, string(body))
+		return nil, fmt.Errorf("github %s returned %d: %s", apiPath, resp.StatusCode, string(body))
 	}
 
 	var v any

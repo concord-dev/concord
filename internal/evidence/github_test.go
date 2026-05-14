@@ -1,6 +1,7 @@
 package evidence_test
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -132,6 +133,168 @@ func TestGitHubCollector_EmptyTypeErrors(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "type")
+}
+
+// --- file_glob ---
+
+const fraudDocMD = "---\n" +
+	"model: fraud-detector\n" +
+	"reviewer: \"alice@example.com\"\n" +
+	"secondary_reviewer: \"bob@example.com\"\n" +
+	"reviewed_at: \"2026-04-01T00:00:00Z\"\n" +
+	"intended_use: \"Detect fraud in real time.\"\n" +
+	"foreseeable_misuse: \"May discriminate.\"\n" +
+	"affected_populations: \"Customers.\"\n" +
+	"residual_risk: medium\n" +
+	"eu_ai_act_tier: high\n" +
+	"---\n\nBody.\n"
+
+const spamDocMD = "---\n" +
+	"model: spam-classifier\n" +
+	"reviewer: \"carol@example.com\"\n" +
+	"reviewed_at: \"2026-04-15T00:00:00Z\"\n" +
+	"intended_use: \"Flag spam.\"\n" +
+	"foreseeable_misuse: \"Over-block.\"\n" +
+	"affected_populations: \"All users.\"\n" +
+	"residual_risk: low\n" +
+	"eu_ai_act_tier: limited\n" +
+	"---\n"
+
+func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+
+func newFileGlobServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/contents/docs/ai/risk-assessments", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `[
+			{"name":"fraud-detector.md","path":"docs/ai/risk-assessments/fraud-detector.md","type":"file"},
+			{"name":"spam-classifier.md","path":"docs/ai/risk-assessments/spam-classifier.md","type":"file"},
+			{"name":"README.txt","path":"docs/ai/risk-assessments/README.txt","type":"file"},
+			{"name":"sub","path":"docs/ai/risk-assessments/sub","type":"dir"}
+		]`)
+	})
+	mux.HandleFunc("/repos/owner/repo/contents/docs/ai/risk-assessments/fraud-detector.md", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `{"name":"fraud-detector.md","path":"docs/ai/risk-assessments/fraud-detector.md","content":"%s","encoding":"base64"}`, b64(fraudDocMD))
+	})
+	mux.HandleFunc("/repos/owner/repo/contents/docs/ai/risk-assessments/spam-classifier.md", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `{"name":"spam-classifier.md","path":"docs/ai/risk-assessments/spam-classifier.md","content":"%s","encoding":"base64"}`, b64(spamDocMD))
+	})
+	return httptest.NewServer(mux)
+}
+
+func TestGitHubCollector_FileGlob_FrontmatterParse(t *testing.T) {
+	srv := newFileGlobServer(t)
+	t.Cleanup(srv.Close)
+
+	c := evidence.NewGitHubCollector("t").SetBaseURL(srv.URL)
+	v, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{
+		Source: "github", Type: "file_glob",
+		Params: map[string]any{
+			"repo":  "owner/repo",
+			"paths": []any{"docs/ai/risk-assessments/*.md"},
+			"parse": "frontmatter",
+		},
+	})
+	require.NoError(t, err)
+
+	m, ok := v.(map[string]any)
+	require.True(t, ok)
+	docs, ok := m["docs"].([]map[string]any)
+	require.True(t, ok, "docs should be []map[string]any, got %T", m["docs"])
+	require.Len(t, docs, 2, "expected only the two .md files; README.txt and sub/ filtered")
+
+	// sorted alphabetically by path
+	assert.Equal(t, "docs/ai/risk-assessments/fraud-detector.md", docs[0]["path"])
+	assert.Equal(t, "fraud-detector", docs[0]["model"])
+	assert.Equal(t, "alice@example.com", docs[0]["reviewer"])
+	assert.Equal(t, "bob@example.com", docs[0]["secondary_reviewer"])
+	assert.Equal(t, "high", docs[0]["eu_ai_act_tier"])
+	assert.Equal(t, "2026-04-01T00:00:00Z", docs[0]["reviewed_at"])
+
+	assert.Equal(t, "docs/ai/risk-assessments/spam-classifier.md", docs[1]["path"])
+	assert.Equal(t, "spam-classifier", docs[1]["model"])
+	assert.Equal(t, "limited", docs[1]["eu_ai_act_tier"])
+}
+
+func TestGitHubCollector_FileGlob_MissingPaths(t *testing.T) {
+	c := evidence.NewGitHubCollector("t")
+	_, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{
+		Source: "github", Type: "file_glob",
+		Params: map[string]any{"repo": "owner/repo"},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "paths")
+}
+
+func TestGitHubCollector_FileGlob_DirectoryNotFound(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/contents/nope", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"message":"Not Found"}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := evidence.NewGitHubCollector("t").SetBaseURL(srv.URL)
+	_, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{
+		Source: "github", Type: "file_glob",
+		Params: map[string]any{
+			"repo":  "owner/repo",
+			"paths": []any{"nope/*.md"},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "404")
+}
+
+func TestGitHubCollector_FileGlob_MalformedFrontmatter(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/contents/d", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `[{"name":"x.md","path":"d/x.md","type":"file"}]`)
+	})
+	mux.HandleFunc("/repos/owner/repo/contents/d/x.md", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `{"name":"x.md","path":"d/x.md","content":"%s","encoding":"base64"}`, b64("no frontmatter here, just text"))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := evidence.NewGitHubCollector("t").SetBaseURL(srv.URL)
+	_, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{
+		Source: "github", Type: "file_glob",
+		Params: map[string]any{
+			"repo":  "owner/repo",
+			"paths": []any{"d/*.md"},
+			"parse": "frontmatter",
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "frontmatter")
+}
+
+func TestGitHubCollector_FileGlob_NoParse(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/contents/d", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `[{"name":"x.txt","path":"d/x.txt","type":"file"}]`)
+	})
+	mux.HandleFunc("/repos/owner/repo/contents/d/x.txt", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `{"name":"x.txt","path":"d/x.txt","content":"%s","encoding":"base64"}`, b64("hello world"))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := evidence.NewGitHubCollector("t").SetBaseURL(srv.URL)
+	v, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{
+		Source: "github", Type: "file_glob",
+		Params: map[string]any{
+			"repo":  "owner/repo",
+			"paths": []any{"d/*.txt"},
+		},
+	})
+	require.NoError(t, err)
+
+	docs := v.(map[string]any)["docs"].([]map[string]any)
+	require.Len(t, docs, 1)
+	assert.Equal(t, "hello world", docs[0]["content"])
 }
 
 func TestGitHubCollector_EnvSubstitution(t *testing.T) {

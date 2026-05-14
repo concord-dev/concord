@@ -49,7 +49,7 @@ spec:
       type: file_glob
       fixture: ./tests/fixtures/docs-baseline.json
       params:
-        repo: ${env.REPO}
+        repo: ${env.CONCORD_REPO}
         paths:
           - "docs/ai/risk-assessments/*.md"
         parse: frontmatter

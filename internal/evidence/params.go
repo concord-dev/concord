@@ -37,3 +37,30 @@ func ResolveEnv(s string) string {
 		return os.Getenv(match[1])
 	})
 }
+
+// StringSliceParam reads a []string-valued param, resolving ${env.X} per element.
+// Non-string elements and empty resolved values are dropped.
+func StringSliceParam(params map[string]any, key string) []string {
+	if params == nil {
+		return nil
+	}
+	raw, ok := params[key]
+	if !ok {
+		return nil
+	}
+	list, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		s, ok := item.(string)
+		if !ok {
+			continue
+		}
+		if r := ResolveEnv(s); r != "" {
+			out = append(out, r)
+		}
+	}
+	return out
+}

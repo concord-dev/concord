@@ -45,3 +45,33 @@ func TestStringParam_NonStringValue(t *testing.T) {
 	got := evidence.StringParam(map[string]any{"repo": 42}, "repo", "def")
 	assert.Equal(t, "def", got)
 }
+
+func TestStringSliceParam_Literal(t *testing.T) {
+	got := evidence.StringSliceParam(map[string]any{"paths": []any{"a/*.md", "b/*.go"}}, "paths")
+	assert.Equal(t, []string{"a/*.md", "b/*.go"}, got)
+}
+
+func TestStringSliceParam_MissingKeyReturnsNil(t *testing.T) {
+	got := evidence.StringSliceParam(map[string]any{}, "paths")
+	assert.Nil(t, got)
+}
+
+func TestStringSliceParam_NonListReturnsNil(t *testing.T) {
+	got := evidence.StringSliceParam(map[string]any{"paths": "a/*.md"}, "paths")
+	assert.Nil(t, got)
+}
+
+func TestStringSliceParam_EnvSubstitutionPerElement(t *testing.T) {
+	t.Setenv("BASE", "docs")
+	got := evidence.StringSliceParam(map[string]any{
+		"paths": []any{"${env.BASE}/ai/*.md", "literal.md"},
+	}, "paths")
+	assert.Equal(t, []string{"docs/ai/*.md", "literal.md"}, got)
+}
+
+func TestStringSliceParam_DropsNonStringElements(t *testing.T) {
+	got := evidence.StringSliceParam(map[string]any{
+		"paths": []any{"keep.md", 42, "also-keep.md"},
+	}, "paths")
+	assert.Equal(t, []string{"keep.md", "also-keep.md"}, got)
+}
