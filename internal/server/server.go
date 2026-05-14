@@ -43,9 +43,10 @@ type Concord struct {
 	Version    string
 	SessionTTL time.Duration
 
-	worker *Worker
-	bus    *Bus
-	mu     sync.Mutex
+	worker    *Worker
+	bus       *Bus
+	scheduler *Scheduler
+	mu        sync.Mutex
 }
 
 // Options is the construction surface for cmd/server.
@@ -59,6 +60,7 @@ type Options struct {
 	Version      string
 	SessionTTL   time.Duration // default: 24h
 	Worker       WorkerOpts
+	Scheduler    SchedulerOpts
 }
 
 // NewConcord loads controls + config and wires the Store.
@@ -105,11 +107,20 @@ func NewConcord(opts Options) (*Concord, error) {
 	}
 	c.worker = NewWorker(c, opts.Worker)
 	c.worker.Start()
+	c.scheduler = NewScheduler(c, opts.Scheduler)
+	c.scheduler.Start()
 	return c, nil
 }
 
-// Shutdown drains the background worker.
-func (c *Concord) Shutdown(ctx context.Context) error { return c.worker.Shutdown(ctx) }
+// Shutdown stops the scheduler then drains the worker, in that order — so
+// the scheduler can't enqueue new work after the worker queue is closing.
+func (c *Concord) Shutdown(ctx context.Context) error {
+	_ = c.scheduler.Shutdown(ctx)
+	return c.worker.Shutdown(ctx)
+}
+
+// Scheduler exposes the scheduler for tests that need to fire ticks manually.
+func (c *Concord) SchedulerForTest() *Scheduler { return c.scheduler }
 
 // Bus exposes the event bus to callers that subscribe (the SSE handler).
 func (c *Concord) Bus() *Bus { return c.bus }
@@ -177,6 +188,14 @@ func (c *Concord) Router() http.Handler {
 		c.requireOrgPerm("controls:override")(http.HandlerFunc(c.handlePutOverride)))
 	mux.Handle("DELETE /v1/orgs/{slug}/controls/{id}/overrides",
 		c.requireOrgPerm("controls:override")(http.HandlerFunc(c.handleDeleteOverride)))
+
+	// Scheduled runs.
+	mux.Handle("GET /v1/orgs/{slug}/schedule",
+		c.requireOrgPerm("runs:read")(http.HandlerFunc(c.handleGetSchedule)))
+	mux.Handle("PUT /v1/orgs/{slug}/schedule",
+		c.requireOrgPerm("runs:create")(http.HandlerFunc(c.handlePutSchedule)))
+	mux.Handle("DELETE /v1/orgs/{slug}/schedule",
+		c.requireOrgPerm("runs:create")(http.HandlerFunc(c.handleDeleteSchedule)))
 
 	return logging(mux)
 }
@@ -1041,6 +1060,72 @@ func (c *Concord) handleDeleteOverride(w http.ResponseWriter, r *http.Request) {
 	if err := c.Store.DeleteControlOverride(r.Context(), p.Org.ID, id); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "no override set for this control")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ─── Schedule ────────────────────────────────────────────────────────
+
+func (c *Concord) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
+	p, _ := principalFromContext(r.Context())
+	sch, err := c.Store.GetSchedule(r.Context(), p.Org.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "no schedule configured for this org")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, sch)
+}
+
+// handlePutSchedule installs or replaces an org's schedule. Body shape:
+//
+//	{"cron_expr": "0 */6 * * *", "enabled": true}
+//
+// The cron expression is validated up-front; an unparseable expression is
+// 400, not 500. next_fire_at is computed and persisted by the store.
+func (c *Concord) handlePutSchedule(w http.ResponseWriter, r *http.Request) {
+	p, _ := principalFromContext(r.Context())
+	var body struct {
+		CronExpr string `json:"cron_expr"`
+		Enabled  *bool  `json:"enabled,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if body.CronExpr == "" {
+		writeError(w, http.StatusBadRequest, "cron_expr is required")
+		return
+	}
+	next, err := ValidateCronExpr(body.CronExpr, time.Now())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	enabled := true
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+	sch, err := c.Store.UpsertSchedule(r.Context(), p.Org.ID, body.CronExpr, enabled, next)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, sch)
+}
+
+func (c *Concord) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
+	p, _ := principalFromContext(r.Context())
+	if err := c.Store.DeleteSchedule(r.Context(), p.Org.ID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "no schedule configured for this org")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
