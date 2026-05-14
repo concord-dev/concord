@@ -147,7 +147,23 @@ func (w *Worker) execute(job runJob) {
 		}
 	}()
 
-	rn := runner.New(policy.New(), w.c.Registry).SetParams(w.c.Config.Controls.Params)
+	// Resolve params for this run. Start from the static config (concord.yaml
+	// shipped with the server, useful for fixture/local mode) and overlay
+	// per-org overrides from the DB so tenants can tune thresholds without
+	// touching the server's filesystem.
+	params := map[string]map[string]any{}
+	for k, v := range w.c.Config.Controls.Params {
+		params[k] = v
+	}
+	if overrides, err := w.c.Store.ControlParamsForOrg(ctx, job.OrgID); err == nil {
+		for k, v := range overrides {
+			params[k] = v
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "worker: loading overrides for org %s: %v (continuing with defaults)\n", job.OrgID, err)
+	}
+
+	rn := runner.New(policy.New(), w.c.Registry).SetParams(params)
 	findings := rn.RunAll(ctx, w.c.Controls)
 	summary := report.Summarize(findings)
 
