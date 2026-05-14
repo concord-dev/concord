@@ -1,0 +1,22 @@
+{
+  "scanned_paths": ["docs/risk-register"],
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "docs": [
+    {
+      "path": "docs/risk-register/old-risk.md",
+      "title": "Vendor X data processing without DPA",
+      "severity": "high",
+      "owner": "legal",
+      "mitigation_status": "open",
+      "reviewed_at": "2024-08-01T00:00:00Z"
+    },
+    {
+      "path": "docs/risk-register/recent-but-malformed.md",
+      "title": "Backup retention policy gap",
+      "severity": "moderate",
+      "owner": "platform",
+      "mitigation_status": "in-progress",
+      "reviewed_at": "2026-04-01T00:00:00Z"
+    }
+  ]
+}

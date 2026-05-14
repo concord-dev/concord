@@ -31,11 +31,16 @@ func NewFileCollector() *FileCollector {
 }
 
 // Collect resolves ref.Fixture relative to cctx.ControlDir and parses JSON.
+// The fixture path is env-substituted (${env.X}) before resolution, so
+// production deployments can point at CI-generated artifacts via env vars.
 func (c *FileCollector) Collect(cctx Context, ref apiv1.EvidenceRef) (any, error) {
 	if ref.Fixture == "" {
 		return nil, fmt.Errorf("no fixture path set")
 	}
-	path := ref.Fixture
+	path := ResolveEnv(ref.Fixture)
+	if path == "" {
+		return nil, fmt.Errorf("fixture path %q resolved to empty (env var unset?)", ref.Fixture)
+	}
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(cctx.ControlDir, path)
 	}

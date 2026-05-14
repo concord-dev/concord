@@ -1,0 +1,31 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2026-05-14T10:00:00Z",
+  "ArtifactName": "concord-dev/concord",
+  "ArtifactType": "filesystem",
+  "Results": [
+    {
+      "Target": "go.sum",
+      "Class": "lang-pkgs",
+      "Type": "gomod",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-00001",
+          "PkgName": "github.com/example/low-risk",
+          "InstalledVersion": "1.0.0",
+          "FixedVersion": "",
+          "Severity": "LOW",
+          "Title": "Information disclosure in error handling"
+        },
+        {
+          "VulnerabilityID": "CVE-2024-00002",
+          "PkgName": "github.com/example/medium-risk",
+          "InstalledVersion": "2.1.0",
+          "FixedVersion": "2.1.1",
+          "Severity": "MEDIUM",
+          "Title": "Denial of service via malformed input"
+        }
+      ]
+    }
+  ]
+}

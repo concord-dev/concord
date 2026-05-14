@@ -113,6 +113,9 @@ func buildRegistry(fixturesOnly bool) *evidence.Registry {
 	if uri := os.Getenv("MLFLOW_TRACKING_URI"); uri != "" {
 		reg.Register("mlflow", evidence.NewMLflowCollector(uri, os.Getenv("MLFLOW_TRACKING_TOKEN")))
 	}
+	if org, token := os.Getenv("OKTA_ORG_URL"), os.Getenv("OKTA_API_TOKEN"); org != "" && token != "" {
+		reg.Register("okta", evidence.NewOktaCollector(org, token))
+	}
 	return reg
 }
 

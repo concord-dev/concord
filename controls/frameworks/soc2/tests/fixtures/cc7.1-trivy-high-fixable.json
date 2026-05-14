@@ -1,0 +1,37 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2026-05-14T10:00:00Z",
+  "ArtifactName": "concord-dev/concord",
+  "ArtifactType": "filesystem",
+  "Results": [
+    {
+      "Target": "go.sum",
+      "Class": "lang-pkgs",
+      "Type": "gomod",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-77001",
+          "PkgName": "github.com/example/parser",
+          "InstalledVersion": "0.4.0",
+          "FixedVersion": "0.5.0",
+          "Severity": "HIGH",
+          "Title": "ReDoS via crafted input"
+        },
+        {
+          "VulnerabilityID": "CVE-2024-77002",
+          "PkgName": "github.com/example/http-client",
+          "InstalledVersion": "1.0.0",
+          "FixedVersion": "1.0.2",
+          "Severity": "HIGH",
+          "Title": "Header injection in redirect handling"
+        }
+      ]
+    },
+    {
+      "Target": "Dockerfile",
+      "Class": "config",
+      "Type": "dockerfile",
+      "Vulnerabilities": null
+    }
+  ]
+}

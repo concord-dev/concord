@@ -1,0 +1,30 @@
+{
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "org_url": "https://concord.okta.com",
+  "users": [
+    {
+      "id": "00u1",
+      "email": "alice@example.com",
+      "name": "Alice Anderson",
+      "login": "alice@example.com",
+      "status": "ACTIVE",
+      "factors": [
+        {"type": "token:software:totp", "provider": "GOOGLE", "status": "ACTIVE"},
+        {"type": "webauthn", "provider": "FIDO", "status": "ACTIVE"}
+      ],
+      "has_strong_mfa": true
+    },
+    {
+      "id": "00u2",
+      "email": "bob@example.com",
+      "name": "Bob Baker",
+      "login": "bob@example.com",
+      "status": "ACTIVE",
+      "factors": [
+        {"type": "push", "provider": "OKTA", "status": "ACTIVE"},
+        {"type": "token:hardware", "provider": "YUBICO", "status": "ACTIVE"}
+      ],
+      "has_strong_mfa": true
+    }
+  ]
+}

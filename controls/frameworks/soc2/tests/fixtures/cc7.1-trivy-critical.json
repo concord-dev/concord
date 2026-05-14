@@ -1,0 +1,31 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2026-05-14T10:00:00Z",
+  "ArtifactName": "concord-dev/concord",
+  "ArtifactType": "filesystem",
+  "Results": [
+    {
+      "Target": "go.sum",
+      "Class": "lang-pkgs",
+      "Type": "gomod",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-99001",
+          "PkgName": "github.com/example/auth-lib",
+          "InstalledVersion": "1.2.3",
+          "FixedVersion": "1.2.4",
+          "Severity": "CRITICAL",
+          "Title": "Authentication bypass via crafted JWT"
+        },
+        {
+          "VulnerabilityID": "CVE-2024-99002",
+          "PkgName": "github.com/example/crypto-lib",
+          "InstalledVersion": "0.9.0",
+          "FixedVersion": "",
+          "Severity": "CRITICAL",
+          "Title": "Weak RNG used for key derivation"
+        }
+      ]
+    }
+  ]
+}

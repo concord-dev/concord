@@ -1,0 +1,67 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: SOC2-CC9.2
+  name: risk-register-current
+  title: A current risk register documents each identified risk with owner, severity, and mitigation
+  framework: soc2
+  category: Risk Mitigation
+  severity: high
+  tags:
+    - risk-management
+    - governance
+  owners:
+    - team: security
+
+spec:
+  description: |
+    SOC 2 CC9.2 requires a documented process for identifying, assessing,
+    and responding to risks. The operational artifact every auditor
+    expects is a risk register. Concord checks for markdown files at
+    docs/risk-register/*.md with required frontmatter: title, severity,
+    owner, mitigation_status (one of: open, mitigated, accepted,
+    transferred), and reviewed_at (within the freshness window).
+
+  rationale: |
+    Risk registers in spreadsheets rot — they become snapshots from the
+    last audit cycle, disconnected from the systems they describe. Git-
+    versioned markdown registers carry diff history, blame, and PR
+    review for free, and Concord can verify their freshness without
+    out-of-band reminders to the security team.
+
+  evidence:
+    - id: risk_register
+      source: github
+      type: file_glob
+      fixture: ./tests/fixtures/cc9.2-register-pass.json
+      params:
+        repo: ${env.CONCORD_REPO}
+        paths:
+          - "docs/risk-register/*.md"
+        parse: frontmatter
+
+  policy:
+    engine: rego
+    package: concord.soc2.cc9_2
+    file: ./policies/cc9_2.rego
+
+  remediation:
+    runbook: docs/remediation/soc2-cc9.2.md
+    auto_fix: false
+    estimated_effort: 1d
+
+  mappings:
+    iso27001:
+      - "A.5.7"
+      - "A.5.8"
+    nist_csf:
+      - "ID.RA-1"
+      - "ID.RA-5"
+      - "ID.RA-6"
+    nist_800_53:
+      - "RA-3"
+      - "PM-9"
+
+  status: stable
+  blocking: true

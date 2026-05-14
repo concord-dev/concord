@@ -1,0 +1,24 @@
+{
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "org_url": "https://concord.okta.com",
+  "users": [
+    {
+      "id": "00u-d1",
+      "email": "former-engineer@example.com",
+      "name": "Former Engineer",
+      "login": "former-engineer@example.com",
+      "status": "DEPROVISIONED",
+      "factors": [],
+      "has_strong_mfa": false
+    },
+    {
+      "id": "00u-d2",
+      "email": "on-leave@example.com",
+      "name": "On Leave",
+      "login": "on-leave@example.com",
+      "status": "SUSPENDED",
+      "factors": [],
+      "has_strong_mfa": false
+    }
+  ]
+}
