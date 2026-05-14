@@ -124,6 +124,13 @@ func buildRegistry(fixturesOnly bool) *evidence.Registry {
 	if tok := os.Getenv("SNYK_TOKEN"); tok != "" {
 		reg.Register("snyk", evidence.NewSnykCollector(tok))
 	}
+	if key := os.Getenv("WANDB_API_KEY"); key != "" {
+		reg.Register("wandb", evidence.NewWandbCollector(os.Getenv("WANDB_BASE_URL"), key))
+	}
+	if hfToken := os.Getenv("HUGGINGFACE_TOKEN"); true {
+		// Register unconditionally — public Hub reads work without a token.
+		reg.Register("huggingface", evidence.NewHuggingFaceCollector(os.Getenv("HUGGINGFACE_BASE_URL"), hfToken))
+	}
 	return reg
 }
 

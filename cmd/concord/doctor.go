@@ -189,6 +189,14 @@ func (d *doctor) runCollectors() {
 	} else {
 		d.warn("snyk", "SNYK_TOKEN not set — controls using source=snyk will fall back to fixtures")
 	}
+
+	// Weights & Biases
+	if key := os.Getenv("WANDB_API_KEY"); key != "" {
+		c := evidence.NewWandbCollector(os.Getenv("WANDB_BASE_URL"), key)
+		d.probe("wandb", c, "verify WANDB_API_KEY at wandb.me/authorize")
+	} else {
+		d.warn("wandb", "WANDB_API_KEY not set — controls using source=wandb will fall back to fixtures")
+	}
 }
 
 func (d *doctor) probe(name string, p prober, hint string) {
