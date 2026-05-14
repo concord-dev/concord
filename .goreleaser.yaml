@@ -1,0 +1,75 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: concord
+    main: ./cmd/concord
+    binary: concord
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: concord
+    formats: [tar.gz]
+    name_template: >-
+      concord_{{ .Version }}_{{ .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "merge conflict"
+
+release:
+  github:
+    owner: concord-dev
+    name: concord
+  draft: false
+  prerelease: auto
+  header: |
+    ## Concord {{ .Tag }}
+
+    Compliance-as-code release. Install:
+
+    ```bash
+    # macOS / Linux
+    curl -sSfL https://github.com/concord-dev/concord/releases/download/{{ .Tag }}/concord_{{ .Version }}_$(uname -s | tr A-Z a-z)_$(uname -m).tar.gz | tar -xz
+    sudo mv concord /usr/local/bin/
+    concord version
+    ```
+  footer: |
+    **Full Changelog**: https://github.com/concord-dev/concord/compare/{{ .PreviousTag }}...{{ .Tag }}

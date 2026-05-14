@@ -100,6 +100,69 @@ func TestConfig_SkipsWhenExists(t *testing.T) {
 	assert.Equal(t, "user-config", readFile(t, dest))
 }
 
+func TestUpgrade_ClassifiesNewModifiedUnchanged(t *testing.T) {
+	dest := t.TempDir()
+
+	// Pre-populate: one file matches embed exactly, one differs, one absent.
+	require.NoError(t, os.MkdirAll(filepath.Join(dest, "frameworks/soc2/policies"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dest, "frameworks/soc2/cc1.yaml"), []byte("soc2-cc1"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dest, "frameworks/soc2/policies/cc1.rego"), []byte("old-rego"), 0o644))
+	// iso42001 files are absent → should be New.
+
+	r, err := scaffold.Upgrade(newMockFS(), dest, nil, false)
+	require.NoError(t, err)
+
+	assertContainsSuffix(t, r.Unchanged, "frameworks/soc2/cc1.yaml")
+	assertContainsSuffix(t, r.Modified, "frameworks/soc2/policies/cc1.rego")
+	assertContainsSuffix(t, r.New, "frameworks/iso42001/r.yaml")
+
+	// Dry-run should NOT have written anything.
+	got, err := os.ReadFile(filepath.Join(dest, "frameworks/soc2/policies/cc1.rego"))
+	require.NoError(t, err)
+	assert.Equal(t, "old-rego", string(got), "dry-run must not modify disk")
+}
+
+func TestUpgrade_Apply(t *testing.T) {
+	dest := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dest, "frameworks/soc2/policies"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dest, "frameworks/soc2/policies/cc1.rego"), []byte("old-rego"), 0o644))
+
+	_, err := scaffold.Upgrade(newMockFS(), dest, nil, true)
+	require.NoError(t, err)
+
+	got, err := os.ReadFile(filepath.Join(dest, "frameworks/soc2/policies/cc1.rego"))
+	require.NoError(t, err)
+	assert.Equal(t, "rego-cc1", string(got), "apply should overwrite with embedded content")
+
+	// New files now exist.
+	_, err = os.Stat(filepath.Join(dest, "frameworks/iso42001/r.yaml"))
+	require.NoError(t, err)
+}
+
+func TestUpgrade_LeavesUserAuthoredFilesAlone(t *testing.T) {
+	dest := t.TempDir()
+	custom := filepath.Join(dest, "frameworks/internal/custom.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(custom), 0o755))
+	require.NoError(t, os.WriteFile(custom, []byte("user-content"), 0o644))
+
+	_, err := scaffold.Upgrade(newMockFS(), dest, nil, true)
+	require.NoError(t, err)
+
+	got, err := os.ReadFile(custom)
+	require.NoError(t, err)
+	assert.Equal(t, "user-content", string(got), "user-authored controls must survive upgrade")
+}
+
+func assertContainsSuffix(t *testing.T, paths []string, suffix string) {
+	t.Helper()
+	for _, p := range paths {
+		if filepath.ToSlash(p) == suffix || filepath.ToSlash(p)[len(filepath.ToSlash(p))-len(suffix):] == suffix {
+			return
+		}
+	}
+	t.Fatalf("no path ending with %q in %v", suffix, paths)
+}
+
 func TestGitHubAction_Writes(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), ".github", "workflows", "concord.yml")
 	written, err := scaffold.GitHubAction(dest, false)

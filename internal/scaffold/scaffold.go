@@ -2,6 +2,7 @@
 package scaffold
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"io/fs"
@@ -57,6 +58,73 @@ func Frameworks(src fs.FS, destDir string, allowed []string, force bool) (Result
 		return r, walkErr
 	}
 	return r, nil
+}
+
+// UpgradeResult classifies each file the walk visited.
+type UpgradeResult struct {
+	New       []string
+	Modified  []string
+	Unchanged []string
+}
+
+// Upgrade compares the embedded controls library against what lives on disk
+// at destDir. With apply=false it returns the diff without touching anything.
+// With apply=true it writes New and Modified files. Files that exist on disk
+// but not in the embedded library are left alone — user-authored controls
+// are never overwritten or removed.
+func Upgrade(src fs.FS, destDir string, allowed []string, apply bool) (UpgradeResult, error) {
+	allow := toSet(allowed)
+	var r UpgradeResult
+
+	walkErr := fs.WalkDir(src, "controls/frameworks", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel := strings.TrimPrefix(p, "controls/")
+		if !frameworkAllowed(rel, allow) {
+			return nil
+		}
+
+		embedContent, err := fs.ReadFile(src, p)
+		if err != nil {
+			return err
+		}
+
+		destPath := filepath.Join(destDir, rel)
+		diskContent, err := os.ReadFile(destPath)
+		switch {
+		case os.IsNotExist(err):
+			r.New = append(r.New, destPath)
+			if apply {
+				if err := writeBytes(destPath, embedContent); err != nil {
+					return err
+				}
+			}
+		case err != nil:
+			return err
+		case bytes.Equal(embedContent, diskContent):
+			r.Unchanged = append(r.Unchanged, destPath)
+		default:
+			r.Modified = append(r.Modified, destPath)
+			if apply {
+				if err := writeBytes(destPath, embedContent); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	return r, walkErr
+}
+
+func writeBytes(path string, content []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, content, 0o644)
 }
 
 // Config writes a starter concord.yaml at destPath unless one already exists and force is false.
