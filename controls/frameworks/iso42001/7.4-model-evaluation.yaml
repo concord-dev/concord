@@ -1,0 +1,65 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: ISO42001-7.4
+  name: ai-model-evaluation-records
+  title: Every production AI model has a fresh evaluation report on file
+  framework: iso42001
+  category: Do
+  severity: high
+  tags:
+    - ai
+    - model-evaluation
+    - nist-ai-rmf
+    - mlops
+  owners:
+    - team: ml-platform
+
+spec:
+  description: |
+    ISO 42001 §7.4 requires AI systems to be continuously evaluated
+    against measurable performance criteria after deployment. Concord
+    enforces this by requiring every production model in the registry
+    to carry an evaluation_report tag (pointing at the artifact) and a
+    last_evaluated_at tag within the configurable freshness window.
+
+  rationale: |
+    Static evaluation at deployment is not enough — model performance
+    drifts as input distributions change. Without periodic
+    re-evaluation, the organization cannot evidence that the deployed
+    model still meets its declared performance and fairness criteria,
+    which directly maps to EU AI Act Article 17 (Quality Management
+    System) for high-risk AI systems.
+
+  evidence:
+    - id: model_registry
+      source: mlflow
+      type: model_registry
+      fixture: ./tests/fixtures/eval-pass.json
+      params:
+        tracking_uri: ${env.MLFLOW_TRACKING_URI}
+
+  policy:
+    engine: rego
+    package: concord.iso42001.model_evaluation
+    file: ./policies/model_evaluation.rego
+
+  remediation:
+    runbook: docs/remediation/iso42001-7.4.md
+    auto_fix: false
+    estimated_effort: 2h
+
+  mappings:
+    nist_ai_rmf:
+      - MEASURE-2.1
+      - MEASURE-2.7
+      - MANAGE-4.1
+    eu_ai_act:
+      - Article-17
+      - Annex-IV-9
+    iso27001:
+      - A.5.8
+
+  status: stable
+  blocking: true

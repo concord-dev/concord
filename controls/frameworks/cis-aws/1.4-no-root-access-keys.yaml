@@ -1,0 +1,58 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: CIS-AWS-1.4
+  name: no-root-account-access-keys
+  title: Root account has no active access keys
+  framework: cis-aws
+  category: IAM
+  severity: critical
+  tags:
+    - aws
+    - iam
+    - root-account
+  owners:
+    - team: platform
+
+spec:
+  description: |
+    CIS AWS Foundations 1.4 forbids the AWS account root user from
+    holding active access keys. Root keys grant unrestricted access
+    to every resource in the account; if leaked they cannot be
+    revoked without rotating the root credentials themselves.
+
+  rationale: |
+    Concord checks IAM's account summary for AccountAccessKeysPresent.
+    Any value greater than zero means the root user has at least one
+    active access key — a high-impact finding for every cloud audit.
+
+  evidence:
+    - id: iam_summary
+      source: aws
+      type: iam_account_summary
+      fixture: ./tests/fixtures/iam-pass.json
+
+  policy:
+    engine: rego
+    package: concord.cis_aws.no_root_access_keys
+    file: ./policies/no_root_access_keys.rego
+
+  remediation:
+    runbook: docs/remediation/cis-aws-1.4.md
+    auto_fix: false
+    estimated_effort: 30m
+
+  mappings:
+    cis_aws_v2:
+      - "1.4"
+    nist_csf:
+      - PR.AC-1
+    iso27001:
+      - A.5.16
+    soc2:
+      - CC6.1
+      - CC6.2
+
+  status: stable
+  blocking: true

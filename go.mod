@@ -5,6 +5,8 @@ go 1.23
 require (
 	github.com/aws/aws-sdk-go-v2 v1.32.0
 	github.com/aws/aws-sdk-go-v2/config v1.27.40
+	github.com/aws/aws-sdk-go-v2/service/cloudtrail v1.43.0
+	github.com/aws/aws-sdk-go-v2/service/iam v1.35.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.61.0
 	github.com/aws/smithy-go v1.22.0
 	github.com/fatih/color v1.18.0

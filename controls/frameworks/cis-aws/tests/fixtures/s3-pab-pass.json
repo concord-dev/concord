@@ -1,0 +1,25 @@
+{
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "buckets": [
+    {
+      "name": "concord-prod-data",
+      "public_access_block": {
+        "configured": true,
+        "block_public_acls": true,
+        "block_public_policy": true,
+        "ignore_public_acls": true,
+        "restrict_public_buckets": true
+      }
+    },
+    {
+      "name": "concord-logs",
+      "public_access_block": {
+        "configured": true,
+        "block_public_acls": true,
+        "block_public_policy": true,
+        "ignore_public_acls": true,
+        "restrict_public_buckets": true
+      }
+    }
+  ]
+}

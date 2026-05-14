@@ -14,7 +14,10 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-const iso42001Path = "controls/frameworks/iso42001/6.1-ai-risk-assessment.yaml"
+const (
+	iso42001Path     = "controls/frameworks/iso42001/6.1-ai-risk-assessment.yaml"
+	iso42001EvalPath = "controls/frameworks/iso42001/7.4-model-evaluation.yaml"
+)
 
 func TestRunISO42001Pass(t *testing.T) {
 	f := runISO42001(t, "models-baseline.json", "docs-baseline.json")
@@ -57,6 +60,35 @@ func TestRunISO42001Stale(t *testing.T) {
 	f := runISO42001(t, "models-baseline.json", "docs-stale.json")
 	assert.Equal(t, apiv1.StatusFail, f.Status)
 	assert.Contains(t, f.Messages, `risk doc "docs/ai/risk-assessments/fraud-detector.md" has not been reviewed in over 365 days`)
+}
+
+// --- ISO 42001 §7.4: Model evaluation ---
+
+func TestRunISO42001_ModelEval_Pass(t *testing.T) {
+	f := runISO42001Eval(t, "eval-pass.json")
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
+}
+
+func TestRunISO42001_ModelEval_MissingReport(t *testing.T) {
+	f := runISO42001Eval(t, "eval-missing-report.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, `production model "fraud-detector" has no evaluation_report tag`)
+}
+
+func TestRunISO42001_ModelEval_Stale(t *testing.T) {
+	f := runISO42001Eval(t, "eval-stale.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, `production model "fraud-detector" was last evaluated over 90 days ago`)
+}
+
+func runISO42001Eval(t *testing.T, fixture string) apiv1.Finding {
+	t.Helper()
+	controlPath := filepath.Join(repoRoot(t), iso42001EvalPath)
+	c, err := controls.LoadFile(controlPath)
+	require.NoError(t, err)
+	c.Spec.Evidence[0].Fixture = "./tests/fixtures/" + fixture
+	r := New(policy.New(), evidence.NewFileCollector())
+	return r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
 }
 
 func runISO42001(t *testing.T, modelsFixture, docsFixture string) apiv1.Finding {

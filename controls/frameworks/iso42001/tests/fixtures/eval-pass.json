@@ -1,0 +1,32 @@
+{
+  "tracking_uri": "https://mlflow.example.com",
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "models": [
+    {
+      "name": "fraud-detector",
+      "version": "5",
+      "production": true,
+      "eu_ai_act_tier": "high",
+      "evaluation_report": "s3://concord-reports/fraud-detector-v5.json",
+      "last_evaluated_at": "2026-04-15T00:00:00Z",
+      "owner": "ml-platform",
+      "stage": "Production"
+    },
+    {
+      "name": "spam-classifier",
+      "version": "2",
+      "production": true,
+      "eu_ai_act_tier": "limited",
+      "evaluation_report": "s3://concord-reports/spam-v2.json",
+      "last_evaluated_at": "2026-04-20T00:00:00Z",
+      "owner": "trust-and-safety",
+      "stage": "Production"
+    },
+    {
+      "name": "experimental-rec",
+      "version": "1",
+      "production": false,
+      "eu_ai_act_tier": "minimal"
+    }
+  ]
+}

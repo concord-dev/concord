@@ -1,0 +1,59 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: CIS-AWS-2.1.5
+  name: s3-public-access-block-enabled
+  title: All S3 buckets have Public Access Block enabled with every flag on
+  framework: cis-aws
+  category: Storage
+  severity: high
+  tags:
+    - aws
+    - s3
+    - data-exposure
+  owners:
+    - team: platform
+
+spec:
+  description: |
+    CIS AWS Foundations 2.1.5 requires the S3 bucket-level Public Access
+    Block to be configured with BlockPublicAcls, BlockPublicPolicy,
+    IgnorePublicAcls, and RestrictPublicBuckets all set to true. This is
+    the last line of defense against accidentally making a bucket public.
+
+  rationale: |
+    Even buckets that are correctly configured today drift over time —
+    a single ACL or bucket-policy mistake can re-expose data. The Public
+    Access Block flags neutralize public ACLs and policies at the bucket
+    boundary, so a future misconfiguration cannot leak data without
+    explicit, deliberate disabling of this control.
+
+  evidence:
+    - id: s3_pab
+      source: aws
+      type: s3_public_access_block
+      fixture: ./tests/fixtures/s3-pab-pass.json
+
+  policy:
+    engine: rego
+    package: concord.cis_aws.s3_public_access_block
+    file: ./policies/s3_public_access_block.rego
+
+  remediation:
+    runbook: docs/remediation/cis-aws-2.1.5.md
+    auto_fix: false
+    estimated_effort: 10m
+
+  mappings:
+    cis_aws_v2:
+      - "2.1.5"
+    nist_csf:
+      - PR.DS-5
+    iso27001:
+      - A.5.10
+    soc2:
+      - CC6.6
+
+  status: stable
+  blocking: true

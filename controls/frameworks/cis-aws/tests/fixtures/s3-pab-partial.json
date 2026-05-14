@@ -1,0 +1,25 @@
+{
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "buckets": [
+    {
+      "name": "concord-prod-data",
+      "public_access_block": {
+        "configured": true,
+        "block_public_acls": true,
+        "block_public_policy": false,
+        "ignore_public_acls": true,
+        "restrict_public_buckets": true
+      }
+    },
+    {
+      "name": "concord-website-assets",
+      "public_access_block": {
+        "configured": false,
+        "block_public_acls": false,
+        "block_public_policy": false,
+        "ignore_public_acls": false,
+        "restrict_public_buckets": false
+      }
+    }
+  ]
+}

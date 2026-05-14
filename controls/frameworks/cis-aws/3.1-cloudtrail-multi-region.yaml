@@ -1,0 +1,60 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: CIS-AWS-3.1
+  name: cloudtrail-multi-region-logging
+  title: At least one CloudTrail trail logs every region with file-integrity validation
+  framework: cis-aws
+  category: Logging
+  severity: critical
+  tags:
+    - aws
+    - cloudtrail
+    - audit-log
+  owners:
+    - team: platform
+
+spec:
+  description: |
+    CIS AWS Foundations 3.1 requires a CloudTrail trail that captures
+    management events across every region, is actively logging, and has
+    log-file integrity validation enabled. Without this, post-incident
+    investigation in regions you didn't expect to be in use is impossible.
+
+  rationale: |
+    A single-region trail leaves blind spots: an attacker who creates
+    resources in a region you don't watch will leave no audit trail.
+    File-integrity validation ensures the log files haven't been
+    tampered with after delivery to S3.
+
+  evidence:
+    - id: cloudtrail
+      source: aws
+      type: cloudtrail_trails
+      fixture: ./tests/fixtures/cloudtrail-pass.json
+
+  policy:
+    engine: rego
+    package: concord.cis_aws.cloudtrail_multi_region
+    file: ./policies/cloudtrail.rego
+
+  remediation:
+    runbook: docs/remediation/cis-aws-3.1.md
+    auto_fix: false
+    estimated_effort: 20m
+
+  mappings:
+    cis_aws_v2:
+      - "3.1"
+    nist_csf:
+      - DE.CM-1
+      - PR.PT-1
+    iso27001:
+      - A.8.15
+    soc2:
+      - CC7.2
+      - CC7.3
+
+  status: stable
+  blocking: true
