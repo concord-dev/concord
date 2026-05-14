@@ -1,22 +1,25 @@
 // Package store is the Postgres-backed persistence layer for concord-server.
 // It owns the schema (see migrations/*.up.sql), maintains the connection
-// pool, and exposes typed CRUD over organizations, users, memberships,
-// API tokens, and runs.
+// pool, and exposes typed CRUD over the RBAC + domain tables:
+//
+//	organization, "user", role, permission, role_permission, user_org_role,
+//	api_token, user_session, run
+//
+// The package is the single seam between the HTTP layer and Postgres.
 package store
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/netip"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/concord-dev/concord/internal/auth"
 )
 
 // ErrNotFound is returned when a lookup finds no matching row.
@@ -24,10 +27,10 @@ var ErrNotFound = errors.New("not found")
 
 // PoolOptions tune the pgxpool configuration.
 type PoolOptions struct {
-	MaxConns        int32         // upper bound on simultaneous connections (default: 8 * GOMAXPROCS, capped by pgx)
-	MinConns        int32         // warm pool size (default: 0)
-	MaxConnLifetime time.Duration // recycle connections older than this (default: 1h)
-	MaxConnIdleTime time.Duration // close idle connections after this (default: 30m)
+	MaxConns        int32
+	MinConns        int32
+	MaxConnLifetime time.Duration
+	MaxConnIdleTime time.Duration
 }
 
 // Store is the typed handle around a pgxpool.Pool.
@@ -35,10 +38,8 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
-// Open dials Postgres via pgxpool. dsn is a libpq URL, e.g.
-// "postgres://concord:dev@localhost:5432/concord?sslmode=disable".
-// The pool is health-checked before returning so misconfiguration surfaces
-// here rather than on the first request.
+// Open dials Postgres via pgxpool. dsn is a libpq URL. The pool is
+// health-checked before returning so misconfiguration surfaces immediately.
 func Open(ctx context.Context, dsn string, opts PoolOptions) (*Store, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -56,7 +57,6 @@ func Open(ctx context.Context, dsn string, opts PoolOptions) (*Store, error) {
 	if opts.MaxConnIdleTime > 0 {
 		cfg.MaxConnIdleTime = opts.MaxConnIdleTime
 	}
-
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("opening pool: %w", err)
@@ -77,24 +77,25 @@ func (s *Store) Close() { s.pool.Close() }
 // methods for everything else.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// --- Organizations ---
+// ─── Organizations ──────────────────────────────────────────────────────
 
-// Organization is the typed representation of one customer organization.
+// Organization is one customer organization.
 type Organization struct {
 	ID        uuid.UUID `json:"id"`
 	Name      string    `json:"name"`
 	Slug      string    `json:"slug"`
 	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // CreateOrganization inserts an org and returns it. Slug must be unique.
 func (s *Store) CreateOrganization(ctx context.Context, name, slug string) (Organization, error) {
-	o := Organization{Name: name, Slug: slug}
+	var o Organization
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO organizations(name, slug) VALUES ($1, $2)
-		 RETURNING id, created_at`,
+		`INSERT INTO organization(name, slug) VALUES ($1, $2)
+		 RETURNING id, name, slug, created_at, updated_at`,
 		name, slug,
-	).Scan(&o.ID, &o.CreatedAt)
+	).Scan(&o.ID, &o.Name, &o.Slug, &o.CreatedAt, &o.UpdatedAt)
 	if err != nil {
 		return Organization{}, fmt.Errorf("inserting organization: %w", err)
 	}
@@ -105,8 +106,8 @@ func (s *Store) CreateOrganization(ctx context.Context, name, slug string) (Orga
 func (s *Store) GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error) {
 	var o Organization
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, slug, created_at FROM organizations WHERE slug = $1`, slug,
-	).Scan(&o.ID, &o.Name, &o.Slug, &o.CreatedAt)
+		`SELECT id, name, slug, created_at, updated_at FROM organization WHERE slug = $1`, slug,
+	).Scan(&o.ID, &o.Name, &o.Slug, &o.CreatedAt, &o.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Organization{}, ErrNotFound
 	}
@@ -117,8 +118,8 @@ func (s *Store) GetOrganizationBySlug(ctx context.Context, slug string) (Organiz
 func (s *Store) GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error) {
 	var o Organization
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, slug, created_at FROM organizations WHERE id = $1`, id,
-	).Scan(&o.ID, &o.Name, &o.Slug, &o.CreatedAt)
+		`SELECT id, name, slug, created_at, updated_at FROM organization WHERE id = $1`, id,
+	).Scan(&o.ID, &o.Name, &o.Slug, &o.CreatedAt, &o.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Organization{}, ErrNotFound
 	}
@@ -128,7 +129,7 @@ func (s *Store) GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organiza
 // ListOrganizations returns every organization, oldest first.
 func (s *Store) ListOrganizations(ctx context.Context) ([]Organization, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, slug, created_at FROM organizations ORDER BY created_at ASC`)
+		`SELECT id, name, slug, created_at, updated_at FROM organization ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +137,7 @@ func (s *Store) ListOrganizations(ctx context.Context) ([]Organization, error) {
 	var out []Organization
 	for rows.Next() {
 		var o Organization
-		if err := rows.Scan(&o.ID, &o.Name, &o.Slug, &o.CreatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.Name, &o.Slug, &o.CreatedAt, &o.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, o)
@@ -144,24 +145,50 @@ func (s *Store) ListOrganizations(ctx context.Context) ([]Organization, error) {
 	return out, rows.Err()
 }
 
-// --- Users ---
+// ─── Users ──────────────────────────────────────────────────────────────
 
-// User is the typed representation of one human principal.
+// User is one human principal. Email + password drive web login; users
+// without a password_hash are invite-pending or SSO-only.
 type User struct {
-	ID        uuid.UUID `json:"id"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+	ID              uuid.UUID  `json:"id"`
+	FirstName       string     `json:"first_name"`
+	LastName        string     `json:"last_name"`
+	Email           string     `json:"email"`
+	EmailVerifiedAt *time.Time `json:"email_verified_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
-// CreateUser inserts a user. Email must be unique (case-insensitive).
-func (s *Store) CreateUser(ctx context.Context, email, name string) (User, error) {
-	u := User{Email: email, Name: name}
+// CreateUserParams is the input for CreateUser. Password may be empty for
+// invite-pending users; the password_hash column stays NULL in that case.
+type CreateUserParams struct {
+	FirstName string
+	LastName  string
+	Email     string
+	Password  string // optional
+}
+
+// CreateUser inserts a user. Email must be unique (case-insensitive). When
+// Password is set, it is hashed with argon2id before insertion.
+func (s *Store) CreateUser(ctx context.Context, p CreateUserParams) (User, error) {
+	if p.FirstName == "" || p.LastName == "" || p.Email == "" {
+		return User{}, errors.New("first_name, last_name, and email are required")
+	}
+	var pwHash *string
+	if p.Password != "" {
+		h, err := auth.HashPassword(p.Password)
+		if err != nil {
+			return User{}, err
+		}
+		pwHash = &h
+	}
+	var u User
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO users(email, name) VALUES ($1, $2)
-		 RETURNING id, created_at`,
-		email, name,
-	).Scan(&u.ID, &u.CreatedAt)
+		`INSERT INTO "user"(first_name, last_name, email, password_hash)
+		 VALUES ($1, $2, $3, $4)
+		 RETURNING id, first_name, last_name, email, email_verified_at, created_at, updated_at`,
+		p.FirstName, p.LastName, p.Email, pwHash,
+	).Scan(&u.ID, &u.FirstName, &u.LastName, &u.Email, &u.EmailVerifiedAt, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return User{}, fmt.Errorf("inserting user: %w", err)
 	}
@@ -172,8 +199,9 @@ func (s *Store) CreateUser(ctx context.Context, email, name string) (User, error
 func (s *Store) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, email, name, created_at FROM users WHERE id = $1`, id,
-	).Scan(&u.ID, &u.Email, &u.Name, &u.CreatedAt)
+		`SELECT id, first_name, last_name, email, email_verified_at, created_at, updated_at
+		 FROM "user" WHERE id = $1`, id,
+	).Scan(&u.ID, &u.FirstName, &u.LastName, &u.Email, &u.EmailVerifiedAt, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -184,18 +212,48 @@ func (s *Store) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, email, name, created_at FROM users WHERE lower(email) = lower($1)`, email,
-	).Scan(&u.ID, &u.Email, &u.Name, &u.CreatedAt)
+		`SELECT id, first_name, last_name, email, email_verified_at, created_at, updated_at
+		 FROM "user" WHERE lower(email) = lower($1)`, email,
+	).Scan(&u.ID, &u.FirstName, &u.LastName, &u.Email, &u.EmailVerifiedAt, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
 	return u, err
 }
 
+// VerifyUserPassword loads the user's password_hash, runs argon2id against
+// plaintext, and returns the user record on success. Used by the login handler.
+func (s *Store) VerifyUserPassword(ctx context.Context, email, plaintext string) (User, error) {
+	var u User
+	var hash *string
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, first_name, last_name, email, email_verified_at, created_at, updated_at, password_hash
+		 FROM "user" WHERE lower(email) = lower($1)`, email,
+	).Scan(&u.ID, &u.FirstName, &u.LastName, &u.Email, &u.EmailVerifiedAt, &u.CreatedAt, &u.UpdatedAt, &hash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	if err != nil {
+		return User{}, err
+	}
+	if hash == nil {
+		return User{}, ErrNotFound
+	}
+	ok, err := auth.VerifyPassword(plaintext, *hash)
+	if err != nil {
+		return User{}, fmt.Errorf("verifying password: %w", err)
+	}
+	if !ok {
+		return User{}, ErrNotFound
+	}
+	return u, nil
+}
+
 // ListUsers returns every user.
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, email, name, created_at FROM users ORDER BY created_at ASC`)
+		`SELECT id, first_name, last_name, email, email_verified_at, created_at, updated_at
+		 FROM "user" ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +261,8 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	var out []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.FirstName, &u.LastName, &u.Email,
+			&u.EmailVerifiedAt, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
@@ -211,68 +270,116 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	return out, rows.Err()
 }
 
-// --- Memberships ---
+// ─── Roles + permissions ────────────────────────────────────────────────
 
-// Role enumerates the role values a membership row can carry. Mirrored in the
-// CHECK constraint on memberships.role so application + DB stay aligned.
-type Role string
-
-const (
-	RoleOwner  Role = "owner"
-	RoleAdmin  Role = "admin"
-	RoleMember Role = "member"
-	RoleViewer Role = "viewer"
-)
-
-// ValidRoles returns the canonical role list. Used by handlers to validate
-// requested role strings.
-func ValidRoles() []Role { return []Role{RoleOwner, RoleAdmin, RoleMember, RoleViewer} }
-
-// IsValid reports whether r is one of the canonical roles.
-func (r Role) IsValid() bool {
-	switch r {
-	case RoleOwner, RoleAdmin, RoleMember, RoleViewer:
-		return true
-	}
-	return false
-}
-
-// Permits reports whether the holder of this role may perform a min-role
-// action. Hierarchy: owner > admin > member > viewer. Action "owner" requires
-// owner, "admin" requires admin or owner, etc.
-func (r Role) Permits(needed Role) bool {
-	rank := map[Role]int{RoleViewer: 0, RoleMember: 1, RoleAdmin: 2, RoleOwner: 3}
-	return rank[r] >= rank[needed]
-}
-
-// Membership ties a user to an organization with a role.
-type Membership struct {
-	UserID    uuid.UUID `json:"user_id"`
-	OrgID     uuid.UUID `json:"org_id"`
-	Role      Role      `json:"role"`
+// Role is a named bundle of permissions. Roles are data, not enum — new
+// roles can be added at runtime without code changes.
+type Role struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// AddMember creates or updates the membership for (userID, orgID) and sets
-// its role. Upsert semantics keep the operation idempotent.
-func (s *Store) AddMember(ctx context.Context, userID, orgID uuid.UUID, role Role) (Membership, error) {
-	if !role.IsValid() {
-		return Membership{}, fmt.Errorf("invalid role %q", role)
-	}
-	var m Membership
+// Permission is one atomic capability, e.g. "runs:create".
+type Permission struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// GetRoleByName returns the role identified by its name.
+func (s *Store) GetRoleByName(ctx context.Context, name string) (Role, error) {
+	var r Role
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO memberships(user_id, org_id, role) VALUES ($1, $2, $3)
-		 ON CONFLICT (user_id, org_id) DO UPDATE SET role = EXCLUDED.role
-		 RETURNING user_id, org_id, role, created_at`,
-		userID, orgID, string(role),
-	).Scan(&m.UserID, &m.OrgID, &m.Role, &m.CreatedAt)
-	return m, err
+		`SELECT id, name, created_at, updated_at FROM role WHERE name = $1`, name,
+	).Scan(&r.ID, &r.Name, &r.CreatedAt, &r.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Role{}, ErrNotFound
+	}
+	return r, err
 }
 
-// RemoveMember deletes the membership row.
-func (s *Store) RemoveMember(ctx context.Context, userID, orgID uuid.UUID) error {
+// ListRoles returns every role, alphabetical.
+func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, name, created_at, updated_at FROM role ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Role
+	for rows.Next() {
+		var r Role
+		if err := rows.Scan(&r.ID, &r.Name, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListPermissions returns every defined permission.
+func (s *Store) ListPermissions(ctx context.Context) ([]Permission, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, name, created_at, updated_at FROM permission ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Permission
+	for rows.Next() {
+		var p Permission
+		if err := rows.Scan(&p.ID, &p.Name, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ListRolePermissions returns every permission attached to roleID.
+func (s *Store) ListRolePermissions(ctx context.Context, roleID uuid.UUID) ([]Permission, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT p.id, p.name, p.created_at, p.updated_at
+		 FROM permission p
+		 JOIN role_permission rp ON rp.permission_id = p.id
+		 WHERE rp.role_id = $1
+		 ORDER BY p.name`, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Permission
+	for rows.Next() {
+		var p Permission
+		if err := rows.Scan(&p.ID, &p.Name, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ─── Memberships (user_org_role) ────────────────────────────────────────
+
+// AssignRole grants a role to a user inside an org. Idempotent — re-assigning
+// the same triple is a no-op (the PK collides and ON CONFLICT skips).
+func (s *Store) AssignRole(ctx context.Context, userID, orgID, roleID uuid.UUID) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO user_org_role(user_id, org_id, role_id)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT DO NOTHING`,
+		userID, orgID, roleID)
+	return err
+}
+
+// RevokeRole removes one specific role grant.
+func (s *Store) RevokeRole(ctx context.Context, userID, orgID, roleID uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx,
-		`DELETE FROM memberships WHERE user_id = $1 AND org_id = $2`, userID, orgID)
+		`DELETE FROM user_org_role WHERE user_id = $1 AND org_id = $2 AND role_id = $3`,
+		userID, orgID, roleID)
 	if err != nil {
 		return err
 	}
@@ -282,153 +389,234 @@ func (s *Store) RemoveMember(ctx context.Context, userID, orgID uuid.UUID) error
 	return nil
 }
 
-// GetMembership returns the membership row for (userID, orgID).
-func (s *Store) GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error) {
-	var m Membership
-	err := s.pool.QueryRow(ctx,
-		`SELECT user_id, org_id, role, created_at FROM memberships
-		 WHERE user_id = $1 AND org_id = $2`, userID, orgID,
-	).Scan(&m.UserID, &m.OrgID, &m.Role, &m.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Membership{}, ErrNotFound
+// RemoveUserFromOrg drops every role grant for (userID, orgID).
+func (s *Store) RemoveUserFromOrg(ctx context.Context, userID, orgID uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM user_org_role WHERE user_id = $1 AND org_id = $2`, userID, orgID)
+	if err != nil {
+		return err
 	}
-	return m, err
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
-// ListOrgMembers returns every membership for the given organization joined
-// with user details. The result is sorted by role rank (owner first) then
-// email.
+// OrgMember is one (user, org) pair with the roles the user holds in that org.
 type OrgMember struct {
-	User       User      `json:"user"`
-	Role       Role      `json:"role"`
-	JoinedAt   time.Time `json:"joined_at"`
+	User  User   `json:"user"`
+	Roles []Role `json:"roles"`
 }
 
+// ListOrgMembers returns every member of orgID, grouped by user so the
+// multiple roles a user holds appear together.
 func (s *Store) ListOrgMembers(ctx context.Context, orgID uuid.UUID) ([]OrgMember, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT u.id, u.email, u.name, u.created_at, m.role, m.created_at
-		 FROM memberships m
-		 JOIN users u ON u.id = m.user_id
-		 WHERE m.org_id = $1
-		 ORDER BY
-		   CASE m.role
-		     WHEN 'owner' THEN 0 WHEN 'admin' THEN 1
-		     WHEN 'member' THEN 2 WHEN 'viewer' THEN 3
-		   END,
-		   lower(u.email)`,
+		`SELECT u.id, u.first_name, u.last_name, u.email, u.email_verified_at,
+		        u.created_at, u.updated_at,
+		        r.id, r.name, r.created_at, r.updated_at
+		 FROM user_org_role uor
+		 JOIN "user" u ON u.id = uor.user_id
+		 JOIN role r ON r.id = uor.role_id
+		 WHERE uor.org_id = $1
+		 ORDER BY lower(u.email), r.name`,
 		orgID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []OrgMember
+
+	byUser := make(map[uuid.UUID]*OrgMember)
+	order := []uuid.UUID{}
 	for rows.Next() {
-		var om OrgMember
-		if err := rows.Scan(&om.User.ID, &om.User.Email, &om.User.Name, &om.User.CreatedAt,
-			&om.Role, &om.JoinedAt); err != nil {
+		var u User
+		var r Role
+		if err := rows.Scan(&u.ID, &u.FirstName, &u.LastName, &u.Email, &u.EmailVerifiedAt,
+			&u.CreatedAt, &u.UpdatedAt,
+			&r.ID, &r.Name, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
-		out = append(out, om)
+		m, ok := byUser[u.ID]
+		if !ok {
+			m = &OrgMember{User: u}
+			byUser[u.ID] = m
+			order = append(order, u.ID)
+		}
+		m.Roles = append(m.Roles, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]OrgMember, 0, len(order))
+	for _, id := range order {
+		out = append(out, *byUser[id])
+	}
+	return out, nil
 }
 
-// ListUserOrgs returns every org the user belongs to, with their role.
+// UserOrg is one org a user belongs to, with the roles they hold there.
 type UserOrg struct {
 	Organization Organization `json:"organization"`
-	Role         Role         `json:"role"`
+	Roles        []Role       `json:"roles"`
 }
 
+// ListUserOrgs returns every org the user belongs to with the roles they hold.
 func (s *Store) ListUserOrgs(ctx context.Context, userID uuid.UUID) ([]UserOrg, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT o.id, o.name, o.slug, o.created_at, m.role
-		 FROM memberships m
-		 JOIN organizations o ON o.id = m.org_id
-		 WHERE m.user_id = $1
-		 ORDER BY o.created_at ASC`,
+		`SELECT o.id, o.name, o.slug, o.created_at, o.updated_at,
+		        r.id, r.name, r.created_at, r.updated_at
+		 FROM user_org_role uor
+		 JOIN organization o ON o.id = uor.org_id
+		 JOIN role r ON r.id = uor.role_id
+		 WHERE uor.user_id = $1
+		 ORDER BY o.created_at, r.name`,
 		userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []UserOrg
+	byOrg := make(map[uuid.UUID]*UserOrg)
+	order := []uuid.UUID{}
 	for rows.Next() {
-		var uo UserOrg
-		if err := rows.Scan(&uo.Organization.ID, &uo.Organization.Name,
-			&uo.Organization.Slug, &uo.Organization.CreatedAt, &uo.Role); err != nil {
+		var o Organization
+		var r Role
+		if err := rows.Scan(&o.ID, &o.Name, &o.Slug, &o.CreatedAt, &o.UpdatedAt,
+			&r.ID, &r.Name, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
-		out = append(out, uo)
+		entry, ok := byOrg[o.ID]
+		if !ok {
+			entry = &UserOrg{Organization: o}
+			byOrg[o.ID] = entry
+			order = append(order, o.ID)
+		}
+		entry.Roles = append(entry.Roles, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]UserOrg, 0, len(order))
+	for _, id := range order {
+		out = append(out, *byOrg[id])
+	}
+	return out, nil
 }
 
-// --- API tokens ---
-
-// Token is the metadata kept for one API token.
-type Token struct {
-	ID         uuid.UUID  `json:"id"`
-	OrgID      uuid.UUID  `json:"org_id"`
-	Name       string     `json:"name"`
-	CreatedBy  *uuid.UUID `json:"created_by,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-}
-
-// tokenPrefix is the human-recognisable prefix for every Concord API token.
-const tokenPrefix = "concord_"
-
-// CreateToken mints a new API token for orgID. The plaintext is returned ONCE
-// and never stored. createdBy may be nil when the token is minted by the
-// admin-bootstrap operator (no user identity yet).
-func (s *Store) CreateToken(ctx context.Context, orgID uuid.UUID, name string, createdBy *uuid.UUID) (Token, string, error) {
-	plaintext, err := generateTokenPlaintext()
-	if err != nil {
-		return Token{}, "", err
-	}
-	hash := hashToken(plaintext)
-	var t Token
-	err = s.pool.QueryRow(ctx,
-		`INSERT INTO api_tokens(org_id, token_hash, name, created_by) VALUES ($1, $2, $3, $4)
-		 RETURNING id, org_id, name, created_by, created_at`,
-		orgID, hash, name, createdBy,
-	).Scan(&t.ID, &t.OrgID, &t.Name, &t.CreatedBy, &t.CreatedAt)
-	if err != nil {
-		return Token{}, "", fmt.Errorf("inserting token: %w", err)
-	}
-	return t, plaintext, nil
-}
-
-// ResolveToken looks up the token row matching plaintext and bumps its
-// last_used_at on success. Returns ErrNotFound when the token is unknown.
-func (s *Store) ResolveToken(ctx context.Context, plaintext string) (Token, error) {
-	hash := hashToken(plaintext)
-	var t Token
+// HasPermission reports whether the user holds any role in the org that
+// grants the named permission. Returns false (no error) when the user has
+// no membership in the org.
+func (s *Store) HasPermission(ctx context.Context, userID, orgID uuid.UUID, permission string) (bool, error) {
+	var got bool
 	err := s.pool.QueryRow(ctx,
-		`UPDATE api_tokens SET last_used_at = now()
-		 WHERE token_hash = $1
-		 RETURNING id, org_id, name, created_by, created_at, last_used_at`,
-		hash,
-	).Scan(&t.ID, &t.OrgID, &t.Name, &t.CreatedBy, &t.CreatedAt, &t.LastUsedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Token{}, ErrNotFound
-	}
-	return t, err
+		`SELECT EXISTS (
+		    SELECT 1
+		    FROM user_org_role uor
+		    JOIN role_permission rp ON rp.role_id = uor.role_id
+		    JOIN permission p       ON p.id = rp.permission_id
+		    WHERE uor.user_id = $1 AND uor.org_id = $2 AND p.name = $3
+		 )`,
+		userID, orgID, permission,
+	).Scan(&got)
+	return got, err
 }
 
-// ListTokens returns every token belonging to orgID, newest first.
-func (s *Store) ListTokens(ctx context.Context, orgID uuid.UUID) ([]Token, error) {
+// UserPermissions returns the distinct permission names the user holds in
+// the org. Useful for "what can this user do here?" UI prompts.
+func (s *Store) UserPermissions(ctx context.Context, userID, orgID uuid.UUID) ([]string, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, org_id, name, created_by, created_at, last_used_at
-		 FROM api_tokens WHERE org_id = $1 ORDER BY created_at DESC`, orgID)
+		`SELECT DISTINCT p.name
+		 FROM user_org_role uor
+		 JOIN role_permission rp ON rp.role_id = uor.role_id
+		 JOIN permission p       ON p.id = rp.permission_id
+		 WHERE uor.user_id = $1 AND uor.org_id = $2
+		 ORDER BY p.name`,
+		userID, orgID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Token
+	var out []string
 	for rows.Next() {
-		var t Token
-		if err := rows.Scan(&t.ID, &t.OrgID, &t.Name, &t.CreatedBy, &t.CreatedAt, &t.LastUsedAt); err != nil {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// ─── API tokens ─────────────────────────────────────────────────────────
+
+// APIToken is the long-lived programmatic credential. Token plaintext is
+// returned only at creation; thereafter only hash + metadata persist.
+type APIToken struct {
+	ID              uuid.UUID  `json:"id"`
+	OrgID           uuid.UUID  `json:"org_id"`
+	Name            string     `json:"name"`
+	CreatedByUserID *uuid.UUID `json:"created_by_user_id,omitempty"`
+	LastUsedAt      *time.Time `json:"last_used_at,omitempty"`
+	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+// CreateAPIToken mints a new programmatic token. createdBy may be nil when
+// the token is minted via the admin-bootstrap path (no user identity yet).
+func (s *Store) CreateAPIToken(ctx context.Context, orgID uuid.UUID, name string, createdBy *uuid.UUID) (APIToken, string, error) {
+	plaintext, err := auth.GenerateSecret(auth.APITokenPrefix, 32)
+	if err != nil {
+		return APIToken{}, "", err
+	}
+	hash := auth.HashSecret(plaintext)
+	var t APIToken
+	err = s.pool.QueryRow(ctx,
+		`INSERT INTO api_token(org_id, token_hash, name, created_by_user_id)
+		 VALUES ($1, $2, $3, $4)
+		 RETURNING id, org_id, name, created_by_user_id, last_used_at, revoked_at, created_at, updated_at`,
+		orgID, hash, name, createdBy,
+	).Scan(&t.ID, &t.OrgID, &t.Name, &t.CreatedByUserID,
+		&t.LastUsedAt, &t.RevokedAt, &t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		return APIToken{}, "", fmt.Errorf("inserting api_token: %w", err)
+	}
+	return t, plaintext, nil
+}
+
+// ResolveAPIToken looks up the token row matching plaintext, ignoring revoked
+// rows, and bumps last_used_at on success. Returns ErrNotFound when the
+// token is unknown or has been revoked.
+func (s *Store) ResolveAPIToken(ctx context.Context, plaintext string) (APIToken, error) {
+	hash := auth.HashSecret(plaintext)
+	var t APIToken
+	err := s.pool.QueryRow(ctx,
+		`UPDATE api_token SET last_used_at = now()
+		 WHERE token_hash = $1 AND revoked_at IS NULL
+		 RETURNING id, org_id, name, created_by_user_id, last_used_at, revoked_at, created_at, updated_at`,
+		hash,
+	).Scan(&t.ID, &t.OrgID, &t.Name, &t.CreatedByUserID,
+		&t.LastUsedAt, &t.RevokedAt, &t.CreatedAt, &t.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return APIToken{}, ErrNotFound
+	}
+	return t, err
+}
+
+// ListAPITokens returns every non-revoked token belonging to orgID, newest first.
+func (s *Store) ListAPITokens(ctx context.Context, orgID uuid.UUID) ([]APIToken, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, org_id, name, created_by_user_id, last_used_at, revoked_at, created_at, updated_at
+		 FROM api_token WHERE org_id = $1 AND revoked_at IS NULL
+		 ORDER BY created_at DESC`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []APIToken
+	for rows.Next() {
+		var t APIToken
+		if err := rows.Scan(&t.ID, &t.OrgID, &t.Name, &t.CreatedByUserID,
+			&t.LastUsedAt, &t.RevokedAt, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -436,11 +624,13 @@ func (s *Store) ListTokens(ctx context.Context, orgID uuid.UUID) ([]Token, error
 	return out, rows.Err()
 }
 
-// DeleteToken removes a token. Scoped to orgID so tenants cannot delete
-// tokens that belong to other organizations.
-func (s *Store) DeleteToken(ctx context.Context, orgID, tokenID uuid.UUID) error {
+// RevokeAPIToken marks a token as revoked. Soft-delete so historical runs
+// retain the FK reference (triggered_by_token).
+func (s *Store) RevokeAPIToken(ctx context.Context, orgID, tokenID uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx,
-		`DELETE FROM api_tokens WHERE id = $1 AND org_id = $2`, tokenID, orgID)
+		`UPDATE api_token SET revoked_at = now()
+		 WHERE id = $1 AND org_id = $2 AND revoked_at IS NULL`,
+		tokenID, orgID)
 	if err != nil {
 		return err
 	}
@@ -450,7 +640,96 @@ func (s *Store) DeleteToken(ctx context.Context, orgID, tokenID uuid.UUID) error
 	return nil
 }
 
-// --- Runs ---
+// ─── User sessions ──────────────────────────────────────────────────────
+
+// Session is one browser session. The plaintext token is returned only at
+// creation; the row stores its sha256 hash.
+type Session struct {
+	ID         uuid.UUID  `json:"id"`
+	UserID     uuid.UUID  `json:"user_id"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+	IP         *netip.Addr `json:"ip,omitempty"`
+	UserAgent  string     `json:"user_agent,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// CreateSession mints a new session token for userID. ttl is how long the
+// session is valid (typical: 24h–7d). ip/userAgent are recorded for the
+// "active sessions" UI; either may be empty.
+func (s *Store) CreateSession(ctx context.Context, userID uuid.UUID, ttl time.Duration, ip, userAgent string) (Session, string, error) {
+	plaintext, err := auth.GenerateSecret(auth.SessionTokenPrefix, 32)
+	if err != nil {
+		return Session{}, "", err
+	}
+	hash := auth.HashSecret(plaintext)
+	expires := time.Now().UTC().Add(ttl)
+
+	var ipPtr *netip.Addr
+	if ip != "" {
+		parsed, err := netip.ParseAddr(ip)
+		if err == nil {
+			ipPtr = &parsed
+		}
+	}
+
+	var sess Session
+	err = s.pool.QueryRow(ctx,
+		`INSERT INTO user_session(user_id, token_hash, expires_at, ip, user_agent)
+		 VALUES ($1, $2, $3, $4, NULLIF($5,''))
+		 RETURNING id, user_id, expires_at, last_used_at, revoked_at, ip, user_agent, created_at`,
+		userID, hash, expires, ipPtr, userAgent,
+	).Scan(&sess.ID, &sess.UserID, &sess.ExpiresAt, &sess.LastUsedAt,
+		&sess.RevokedAt, &sess.IP, &sess.UserAgent, &sess.CreatedAt)
+	if err != nil {
+		return Session{}, "", fmt.Errorf("inserting session: %w", err)
+	}
+	return sess, plaintext, nil
+}
+
+// ResolveSession looks up an active (non-expired, non-revoked) session by
+// plaintext token and bumps last_used_at.
+func (s *Store) ResolveSession(ctx context.Context, plaintext string) (Session, error) {
+	hash := auth.HashSecret(plaintext)
+	var sess Session
+	err := s.pool.QueryRow(ctx,
+		`UPDATE user_session SET last_used_at = now()
+		 WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
+		 RETURNING id, user_id, expires_at, last_used_at, revoked_at, ip, user_agent, created_at`,
+		hash,
+	).Scan(&sess.ID, &sess.UserID, &sess.ExpiresAt, &sess.LastUsedAt,
+		&sess.RevokedAt, &sess.IP, &sess.UserAgent, &sess.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Session{}, ErrNotFound
+	}
+	return sess, err
+}
+
+// RevokeSession marks a single session as revoked.
+func (s *Store) RevokeSession(ctx context.Context, sessionID uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE user_session SET revoked_at = now()
+		 WHERE id = $1 AND revoked_at IS NULL`, sessionID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// RevokeAllSessionsForUser invalidates every active session for a user;
+// invoked on password change or admin-revoke.
+func (s *Store) RevokeAllSessionsForUser(ctx context.Context, userID uuid.UUID) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE user_session SET revoked_at = now()
+		 WHERE user_id = $1 AND revoked_at IS NULL`, userID)
+	return err
+}
+
+// ─── Runs ───────────────────────────────────────────────────────────────
 
 // RunStatus enumerates the lifecycle states a run moves through.
 type RunStatus string
@@ -473,29 +752,41 @@ type Run struct {
 	Summary           []byte     `json:"summary,omitempty"`  // raw JSON
 	Findings          []byte     `json:"findings,omitempty"` // raw JSON
 	TriggeredByToken  *uuid.UUID `json:"triggered_by_token,omitempty"`
+	TriggeredByUser   *uuid.UUID `json:"triggered_by_user,omitempty"`
+}
+
+// CreateRunParams identifies who triggered the run. Exactly one of TokenID
+// or UserID may be non-nil; passing both is allowed but only the token
+// attribution is shown in audit views by convention.
+type CreateRunParams struct {
+	OrgID   uuid.UUID
+	TokenID *uuid.UUID
+	UserID  *uuid.UUID
 }
 
 // CreateRun inserts a new run in pending state.
-func (s *Store) CreateRun(ctx context.Context, orgID uuid.UUID, tokenID *uuid.UUID) (Run, error) {
-	r := Run{OrgID: orgID, Status: RunPending, TriggeredByToken: tokenID}
+func (s *Store) CreateRun(ctx context.Context, p CreateRunParams) (Run, error) {
+	r := Run{OrgID: p.OrgID, Status: RunPending,
+		TriggeredByToken: p.TokenID, TriggeredByUser: p.UserID}
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO runs(org_id, status, triggered_by_token) VALUES ($1, $2, $3)
+		`INSERT INTO run(org_id, status, triggered_by_token, triggered_by_user)
+		 VALUES ($1, $2, $3, $4)
 		 RETURNING id, started_at`,
-		orgID, string(r.Status), tokenID,
+		p.OrgID, string(r.Status), p.TokenID, p.UserID,
 	).Scan(&r.ID, &r.StartedAt)
 	return r, err
 }
 
 // MarkRunRunning transitions pending → running.
 func (s *Store) MarkRunRunning(ctx context.Context, runID uuid.UUID) error {
-	_, err := s.pool.Exec(ctx, `UPDATE runs SET status = 'running' WHERE id = $1`, runID)
+	_, err := s.pool.Exec(ctx, `UPDATE run SET status = 'running' WHERE id = $1`, runID)
 	return err
 }
 
 // CompleteRun marks the run as succeeded and stores summary + findings JSON.
 func (s *Store) CompleteRun(ctx context.Context, runID uuid.UUID, summary, findings []byte) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE runs SET status = 'succeeded', completed_at = now(),
+		`UPDATE run SET status = 'succeeded', completed_at = now(),
 		 summary = $2, findings = $3 WHERE id = $1`,
 		runID, summary, findings)
 	return err
@@ -504,7 +795,7 @@ func (s *Store) CompleteRun(ctx context.Context, runID uuid.UUID, summary, findi
 // FailRun marks the run as failed with an error message.
 func (s *Store) FailRun(ctx context.Context, runID uuid.UUID, errMsg string) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE runs SET status = 'failed', completed_at = now(), error_message = $2
+		`UPDATE run SET status = 'failed', completed_at = now(), error_message = $2
 		 WHERE id = $1`, runID, errMsg)
 	return err
 }
@@ -514,11 +805,13 @@ func (s *Store) GetRun(ctx context.Context, orgID, runID uuid.UUID) (Run, error)
 	var r Run
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, org_id, status, started_at, completed_at,
-		        COALESCE(error_message,''), summary, findings, triggered_by_token
-		 FROM runs WHERE id = $1 AND org_id = $2`,
+		        COALESCE(error_message,''), summary, findings,
+		        triggered_by_token, triggered_by_user
+		 FROM run WHERE id = $1 AND org_id = $2`,
 		runID, orgID,
 	).Scan(&r.ID, &r.OrgID, &r.Status, &r.StartedAt, &r.CompletedAt,
-		&r.ErrorMessage, &r.Summary, &r.Findings, &r.TriggeredByToken)
+		&r.ErrorMessage, &r.Summary, &r.Findings,
+		&r.TriggeredByToken, &r.TriggeredByUser)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Run{}, ErrNotFound
 	}
@@ -531,8 +824,9 @@ func (s *Store) ListRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]Run
 		limit = 50
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, org_id, status, started_at, completed_at, COALESCE(error_message,''), triggered_by_token
-		 FROM runs WHERE org_id = $1 ORDER BY started_at DESC LIMIT $2`,
+		`SELECT id, org_id, status, started_at, completed_at, COALESCE(error_message,''),
+		        triggered_by_token, triggered_by_user
+		 FROM run WHERE org_id = $1 ORDER BY started_at DESC LIMIT $2`,
 		orgID, limit)
 	if err != nil {
 		return nil, err
@@ -542,28 +836,11 @@ func (s *Store) ListRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]Run
 	for rows.Next() {
 		var r Run
 		if err := rows.Scan(&r.ID, &r.OrgID, &r.Status, &r.StartedAt,
-			&r.CompletedAt, &r.ErrorMessage, &r.TriggeredByToken); err != nil {
+			&r.CompletedAt, &r.ErrorMessage,
+			&r.TriggeredByToken, &r.TriggeredByUser); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
-}
-
-// --- Helpers ---
-
-// generateTokenPlaintext returns a 32-byte (256-bit) URL-safe random token
-// prefixed with "concord_". 256 bits of entropy makes the token effectively
-// unguessable.
-func generateTokenPlaintext() (string, error) {
-	var raw [32]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
-	}
-	return tokenPrefix + base64.RawURLEncoding.EncodeToString(raw[:]), nil
-}
-
-func hashToken(plaintext string) string {
-	sum := sha256.Sum256([]byte(plaintext))
-	return hex.EncodeToString(sum[:])
 }
