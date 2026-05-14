@@ -29,6 +29,7 @@ import (
 	"github.com/concord-dev/concord/internal/controls"
 	"github.com/concord-dev/concord/internal/evidence"
 	"github.com/concord-dev/concord/internal/report"
+	"github.com/concord-dev/concord/internal/server/openapi"
 	"github.com/concord-dev/concord/internal/store"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
@@ -132,6 +133,8 @@ func (c *Concord) Router() http.Handler {
 	// Public.
 	mux.HandleFunc("GET /healthz", c.handleHealth)
 	mux.HandleFunc("GET /version", c.handleVersion)
+	mux.HandleFunc("GET /openapi.yaml", c.handleOpenAPI)
+	mux.HandleFunc("GET /docs", c.handleDocs)
 
 	// Auth (session lifecycle).
 	mux.HandleFunc("POST /v1/auth/login", c.handleLogin)
@@ -392,6 +395,53 @@ func (c *Concord) handleVersion(w http.ResponseWriter, _ *http.Request) {
 		"controls": len(c.Controls),
 	})
 }
+
+// ─── OpenAPI spec + Swagger UI ────────────────────────────────────────
+
+// handleOpenAPI serves the hand-maintained spec verbatim. Public — anyone
+// can fetch the API contract without auth, same as the routes it describes.
+func (c *Concord) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
+	spec, err := openapi.SpecYAML()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/yaml")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	_, _ = w.Write(spec)
+}
+
+// handleDocs serves a minimal HTML page that loads Swagger UI from the
+// official jsdelivr CDN and points it at /openapi.yaml. Zero build steps;
+// the entire frontend is one static page.
+func (c *Concord) handleDocs(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, docsHTML)
+}
+
+// docsHTML is the inline Swagger UI shim. Kept tiny and CDN-loaded so the
+// server binary stays a single artifact with no embedded JS.
+const docsHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Concord API</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: "/openapi.yaml",
+      dom_id: "#swagger-ui",
+      deepLinking: true,
+      persistAuthorization: true,
+    });
+  </script>
+</body>
+</html>
+`
 
 // ─── Login + session ──────────────────────────────────────────────────
 

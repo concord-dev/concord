@@ -1,0 +1,1060 @@
+openapi: 3.0.3
+info:
+  title: Concord API
+  description: |
+    Concord is the open-source compliance-as-code platform. This API powers
+    the SaaS multi-tenant deployment. Two auth mechanisms cover every path:
+
+    * **API token** (`Authorization: Bearer concord_...`) — long-lived,
+      org-scoped; CI/CLI use this.
+    * **Session token** (`Authorization: Bearer concord_sess_...`) — short-
+      lived, issued by `POST /v1/auth/login`; the web dashboard uses this.
+    * **Admin token** (`Authorization: Bearer <CONCORD_ADMIN_TOKEN>`) —
+      operator-only bootstrap secret, gates `/admin/v1/*`.
+
+    Permissions on the org API are enforced by RBAC: every route declares
+    the permission it requires; sessions are checked against the
+    `user_org_role` + `role_permission` join; API tokens implicitly carry
+    every permission of their org.
+  version: 1.0.0
+  license:
+    name: AGPL-3.0
+servers:
+  - url: http://localhost:8080
+    description: Local dev (via `docker compose up -d postgres && concord-server`)
+
+# ─── Components (security, schemas, parameters, responses) ────────────────
+components:
+  securitySchemes:
+    adminToken:
+      type: http
+      scheme: bearer
+      description: CONCORD_ADMIN_TOKEN env var on the server. Bootstrap-only.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Either an API token (prefix `concord_`) or a session token
+        (prefix `concord_sess_`). The server picks the auth path off the
+        token prefix.
+
+  parameters:
+    OrgSlug:
+      name: slug
+      in: path
+      required: true
+      description: Organization slug (URL-safe).
+      schema: { type: string }
+    UUIDPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    BadRequest:
+      description: Bad request — invalid body, missing field, etc.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing or invalid Authorization header
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Caller is authenticated but lacks the required permission
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  # ─── Schemas ────────────────────────────────────────────────────────────
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    Organization:
+      type: object
+      required: [id, name, slug, created_at, updated_at]
+      properties:
+        id:         { type: string, format: uuid }
+        name:       { type: string }
+        slug:       { type: string, description: "URL-safe identifier" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    User:
+      type: object
+      required: [id, first_name, last_name, email, created_at, updated_at]
+      properties:
+        id:                 { type: string, format: uuid }
+        first_name:         { type: string }
+        last_name:          { type: string }
+        email:              { type: string, format: email }
+        email_verified_at:  { type: string, format: date-time, nullable: true }
+        created_at:         { type: string, format: date-time }
+        updated_at:         { type: string, format: date-time }
+
+    Role:
+      type: object
+      required: [id, name]
+      properties:
+        id:   { type: string, format: uuid }
+        name: { type: string, enum: [owner, admin, member, viewer] }
+
+    Permission:
+      type: object
+      required: [id, name]
+      properties:
+        id:   { type: string, format: uuid }
+        name: { type: string, description: "`<resource>:<verb>`, e.g. `runs:create`" }
+
+    RoleWithPermissions:
+      allOf:
+        - $ref: '#/components/schemas/Role'
+        - type: object
+          properties:
+            permissions:
+              type: array
+              items: { $ref: '#/components/schemas/Permission' }
+
+    OrgMember:
+      type: object
+      required: [user, roles]
+      properties:
+        user:  { $ref: '#/components/schemas/User' }
+        roles:
+          type: array
+          items: { $ref: '#/components/schemas/Role' }
+
+    UserOrg:
+      type: object
+      required: [organization, roles]
+      properties:
+        organization: { $ref: '#/components/schemas/Organization' }
+        roles:
+          type: array
+          items: { $ref: '#/components/schemas/Role' }
+
+    APIToken:
+      type: object
+      required: [id, org_id, name, created_at]
+      properties:
+        id:                  { type: string, format: uuid }
+        org_id:              { type: string, format: uuid }
+        name:                { type: string }
+        created_by_user_id:  { type: string, format: uuid, nullable: true }
+        last_used_at:        { type: string, format: date-time, nullable: true }
+        revoked_at:          { type: string, format: date-time, nullable: true }
+        created_at:          { type: string, format: date-time }
+        updated_at:          { type: string, format: date-time }
+
+    APITokenCreated:
+      allOf:
+        - $ref: '#/components/schemas/APIToken'
+        - type: object
+          required: [token]
+          properties:
+            token:
+              type: string
+              description: |
+                The plaintext token. Returned only once at creation; save it
+                immediately. Subsequent GETs never expose it again.
+            note: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:    { type: string, format: email }
+        password: { type: string, format: password }
+
+    Session:
+      type: object
+      required: [token, expires_at, user]
+      properties:
+        session_id: { type: string, format: uuid }
+        token:
+          type: string
+          description: "Plaintext session token (prefix `concord_sess_`); use it as Bearer."
+        expires_at: { type: string, format: date-time }
+        user:       { $ref: '#/components/schemas/User' }
+
+    OrgMe:
+      type: object
+      properties:
+        organization: { $ref: '#/components/schemas/Organization' }
+        token_id:     { type: string, format: uuid, nullable: true }
+        user_id:      { type: string, format: uuid, nullable: true }
+        permissions:
+          type: array
+          items: { type: string }
+          description: "Present only for session-authenticated callers."
+
+    FrameworkCount:
+      type: object
+      required: [framework, controls]
+      properties:
+        framework: { type: string }
+        controls:  { type: integer }
+
+    Control:
+      type: object
+      description: "Static control definition loaded from the controls library."
+
+    Finding:
+      type: object
+      required: [control_id, status]
+      properties:
+        control_id:   { type: string }
+        title:        { type: string }
+        framework:    { type: string }
+        severity:     { type: string }
+        status:       { type: string, enum: [pass, fail, error] }
+        messages:     { type: array, items: { type: string } }
+        warnings:     { type: array, items: { type: string } }
+        mappings:     { type: object, additionalProperties: { type: array, items: { type: string } } }
+        evaluated_at: { type: string, format: date-time }
+        duration_ms:  { type: integer }
+
+    Summary:
+      type: object
+      properties:
+        pass:     { type: integer }
+        fail:     { type: integer }
+        error:    { type: integer }
+        warnings: { type: integer }
+
+    RunEnvelope:
+      type: object
+      required: [run_id, status]
+      properties:
+        run_id:        { type: string, format: uuid }
+        status:        { type: string, enum: [pending, running, succeeded, failed] }
+        started_at:    { type: string, format: date-time }
+        completed_at:  { type: string, format: date-time, nullable: true }
+        error_message: { type: string }
+        summary:       { $ref: '#/components/schemas/Summary' }
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/Finding' }
+
+    RunListEntry:
+      type: object
+      required: [id, status, started_at]
+      properties:
+        id:            { type: string, format: uuid }
+        status:        { type: string, enum: [pending, running, succeeded, failed] }
+        started_at:    { type: string, format: date-time }
+        completed_at:  { type: string, format: date-time, nullable: true }
+        error_message: { type: string }
+
+    RunAccepted:
+      type: object
+      required: [run_id, status, poll_url]
+      properties:
+        run_id:     { type: string, format: uuid }
+        status:     { type: string, enum: [pending] }
+        poll_url:   { type: string }
+        started_at: { type: string, format: date-time }
+
+    ControlOverride:
+      type: object
+      required: [control_id, params]
+      properties:
+        id:         { type: string, format: uuid }
+        control_id: { type: string }
+        params:
+          type: object
+          additionalProperties: true
+          description: "Free-form param map consumed by Rego at `input._concord.params`."
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Schedule:
+      type: object
+      required: [id, org_id, cron_expr, enabled, next_fire_at]
+      properties:
+        id:            { type: string, format: uuid }
+        org_id:        { type: string, format: uuid }
+        cron_expr:
+          type: string
+          description: |
+            5-field cron expression or robfig descriptor (`@hourly`,
+            `@every 30m`). Validated server-side on PUT.
+        enabled:       { type: boolean }
+        last_fired_at: { type: string, format: date-time, nullable: true }
+        next_fire_at:  { type: string, format: date-time }
+        created_at:    { type: string, format: date-time }
+        updated_at:    { type: string, format: date-time }
+
+    Webhook:
+      type: object
+      required: [id, url, event_kinds, enabled]
+      properties:
+        id:            { type: string, format: uuid }
+        url:           { type: string, format: uri }
+        event_kinds:
+          type: array
+          items: { type: string }
+          description: |
+            Empty array = subscribe to every event kind. Otherwise an
+            allow-list of kind names (e.g. `["run.completed","run.failed"]`).
+        enabled:       { type: boolean }
+        last_fired_at: { type: string, format: date-time, nullable: true }
+        last_status:   { type: integer, nullable: true }
+        last_error:    { type: string }
+        created_at:    { type: string, format: date-time }
+        updated_at:    { type: string, format: date-time }
+
+    WebhookCreated:
+      type: object
+      required: [webhook, secret]
+      properties:
+        webhook: { $ref: '#/components/schemas/Webhook' }
+        secret:
+          type: string
+          description: |
+            HMAC signing secret. Verify the `X-Concord-Signature` header
+            against this on every received delivery. Returned ONLY at
+            creation; subsequent GETs never expose it.
+        note: { type: string }
+
+# ─── Paths ────────────────────────────────────────────────────────────────
+paths:
+
+  /healthz:
+    get:
+      summary: Liveness probe
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+
+  /version:
+    get:
+      summary: Build metadata + control library size
+      operationId: getVersion
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:  { type: string }
+                  controls: { type: integer }
+
+  # ─── Auth ──────────────────────────────────────────────────────────────
+
+  /v1/auth/login:
+    post:
+      summary: Exchange email + password for a session token
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/auth/logout:
+    post:
+      summary: Revoke the current session
+      operationId: logout
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Session revoked }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ─── Session-scoped (user lives across multiple orgs) ──────────────────
+
+  /v1/me:
+    get:
+      summary: Currently authenticated user
+      operationId: getMe
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/me/orgs:
+    get:
+      summary: Orgs the current user belongs to, with their roles in each
+      operationId: listMyOrgs
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/UserOrg' }
+
+  # ─── Org API ───────────────────────────────────────────────────────────
+
+  /v1/orgs/{slug}/me:
+    get:
+      summary: Resolved org + permissions for the current caller
+      operationId: getOrgMe
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrgMe' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/orgs/{slug}/frameworks:
+    get:
+      summary: Frameworks present in the control library, with counts
+      operationId: listFrameworks
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/FrameworkCount' }
+
+  /v1/orgs/{slug}/controls:
+    get:
+      summary: List controls (optionally filtered by framework)
+      operationId: listControls
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: framework
+          in: query
+          schema: { type: string }
+          description: e.g. `nist-800-53`
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Control' }
+
+  /v1/orgs/{slug}/controls/{id}:
+    get:
+      summary: Fetch one control by id (case-insensitive)
+      operationId: getControl
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Control' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/orgs/{slug}/check:
+    post:
+      summary: Enqueue a compliance run for the org
+      description: |
+        Returns `202 Accepted` immediately with a `run_id` and a `poll_url`.
+        The worker pool runs the checks asynchronously; subscribe to
+        `/v1/orgs/{slug}/events` or poll `/v1/orgs/{slug}/runs/{id}` for the
+        terminal outcome.
+      operationId: createRun
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '202':
+          description: Run enqueued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunAccepted' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503':
+          description: Worker queue full
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /v1/orgs/{slug}/findings:
+    get:
+      summary: Most recent succeeded run's findings (convenience shortcut)
+      operationId: getLatestFindings
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunEnvelope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/orgs/{slug}/runs:
+    get:
+      summary: Run history (most recent 50)
+      operationId: listRuns
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RunListEntry' }
+
+  /v1/orgs/{slug}/runs/{id}:
+    get:
+      summary: Single run, including summary + findings when complete
+      operationId: getRun
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunEnvelope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/orgs/{slug}/events:
+    get:
+      summary: Server-Sent Events stream of run lifecycle events
+      description: |
+        Long-poll over `text/event-stream`. Frames are formatted as:
+
+        ```
+        event: run.completed
+        data: {"kind":"run.completed","org_id":"...","run_id":"...","summary":{...}}
+        ```
+
+        Heartbeats fire every 15s as `: heartbeat` comments.
+      operationId: streamEvents
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+
+  /v1/orgs/{slug}/overrides:
+    get:
+      summary: List every control override the org has on file
+      operationId: listOverrides
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ControlOverride' }
+
+  /v1/orgs/{slug}/controls/{id}/overrides:
+    get:
+      summary: Read the override for one control
+      operationId: getOverride
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlOverride' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Upsert the override for one control
+      operationId: putOverride
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [params]
+              properties:
+                params:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Override upserted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlOverride' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Remove the override for one control
+      operationId: deleteOverride
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Override deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/orgs/{slug}/schedule:
+    get:
+      summary: Read the org's cron-driven schedule
+      operationId: getSchedule
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Schedule' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Install or replace the org's schedule
+      operationId: putSchedule
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cron_expr]
+              properties:
+                cron_expr: { type: string }
+                enabled:   { type: boolean, default: true }
+      responses:
+        '200':
+          description: Schedule upserted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Schedule' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    delete:
+      summary: Remove the org's schedule
+      operationId: deleteSchedule
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '204': { description: Schedule deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/orgs/{slug}/webhooks:
+    get:
+      summary: List the org's webhooks
+      operationId: listWebhooks
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Webhook' }
+    post:
+      summary: Create a webhook
+      description: |
+        Returns the new webhook AND its HMAC secret. Save the secret — it is
+        never exposed again. Outbound deliveries sign their JSON body with
+        HMAC-SHA256 and pass the signature in `X-Concord-Signature`.
+      operationId: createWebhook
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:         { type: string, format: uri }
+                event_kinds:
+                  type: array
+                  items: { type: string }
+                enabled:     { type: boolean, default: true }
+      responses:
+        '201':
+          description: Webhook created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WebhookCreated' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /v1/orgs/{slug}/webhooks/{id}:
+    get:
+      summary: Fetch one webhook (secret never returned)
+      operationId: getWebhook
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - { $ref: '#/components/parameters/UUIDPath' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Webhook' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Patch a webhook (URL, event_kinds, enabled)
+      operationId: updateWebhook
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - { $ref: '#/components/parameters/UUIDPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:         { type: string, format: uri }
+                event_kinds:
+                  type: array
+                  items: { type: string }
+                enabled:     { type: boolean }
+      responses:
+        '200':
+          description: Webhook updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Webhook' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Delete a webhook
+      operationId: deleteWebhook
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - { $ref: '#/components/parameters/UUIDPath' }
+      responses:
+        '204': { description: Webhook deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─── Admin (CONCORD_ADMIN_TOKEN) ───────────────────────────────────────
+
+  /admin/v1/orgs:
+    post:
+      summary: Create an organization
+      operationId: adminCreateOrg
+      security: [{ adminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug]
+              properties:
+                name: { type: string }
+                slug: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Organization' }
+        '409':
+          description: Slug already in use
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      summary: List every organization
+      operationId: adminListOrgs
+      security: [{ adminToken: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Organization' }
+
+  /admin/v1/orgs/{slug}:
+    get:
+      summary: Fetch one organization
+      operationId: adminGetOrg
+      security: [{ adminToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Organization' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/v1/orgs/{slug}/tokens:
+    get:
+      summary: List API tokens for an org
+      operationId: adminListTokens
+      security: [{ adminToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/APIToken' }
+    post:
+      summary: Mint a new API token
+      operationId: adminCreateToken
+      security: [{ adminToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:             { type: string }
+                created_by_email: { type: string, format: email }
+      responses:
+        '201':
+          description: Token minted (plaintext returned ONCE)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/APITokenCreated' }
+
+  /admin/v1/orgs/{slug}/tokens/{tokenID}:
+    delete:
+      summary: Revoke an API token
+      operationId: adminRevokeToken
+      security: [{ adminToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: tokenID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Revoked }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/v1/orgs/{slug}/members:
+    get:
+      summary: List members of an org with their roles
+      operationId: adminListMembers
+      security: [{ adminToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OrgMember' }
+    post:
+      summary: Attach a user to an org with one or more roles
+      operationId: adminAddMember
+      security: [{ adminToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roles]
+              properties:
+                user_id: { type: string, format: uuid }
+                email:   { type: string, format: email }
+                roles:
+                  type: array
+                  items: { type: string, enum: [owner, admin, member, viewer] }
+      responses:
+        '201':
+          description: Member added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:  { $ref: '#/components/schemas/User' }
+                  org:   { $ref: '#/components/schemas/Organization' }
+                  roles: { type: array, items: { type: string } }
+
+  /admin/v1/orgs/{slug}/members/{userID}:
+    delete:
+      summary: Remove a user from the org (drops every role grant)
+      operationId: adminRemoveMember
+      security: [{ adminToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: userID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Removed }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/v1/users:
+    get:
+      summary: List every user
+      operationId: adminListUsers
+      security: [{ adminToken: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/User' }
+    post:
+      summary: Create a user
+      operationId: adminCreateUser
+      security: [{ adminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [first_name, last_name, email]
+              properties:
+                first_name: { type: string }
+                last_name:  { type: string }
+                email:      { type: string, format: email }
+                password:
+                  type: string
+                  format: password
+                  description: |
+                    Optional. When empty the user cannot log in until a
+                    later password-set flow assigns one.
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+
+  /admin/v1/roles:
+    get:
+      summary: List canonical roles with their permission bundles
+      operationId: adminListRoles
+      security: [{ adminToken: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RoleWithPermissions' }
+
+  /admin/v1/permissions:
+    get:
+      summary: List every defined permission
+      operationId: adminListPermissions
+      security: [{ adminToken: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Permission' }
+
+# Default security: every operation falls back to bearerAuth unless its own
+# `security:` overrides. Public endpoints declare `security: []`.
+security:
+  - bearerAuth: []
