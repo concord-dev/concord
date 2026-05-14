@@ -125,6 +125,108 @@ func TestSnykCollector_OrgIssues_AggregatesAcrossPages(t *testing.T) {
 	assert.Equal(t, 3, summary["total"])
 }
 
+const snykContainerProjectsJSON = `{
+  "data": [
+    {"id": "p1", "type": "project", "attributes": {"name": "concord-api:prod", "type": "container_image", "target_reference": "prod"}},
+    {"id": "p2", "type": "project", "attributes": {"name": "concord-worker:prod", "type": "container_image", "target_reference": "prod"}}
+  ],
+  "links": {}
+}`
+
+const snykContainerIssuesP1JSON = `{
+  "data": [
+    {
+      "id": "issue-1",
+      "type": "issue",
+      "attributes": {
+        "key": "CVE-2024-12345",
+        "title": "Heap overflow in libssl",
+        "effective_severity_level": "critical",
+        "status": "open",
+        "coordinates": [{
+          "is_fixable_snyk": true,
+          "representations": [{"dependency": {"package_name": "openssl", "package_version": "1.1.1k"}}]
+        }]
+      }
+    }
+  ],
+  "links": {}
+}`
+
+const snykContainerIssuesP2JSON = `{
+  "data": [
+    {
+      "id": "issue-2",
+      "type": "issue",
+      "attributes": {
+        "key": "CVE-2024-77777",
+        "title": "Auth bypass in old-pkg",
+        "effective_severity_level": "high",
+        "status": "open",
+        "coordinates": [{
+          "is_fixable_snyk": true,
+          "representations": [{"dependency": {"package_name": "old-pkg", "package_version": "3.0.0"}}]
+        }]
+      }
+    }
+  ],
+  "links": {}
+}`
+
+func TestSnykCollector_ContainerIssues_AggregatesAcrossProjects(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/rest/orgs/test-org/projects", func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "container_image", r.URL.Query().Get("types"))
+		fmt.Fprint(w, snykContainerProjectsJSON)
+	})
+	mux.HandleFunc("/rest/orgs/test-org/issues", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("scan_item.id") {
+		case "p1":
+			fmt.Fprint(w, snykContainerIssuesP1JSON)
+		case "p2":
+			fmt.Fprint(w, snykContainerIssuesP2JSON)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := evidence.NewSnykCollector("tok").SetBaseURL(srv.URL)
+	v, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{
+		Source: "snyk", Type: "container_issues",
+		Params: map[string]any{"org_id": "test-org"},
+	})
+	require.NoError(t, err)
+
+	out := v.(map[string]any)
+	assert.Equal(t, "container_image", out["project_type"])
+
+	projects := out["projects"].([]map[string]any)
+	require.Len(t, projects, 2)
+	assert.Equal(t, 1, projects[0]["issue_count"])
+	assert.Equal(t, 1, projects[1]["issue_count"])
+
+	issues := out["issues"].([]map[string]any)
+	require.Len(t, issues, 2)
+	// Project metadata must be attached to each issue.
+	assert.Equal(t, "p1", issues[0]["project_id"])
+	assert.Equal(t, "concord-api:prod", issues[0]["project_name"])
+	assert.Equal(t, "concord-worker:prod", issues[1]["project_name"])
+
+	summary := out["summary"].(map[string]any)
+	assert.Equal(t, 1, summary["critical"])
+	assert.Equal(t, 1, summary["high"])
+	assert.Equal(t, 2, summary["total"])
+}
+
+func TestSnykCollector_ContainerIssues_MissingOrgIDErrors(t *testing.T) {
+	c := evidence.NewSnykCollector("tok")
+	_, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{Source: "snyk", Type: "container_issues"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "org_id")
+}
+
 func TestSnykCollector_OrgIssues_MissingOrgIDErrors(t *testing.T) {
 	c := evidence.NewSnykCollector("tok")
 	_, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{Source: "snyk", Type: "org_issues"})

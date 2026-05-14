@@ -55,6 +55,8 @@ func (c *SnykCollector) Collect(cctx Context, ref apiv1.EvidenceRef) (any, error
 	switch ref.Type {
 	case "org_issues":
 		return c.collectOrgIssues(ref)
+	case "container_issues":
+		return c.collectContainerIssues(ref)
 	case "":
 		return nil, fmt.Errorf("snyk collector requires evidence type")
 	default:
@@ -103,6 +105,126 @@ func (c *SnykCollector) collectOrgIssues(ref apiv1.EvidenceRef) (any, error) {
 		"issues":     issues,
 		"summary":    summarizeSnykIssues(issues),
 	}, nil
+}
+
+// collectContainerIssues lists every container-type project in the org and
+// pulls open issues across them. The result attaches the originating project
+// name to each issue so policies can identify which image is affected.
+func (c *SnykCollector) collectContainerIssues(ref apiv1.EvidenceRef) (any, error) {
+	orgID := StringParam(ref.Params, "org_id", "")
+	if orgID == "" {
+		return nil, fmt.Errorf("missing required param %q", "org_id")
+	}
+	projectType := StringParam(ref.Params, "project_type", "container_image")
+	severities := StringParam(ref.Params, "severities", "critical,high,medium,low")
+	statusFilter := StringParam(ref.Params, "status", "open")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	projects, err := c.listProjects(ctx, orgID, projectType)
+	if err != nil {
+		return nil, fmt.Errorf("listing %s projects: %w", projectType, err)
+	}
+
+	projectsOut := make([]map[string]any, 0, len(projects))
+	allIssues := make([]map[string]any, 0)
+	for _, p := range projects {
+		issues, err := c.listProjectIssues(ctx, orgID, p.ID, severities, statusFilter)
+		if err != nil {
+			return nil, fmt.Errorf("listing issues for project %s (%s): %w", p.Attributes.Name, p.ID, err)
+		}
+		for _, i := range issues {
+			i["project_id"] = p.ID
+			i["project_name"] = p.Attributes.Name
+			i["target_reference"] = p.Attributes.TargetReference
+			allIssues = append(allIssues, i)
+		}
+		projectsOut = append(projectsOut, map[string]any{
+			"id":              p.ID,
+			"name":            p.Attributes.Name,
+			"target_reference": p.Attributes.TargetReference,
+			"issue_count":     len(issues),
+		})
+	}
+
+	return map[string]any{
+		"fetched_at":   time.Now().UTC().Format(time.RFC3339),
+		"org_id":       orgID,
+		"project_type": projectType,
+		"projects":     projectsOut,
+		"issues":       allIssues,
+		"summary":      summarizeSnykIssues(allIssues),
+	}, nil
+}
+
+func (c *SnykCollector) listProjects(ctx context.Context, orgID, projectType string) ([]snykProject, error) {
+	q := url.Values{}
+	q.Set("version", c.apiVersion)
+	q.Set("limit", "100")
+	q.Set("types", projectType)
+	path := fmt.Sprintf("/rest/orgs/%s/projects?%s", url.PathEscape(orgID), q.Encode())
+
+	var projects []snykProject
+	for path != "" {
+		raw, err := c.get(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		var page snykProjectsPage
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return nil, fmt.Errorf("parsing projects page: %w", err)
+		}
+		projects = append(projects, page.Data...)
+		path = nextPath(page.Links.Next, c.baseURL)
+	}
+	return projects, nil
+}
+
+func (c *SnykCollector) listProjectIssues(ctx context.Context, orgID, projectID, severities, statusFilter string) ([]map[string]any, error) {
+	q := url.Values{}
+	q.Set("version", c.apiVersion)
+	q.Set("limit", "100")
+	q.Set("effective_severity_level", severities)
+	q.Set("status", statusFilter)
+	q.Set("scan_item.id", projectID)
+	q.Set("scan_item.type", "project")
+	path := fmt.Sprintf("/rest/orgs/%s/issues?%s", url.PathEscape(orgID), q.Encode())
+
+	var out []map[string]any
+	for path != "" {
+		raw, err := c.get(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		var page snykIssuesPage
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return nil, fmt.Errorf("parsing issues page: %w", err)
+		}
+		for _, d := range page.Data {
+			out = append(out, normalizeSnykIssue(d))
+		}
+		path = nextPath(page.Links.Next, c.baseURL)
+	}
+	return out, nil
+}
+
+type snykProjectsPage struct {
+	Data  []snykProject `json:"data"`
+	Links snykLinks     `json:"links"`
+}
+
+type snykProject struct {
+	ID         string             `json:"id"`
+	Type       string             `json:"type"`
+	Attributes snykProjectAttrs   `json:"attributes"`
+}
+
+type snykProjectAttrs struct {
+	Name            string `json:"name"`
+	Type            string `json:"type"`
+	TargetReference string `json:"target_reference"`
+	Origin          string `json:"origin"`
 }
 
 type snykIssuesPage struct {

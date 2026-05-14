@@ -1,0 +1,10 @@
+{
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "org_id": "00000000-0000-0000-0000-000000000000",
+  "project_type": "container_image",
+  "projects": [
+    {"id": "p1", "name": "concord-api:prod", "target_reference": "prod", "issue_count": 0}
+  ],
+  "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0, "total": 0},
+  "issues": []
+}

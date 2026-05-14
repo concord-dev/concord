@@ -328,6 +328,30 @@ func TestRunCC5_1_TooFewEntriesFails(t *testing.T) {
 	assert.Contains(t, f.Warnings, `control register entry "docs/control-activities/branch-protection.md" is ad_hoc — consider formalizing for audit`)
 }
 
+// --- SOC2-CC7.1-containers — Snyk container scans ---
+
+const cc71ContainersPath = "controls/frameworks/soc2/cc7.1-container-vulnerabilities.yaml"
+
+func TestRunCC7_1Containers_Pass(t *testing.T) {
+	f := runSingleEv(t, cc71ContainersPath, "cc7.1-containers-pass.json")
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
+}
+
+func TestRunCC7_1Containers_CriticalAndHighFail(t *testing.T) {
+	f := runSingleEv(t, cc71ContainersPath, "cc7.1-containers-critical.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, "1 CRITICAL container issue(s) open (threshold: 0) — see warnings for affected images")
+	assert.Contains(t, f.Messages, "2 HIGH container issue(s) open (threshold: 0)")
+	// Per-image warns must name the image.
+	found := false
+	for _, w := range f.Warnings {
+		if strings.Contains(w, "concord-api:prod") && strings.Contains(w, "CRITICAL") {
+			found = true
+		}
+	}
+	assert.True(t, found, "expected a CRITICAL warning naming concord-api:prod; got %v", f.Warnings)
+}
+
 // --- CIS-AWS-1.10 — Console MFA ---
 
 const cisAws110Path = "controls/frameworks/cis-aws/1.10-console-mfa.yaml"
