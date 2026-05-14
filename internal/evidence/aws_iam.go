@@ -1,0 +1,237 @@
+package evidence
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/smithy-go"
+
+	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
+)
+
+// credentialReportPollAttempts caps how long collectIAMCredentialReport will
+// wait for a freshly-requested report to become ready. credentialReportPollDelay
+// is a var (not const) so tests can shrink it.
+const credentialReportPollAttempts = 10
+
+var credentialReportPollDelay = 2 * time.Second
+
+// SetCredentialReportPollDelay overrides the inter-attempt wait time. Test-only.
+func SetCredentialReportPollDelay(d time.Duration) { credentialReportPollDelay = d }
+
+// collectIAMAccountSummary returns the global IAM account counters
+// (Users, MFADevicesInUse, AccountAccessKeysPresent, etc.).
+func (c *AWSCollector) collectIAMAccountSummary(ref apiv1.EvidenceRef) (any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := c.iam.GetAccountSummary(ctx, &iam.GetAccountSummaryInput{})
+	if err != nil {
+		return nil, wrapAWSError("get account summary", err)
+	}
+	summary := map[string]any{}
+	for k, v := range out.SummaryMap {
+		summary[string(k)] = v
+	}
+	return map[string]any{
+		"fetched_at": time.Now().UTC().Format(time.RFC3339),
+		"summary":    summary,
+	}, nil
+}
+
+// collectIAMPasswordPolicy returns the account-wide password policy. A
+// missing policy (NoSuchEntity) surfaces as `configured: false` data rather
+// than an error so the Rego policy can describe what's wrong.
+func (c *AWSCollector) collectIAMPasswordPolicy(ref apiv1.EvidenceRef) (any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := c.iam.GetAccountPasswordPolicy(ctx, &iam.GetAccountPasswordPolicyInput{})
+	if err != nil {
+		if isNoPasswordPolicyError(err) {
+			return map[string]any{
+				"fetched_at": time.Now().UTC().Format(time.RFC3339),
+				"configured": false,
+			}, nil
+		}
+		return nil, wrapAWSError("get account password policy", err)
+	}
+	p := out.PasswordPolicy
+	return map[string]any{
+		"fetched_at": time.Now().UTC().Format(time.RFC3339),
+		"policy": map[string]any{
+			"configured":                     true,
+			"minimum_password_length":        aws.ToInt32(p.MinimumPasswordLength),
+			"require_symbols":                p.RequireSymbols,
+			"require_numbers":                p.RequireNumbers,
+			"require_uppercase_characters":   p.RequireUppercaseCharacters,
+			"require_lowercase_characters":   p.RequireLowercaseCharacters,
+			"allow_users_to_change_password": p.AllowUsersToChangePassword,
+			"expire_passwords":               p.ExpirePasswords,
+			"max_password_age":               aws.ToInt32(p.MaxPasswordAge),
+			"password_reuse_prevention":      aws.ToInt32(p.PasswordReusePrevention),
+			"hard_expiry":                    aws.ToBool(p.HardExpiry),
+		},
+	}, nil
+}
+
+func isNoPasswordPolicyError(err error) bool {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.ErrorCode() == "NoSuchEntity" || apiErr.ErrorCode() == "NoSuchEntityException"
+	}
+	return false
+}
+
+// collectIAMCredentialReport requests a fresh credential report, polls until
+// it's ready, and returns the parsed per-user shape.
+func (c *AWSCollector) collectIAMCredentialReport(ref apiv1.EvidenceRef) (any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	if _, err := c.iam.GenerateCredentialReport(ctx, &iam.GenerateCredentialReportInput{}); err != nil {
+		return nil, wrapAWSError("generate credential report", err)
+	}
+	out, err := c.pollCredentialReport(ctx)
+	if err != nil {
+		return nil, err
+	}
+	users, err := parseCredentialReport(string(out.Content), time.Now().UTC())
+	if err != nil {
+		return nil, fmt.Errorf("parsing credential report: %w", err)
+	}
+	generated := ""
+	if out.GeneratedTime != nil {
+		generated = out.GeneratedTime.UTC().Format(time.RFC3339)
+	}
+	return map[string]any{
+		"fetched_at":   time.Now().UTC().Format(time.RFC3339),
+		"generated_at": generated,
+		"users":        users,
+	}, nil
+}
+
+// pollCredentialReport waits for AWS to finish building the report. AWS
+// returns ReportInProgress for the first ~few seconds after a generate.
+func (c *AWSCollector) pollCredentialReport(ctx context.Context) (*iam.GetCredentialReportOutput, error) {
+	for i := 0; i < credentialReportPollAttempts; i++ {
+		out, err := c.iam.GetCredentialReport(ctx, &iam.GetCredentialReportInput{})
+		if err == nil {
+			if out == nil || len(out.Content) == 0 {
+				return nil, fmt.Errorf("credential report empty")
+			}
+			return out, nil
+		}
+		if !isReportInProgressError(err) {
+			return nil, wrapAWSError("get credential report", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("credential report not ready before timeout: %w", ctx.Err())
+		case <-time.After(credentialReportPollDelay):
+		}
+	}
+	return nil, fmt.Errorf("credential report not ready after %d attempts", credentialReportPollAttempts)
+}
+
+func isReportInProgressError(err error) bool {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.ErrorCode() == "ReportInProgress" || apiErr.ErrorCode() == "ReportInProgressException"
+	}
+	return false
+}
+
+// parseCredentialReport turns the IAM credential report CSV into a slice of
+// per-user maps. `now` is injected so tests can fix the "days ago" math.
+func parseCredentialReport(csvData string, now time.Time) ([]map[string]any, error) {
+	lines := strings.Split(strings.TrimSpace(csvData), "\n")
+	if len(lines) < 2 {
+		return nil, fmt.Errorf("expected header + at least one row, got %d line(s)", len(lines))
+	}
+	header := splitCSV(lines[0])
+	idx := make(map[string]int, len(header))
+	for i, h := range header {
+		idx[h] = i
+	}
+	get := func(row []string, col string) string {
+		i, ok := idx[col]
+		if !ok || i >= len(row) {
+			return ""
+		}
+		return row[i]
+	}
+	users := make([]map[string]any, 0, len(lines)-1)
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		users = append(users, parseCredentialReportRow(splitCSV(line), get, now))
+	}
+	return users, nil
+}
+
+// parseCredentialReportRow extracts one user from the parsed CSV row.
+func parseCredentialReportRow(row []string, get func([]string, string) string, now time.Time) map[string]any {
+	user := map[string]any{
+		"user":             get(row, "user"),
+		"arn":              get(row, "arn"),
+		"user_created":     get(row, "user_creation_time"),
+		"password_enabled": parseCSVBool(get(row, "password_enabled")),
+		"mfa_active":       parseCSVBool(get(row, "mfa_active")),
+	}
+	pwLast := normalizeNA(get(row, "password_last_used"))
+	user["password_last_used"] = pwLast
+	user["password_last_used_days_ago"] = daysAgo(pwLast, now)
+
+	keys := []map[string]any{}
+	for _, n := range []string{"1", "2"} {
+		active := parseCSVBool(get(row, "access_key_"+n+"_active"))
+		lastUsed := normalizeNA(get(row, "access_key_"+n+"_last_used_date"))
+		lastRotated := normalizeNA(get(row, "access_key_"+n+"_last_rotated"))
+		if !active && lastUsed == "" && lastRotated == "" {
+			continue
+		}
+		keys = append(keys, map[string]any{
+			"key_num":            n,
+			"active":             active,
+			"last_used_date":     lastUsed,
+			"last_used_days_ago": daysAgo(lastUsed, now),
+			"last_rotated":       lastRotated,
+		})
+	}
+	user["access_keys"] = keys
+	return user
+}
+
+// splitCSV is a minimal CSV splitter for IAM credential reports, which never
+// contain quoted fields or escaped commas.
+func splitCSV(line string) []string { return strings.Split(line, ",") }
+
+func parseCSVBool(s string) bool { return strings.EqualFold(s, "true") }
+
+// normalizeNA collapses the IAM credential report's various "no value here"
+// markers to an empty string so downstream rules don't special-case them.
+func normalizeNA(s string) string {
+	switch s {
+	case "N/A", "no_information", "not_supported":
+		return ""
+	}
+	return s
+}
+
+// daysAgo returns the integer number of days between when and now. Returns
+// -1 when the value is empty or any "never used" marker.
+func daysAgo(when string, now time.Time) int {
+	if when == "" || when == "N/A" || when == "no_information" || when == "not_supported" {
+		return -1
+	}
+	t, err := time.Parse(time.RFC3339, when)
+	if err != nil {
+		return -1
+	}
+	return int(now.Sub(t).Hours() / 24)
+}
