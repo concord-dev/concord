@@ -1,6 +1,7 @@
 package evidence_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -77,6 +78,38 @@ func TestOktaCollector_UsersMFA_ClassifiesStrong(t *testing.T) {
 
 	carol := findUser(t, users, "carol@example.com")
 	assert.Equal(t, false, carol["has_strong_mfa"], "carol has no factors at all")
+}
+
+func TestOktaCollector_Probe(t *testing.T) {
+	var gotAuth string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/users", func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		fmt.Fprint(w, `[]`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := evidence.NewOktaCollector(srv.URL, "test-token")
+	info, err := c.Probe(context.Background())
+	require.NoError(t, err)
+	assert.Contains(t, info, srv.URL)
+	assert.Equal(t, "SSWS test-token", gotAuth)
+}
+
+func TestOktaCollector_Probe_PropagatesAuthError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/users", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"errorCode":"E0000011"}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := evidence.NewOktaCollector(srv.URL, "bad")
+	_, err := c.Probe(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "401")
 }
 
 func TestOktaCollector_PropagatesUnauthorized(t *testing.T) {

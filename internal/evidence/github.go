@@ -39,6 +39,24 @@ func (c *GitHubCollector) SetBaseURL(url string) *GitHubCollector {
 	return c
 }
 
+// Probe calls GET /user as a low-cost reachability + auth check. Returns the
+// authenticated login (e.g. "octocat") or a wrapped error suitable for
+// surfacing in `concord doctor`.
+func (c *GitHubCollector) Probe(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	raw, err := c.getJSON(ctx, "/user")
+	if err != nil {
+		return "", err
+	}
+	if obj, ok := raw.(map[string]any); ok {
+		if login, ok := obj["login"].(string); ok && login != "" {
+			return "authenticated as " + login, nil
+		}
+	}
+	return "authenticated", nil
+}
+
 // Collect dispatches based on ref.Type.
 func (c *GitHubCollector) Collect(cctx Context, ref apiv1.EvidenceRef) (any, error) {
 	switch ref.Type {

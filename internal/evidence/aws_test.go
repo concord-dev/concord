@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
 	cttypes "github.com/aws/aws-sdk-go-v2/service/cloudtrail/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
+	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
@@ -62,10 +63,35 @@ func (m *mockS3) GetPublicAccessBlock(_ context.Context, in *s3.GetPublicAccessB
 type mockIAM struct {
 	out *iam.GetAccountSummaryOutput
 	err error
+
+	policyOut *iam.GetAccountPasswordPolicyOutput
+	policyErr error
+
+	generateErr  error
+	reportOut    *iam.GetCredentialReportOutput
+	reportErr    error
+	reportErrSeq []error // optional: sequence of errors returned by GetCredentialReport across attempts
+	reportCalls  int
 }
 
 func (m *mockIAM) GetAccountSummary(_ context.Context, _ *iam.GetAccountSummaryInput, _ ...func(*iam.Options)) (*iam.GetAccountSummaryOutput, error) {
 	return m.out, m.err
+}
+
+func (m *mockIAM) GetAccountPasswordPolicy(_ context.Context, _ *iam.GetAccountPasswordPolicyInput, _ ...func(*iam.Options)) (*iam.GetAccountPasswordPolicyOutput, error) {
+	return m.policyOut, m.policyErr
+}
+
+func (m *mockIAM) GenerateCredentialReport(_ context.Context, _ *iam.GenerateCredentialReportInput, _ ...func(*iam.Options)) (*iam.GenerateCredentialReportOutput, error) {
+	return &iam.GenerateCredentialReportOutput{}, m.generateErr
+}
+
+func (m *mockIAM) GetCredentialReport(_ context.Context, _ *iam.GetCredentialReportInput, _ ...func(*iam.Options)) (*iam.GetCredentialReportOutput, error) {
+	defer func() { m.reportCalls++ }()
+	if m.reportCalls < len(m.reportErrSeq) {
+		return nil, m.reportErrSeq[m.reportCalls]
+	}
+	return m.reportOut, m.reportErr
 }
 
 type mockCloudTrail struct {
@@ -254,6 +280,21 @@ func TestAWSCollector_IAM_ErrorPropagates(t *testing.T) {
 	assert.Contains(t, err.Error(), "access denied")
 }
 
+func TestAWSCollector_Probe(t *testing.T) {
+	m := &mockIAM{out: &iam.GetAccountSummaryOutput{SummaryMap: map[string]int32{"Users": 7}}}
+	c := evidence.NewAWSCollectorWith(evidence.WithIAM(m))
+	info, err := c.Probe(context.Background())
+	require.NoError(t, err)
+	assert.Contains(t, info, "7 users")
+}
+
+func TestAWSCollector_Probe_WrapsAccessDenied(t *testing.T) {
+	c := evidence.NewAWSCollectorWith(evidence.WithIAM(&mockIAM{err: &errCode{code: "AccessDenied"}}))
+	_, err := c.Probe(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "access denied")
+}
+
 // --- CloudTrail ---
 
 func TestAWSCollector_CloudTrail_MultiRegionLogging(t *testing.T) {
@@ -312,6 +353,109 @@ func TestAWSCollector_CloudTrail_NoTrails(t *testing.T) {
 	v, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{Source: "aws", Type: "cloudtrail_trails"})
 	require.NoError(t, err)
 	assert.Empty(t, v.(map[string]any)["trails"])
+}
+
+// --- IAM password policy ---
+
+func TestAWSCollector_IAM_PasswordPolicy_Present(t *testing.T) {
+	m := &mockIAM{policyOut: &iam.GetAccountPasswordPolicyOutput{
+		PasswordPolicy: &iamtypes.PasswordPolicy{
+			MinimumPasswordLength:      aws.Int32(14),
+			RequireSymbols:             true,
+			RequireNumbers:             true,
+			RequireUppercaseCharacters: true,
+			RequireLowercaseCharacters: true,
+			AllowUsersToChangePassword: true,
+			ExpirePasswords:            true,
+			MaxPasswordAge:             aws.Int32(90),
+			PasswordReusePrevention:    aws.Int32(24),
+			HardExpiry:                 aws.Bool(false),
+		},
+	}}
+	c := evidence.NewAWSCollectorWith(evidence.WithIAM(m))
+	v, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{Source: "aws", Type: "iam_password_policy"})
+	require.NoError(t, err)
+
+	policy := v.(map[string]any)["policy"].(map[string]any)
+	assert.Equal(t, true, policy["configured"])
+	assert.EqualValues(t, 14, policy["minimum_password_length"])
+	assert.Equal(t, true, policy["require_symbols"])
+	assert.EqualValues(t, 90, policy["max_password_age"])
+	assert.EqualValues(t, 24, policy["password_reuse_prevention"])
+}
+
+func TestAWSCollector_IAM_PasswordPolicy_NoSuchEntityReturnsUnconfigured(t *testing.T) {
+	m := &mockIAM{policyErr: &errCode{code: "NoSuchEntity"}}
+	c := evidence.NewAWSCollectorWith(evidence.WithIAM(m))
+	v, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{Source: "aws", Type: "iam_password_policy"})
+	require.NoError(t, err, "missing policy is data, not an error")
+	assert.Equal(t, false, v.(map[string]any)["configured"])
+}
+
+func TestAWSCollector_IAM_PasswordPolicy_OtherErrorsPropagate(t *testing.T) {
+	m := &mockIAM{policyErr: errors.New("network down")}
+	c := evidence.NewAWSCollectorWith(evidence.WithIAM(m))
+	_, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{Source: "aws", Type: "iam_password_policy"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "network down")
+}
+
+// --- IAM credential report ---
+
+func TestAWSCollector_IAM_CredentialReport_HappyPath(t *testing.T) {
+	generated := time.Date(2026, 5, 14, 9, 55, 0, 0, time.UTC)
+	csv := "user,arn,user_creation_time,password_enabled,password_last_used,mfa_active,access_key_1_active,access_key_1_last_used_date,access_key_1_last_rotated,access_key_2_active,access_key_2_last_used_date,access_key_2_last_rotated\n" +
+		"<root_account>,arn:aws:iam::123:root,2024-01-01T00:00:00+00:00,false,2026-05-12T08:00:00+00:00,true,false,N/A,N/A,false,N/A,N/A\n" +
+		"alice,arn:aws:iam::123:user/alice,2025-02-10T00:00:00+00:00,true,2026-05-14T07:00:00+00:00,true,true,2026-05-13T22:30:00+00:00,2026-03-01T00:00:00+00:00,false,N/A,N/A\n"
+
+	m := &mockIAM{
+		reportOut: &iam.GetCredentialReportOutput{
+			Content:       []byte(csv),
+			GeneratedTime: aws.Time(generated),
+		},
+	}
+	c := evidence.NewAWSCollectorWith(evidence.WithIAM(m))
+	v, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{Source: "aws", Type: "iam_credential_report"})
+	require.NoError(t, err)
+
+	out := v.(map[string]any)
+	assert.Equal(t, "2026-05-14T09:55:00Z", out["generated_at"])
+	users := out["users"].([]map[string]any)
+	require.Len(t, users, 2)
+	assert.Equal(t, "<root_account>", users[0]["user"])
+	assert.Equal(t, false, users[0]["password_enabled"])
+
+	alice := users[1]
+	assert.Equal(t, "alice", alice["user"])
+	assert.Equal(t, true, alice["password_enabled"])
+	assert.Equal(t, true, alice["mfa_active"])
+	keys := alice["access_keys"].([]map[string]any)
+	require.Len(t, keys, 1, "only the active key #1 should appear; #2 is fully absent")
+	assert.Equal(t, "1", keys[0]["key_num"])
+	assert.Equal(t, true, keys[0]["active"])
+}
+
+func TestAWSCollector_IAM_CredentialReport_PollsUntilReady(t *testing.T) {
+	evidence.SetCredentialReportPollDelay(5 * time.Millisecond)
+	t.Cleanup(func() { evidence.SetCredentialReportPollDelay(2 * time.Second) })
+
+	csv := "user,arn,user_creation_time,password_enabled,password_last_used,mfa_active,access_key_1_active,access_key_1_last_used_date,access_key_1_last_rotated\nbob,arn,2025-01-01T00:00:00+00:00,false,N/A,false,false,N/A,N/A\n"
+	m := &mockIAM{
+		reportErrSeq: []error{&errCode{code: "ReportInProgress"}, &errCode{code: "ReportInProgress"}},
+		reportOut:    &iam.GetCredentialReportOutput{Content: []byte(csv), GeneratedTime: aws.Time(time.Now())},
+	}
+	c := evidence.NewAWSCollectorWith(evidence.WithIAM(m))
+	v, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{Source: "aws", Type: "iam_credential_report"})
+	require.NoError(t, err)
+	assert.Len(t, v.(map[string]any)["users"], 1)
+	assert.Equal(t, 3, m.reportCalls, "should poll past the two ReportInProgress responses before succeeding")
+}
+
+func TestAWSCollector_IAM_CredentialReport_GenerateErrorPropagates(t *testing.T) {
+	m := &mockIAM{generateErr: &errCode{code: "AccessDenied"}}
+	c := evidence.NewAWSCollectorWith(evidence.WithIAM(m))
+	_, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{Source: "aws", Type: "iam_credential_report"})
+	require.Error(t, err)
 }
 
 // --- Dispatch ---

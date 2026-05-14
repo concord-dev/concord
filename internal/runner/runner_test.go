@@ -328,6 +328,109 @@ func TestRunCC5_1_TooFewEntriesFails(t *testing.T) {
 	assert.Contains(t, f.Warnings, `control register entry "docs/control-activities/branch-protection.md" is ad_hoc — consider formalizing for audit`)
 }
 
+// --- SOC2-CC7.1-snyk — Snyk-tracked vulnerabilities ---
+
+const cc71SnykPath = "controls/frameworks/soc2/cc7.1-vulnerability-management-snyk.yaml"
+
+func TestRunCC7_1Snyk_Pass(t *testing.T) {
+	f := runSingleEv(t, cc71SnykPath, "cc7.1-snyk-pass.json")
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
+}
+
+func TestRunCC7_1Snyk_CriticalAndHighFail(t *testing.T) {
+	f := runSingleEv(t, cc71SnykPath, "cc7.1-snyk-critical.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, "1 CRITICAL Snyk issue(s) open (threshold: 0) — see warnings for fix paths")
+	assert.Contains(t, f.Messages, "3 HIGH Snyk issue(s) open (threshold: 0)")
+	// Per-issue warns: fixable vs unfixable bucketing.
+	assert.Contains(t, f.Warnings, "[CRITICAL] CVE-2024-1234 in lodash@4.17.10 — fix available via Snyk")
+	assert.Contains(t, f.Warnings, "[HIGH] CVE-2024-9999 in regex-foo has no fix yet — document exception or apply workaround")
+}
+
+func TestRunCC7_1Snyk_RelaxedThresholdPasses(t *testing.T) {
+	controlPath := filepath.Join(repoRoot(t), cc71SnykPath)
+	c, err := controls.LoadFile(controlPath)
+	require.NoError(t, err)
+	c.Spec.Evidence[0].Fixture = "./tests/fixtures/cc7.1-snyk-critical.json"
+
+	r := New(policy.New(), evidence.NewFileCollector()).SetParams(map[string]map[string]any{
+		"SOC2-CC7.1-snyk": {"max_critical": 1, "max_high": 5},
+	})
+	f := r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
+	assert.Equal(t, apiv1.StatusPass, f.Status, "relaxed thresholds should accept the fixture")
+}
+
+// --- CIS-AWS-1.16 — IAM password policy ---
+
+const cisAws116Path = "controls/frameworks/cis-aws/1.16-iam-password-policy.yaml"
+
+func TestRunCISAWS1_16_Pass(t *testing.T) {
+	f := runSingleEv(t, cisAws116Path, "iam-password-policy-pass.json")
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
+}
+
+func TestRunCISAWS1_16_WeakPolicyFails(t *testing.T) {
+	f := runSingleEv(t, cisAws116Path, "iam-password-policy-weak.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	// Each weak attribute should produce its own message.
+	assert.Contains(t, f.Messages, "minimum_password_length is 8, must be >= 14")
+	assert.Contains(t, f.Messages, "require_symbols is false (CIS-AWS-1.16 requires symbols)")
+	assert.Contains(t, f.Messages, "expire_passwords is false; max_password_age must be set to <= 90 days")
+	assert.Contains(t, f.Messages, "password_reuse_prevention is 3, must remember >= 24 previous passwords")
+}
+
+func TestRunCISAWS1_16_NoPolicyFails(t *testing.T) {
+	f := runSingleEv(t, cisAws116Path, "iam-password-policy-none.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, "no IAM account password policy is configured (CIS-AWS-1.16 requires one)")
+}
+
+func TestRunCISAWS1_16_TightenedMinLength(t *testing.T) {
+	controlPath := filepath.Join(repoRoot(t), cisAws116Path)
+	c, err := controls.LoadFile(controlPath)
+	require.NoError(t, err)
+	c.Spec.Evidence[0].Fixture = "./tests/fixtures/iam-password-policy-pass.json"
+
+	r := New(policy.New(), evidence.NewFileCollector()).SetParams(map[string]map[string]any{
+		"CIS-AWS-1.16": {"min_length": 16},
+	})
+	f := r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
+	assert.Equal(t, apiv1.StatusFail, f.Status, "fixture has length 14, tightened param requires 16")
+	assert.Contains(t, f.Messages, "minimum_password_length is 14, must be >= 16")
+}
+
+// --- CIS-AWS-4.1 — Unused credentials ---
+
+const cisAws41Path = "controls/frameworks/cis-aws/4.1-unused-credentials.yaml"
+
+func TestRunCISAWS4_1_Pass(t *testing.T) {
+	f := runSingleEv(t, cisAws41Path, "credentials-pass.json")
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
+}
+
+func TestRunCISAWS4_1_DormantCredentialsFail(t *testing.T) {
+	f := runSingleEv(t, cisAws41Path, "credentials-dormant.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, `user "former-intern" password active but unused for 255 days (limit 90) — disable console login`)
+	assert.Contains(t, f.Messages, `user "former-intern" access key #1 active but unused for 255 days (limit 90) — deactivate the key`)
+	assert.Contains(t, f.Messages, `user "deploy-bot" access key #1 is active but has never been used — delete it`)
+}
+
+func TestRunCISAWS4_1_TightenedWindow(t *testing.T) {
+	controlPath := filepath.Join(repoRoot(t), cisAws41Path)
+	c, err := controls.LoadFile(controlPath)
+	require.NoError(t, err)
+	c.Spec.Evidence[0].Fixture = "./tests/fixtures/credentials-pass.json"
+
+	// Tighten max_unused_days to 0 so alice's 1-day-old access key trips the rule.
+	r := New(policy.New(), evidence.NewFileCollector()).SetParams(map[string]map[string]any{
+		"CIS-AWS-4.1": {"max_unused_days": 0},
+	})
+	f := r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
+	assert.Equal(t, apiv1.StatusFail, f.Status, "0-day window should fail on alice's 1-day-old key")
+	assert.Contains(t, f.Messages, `user "alice" access key #1 active but unused for 1 days (limit 0) — deactivate the key`)
+}
+
 // runSingleEv is the helper for single-evidence controls.
 func runSingleEv(t *testing.T, controlRelPath, fixture string) apiv1.Finding {
 	t.Helper()

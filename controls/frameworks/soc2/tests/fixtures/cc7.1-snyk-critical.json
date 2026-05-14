@@ -1,0 +1,51 @@
+{
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "org_id": "00000000-0000-0000-0000-000000000000",
+  "summary": {"critical": 1, "high": 3, "medium": 0, "low": 0, "total": 4},
+  "issues": [
+    {
+      "id": "issue-1",
+      "key": "CVE-2024-1234",
+      "title": "Prototype Pollution in lodash",
+      "type": "package_vulnerability",
+      "status": "open",
+      "severity": "critical",
+      "package_name": "lodash",
+      "package_version": "4.17.10",
+      "fixable": true
+    },
+    {
+      "id": "issue-2",
+      "key": "CVE-2024-9999",
+      "title": "ReDoS in regex-foo",
+      "type": "package_vulnerability",
+      "status": "open",
+      "severity": "high",
+      "package_name": "regex-foo",
+      "package_version": "1.2.3",
+      "fixable": false
+    },
+    {
+      "id": "issue-3",
+      "key": "CVE-2024-7777",
+      "title": "Path traversal in legacy",
+      "type": "package_vulnerability",
+      "status": "open",
+      "severity": "high",
+      "package_name": "legacy",
+      "package_version": "0.1.0",
+      "fixable": true
+    },
+    {
+      "id": "issue-4",
+      "key": "CVE-2024-3333",
+      "title": "Auth bypass in old-auth",
+      "type": "package_vulnerability",
+      "status": "open",
+      "severity": "high",
+      "package_name": "old-auth",
+      "package_version": "2.0.1",
+      "fixable": true
+    }
+  ]
+}

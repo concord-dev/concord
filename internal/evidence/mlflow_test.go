@@ -1,6 +1,7 @@
 package evidence_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -130,6 +131,38 @@ func TestMLflowCollector_UnknownTypeReturnsUnsupported(t *testing.T) {
 	_, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{Source: "mlflow", Type: "weird"})
 	require.Error(t, err)
 	// the registry will fall back to fixture; collector itself signals unsupported
+}
+
+func TestMLflowCollector_Probe(t *testing.T) {
+	var calledPath string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/2.0/mlflow/registered-models/search", func(w http.ResponseWriter, r *http.Request) {
+		calledPath = r.URL.RequestURI()
+		fmt.Fprint(w, `{"registered_models":[]}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := evidence.NewMLflowCollector(srv.URL, "")
+	info, err := c.Probe(context.Background())
+	require.NoError(t, err)
+	assert.Contains(t, info, srv.URL)
+	assert.Contains(t, calledPath, "max_results=1", "probe should pull one record only")
+}
+
+func TestMLflowCollector_Probe_PropagatesAuthError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/2.0/mlflow/registered-models/search", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"error_code":"PERMISSION_DENIED"}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := evidence.NewMLflowCollector(srv.URL, "bad")
+	_, err := c.Probe(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "401")
 }
 
 func TestMLflowCollector_NoAuthHeaderWhenTokenEmpty(t *testing.T) {

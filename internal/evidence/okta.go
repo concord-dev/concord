@@ -30,6 +30,16 @@ func NewOktaCollector(orgURL, token string) *OktaCollector {
 	}
 }
 
+// Probe calls /api/v1/users?limit=1 as a low-cost reachability + auth check.
+func (c *OktaCollector) Probe(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if _, err := c.get(ctx, "/api/v1/users?limit=1"); err != nil {
+		return "", err
+	}
+	return "org reachable at " + c.orgURL, nil
+}
+
 // Collect dispatches based on ref.Type.
 func (c *OktaCollector) Collect(cctx Context, ref apiv1.EvidenceRef) (any, error) {
 	switch ref.Type {

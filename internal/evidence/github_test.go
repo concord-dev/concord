@@ -1,6 +1,7 @@
 package evidence_test
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -366,6 +367,30 @@ func TestGitHubCollector_OrgSecurityPolicy_DerivesOrgFromRepo(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "concord-dev", v.(map[string]any)["org"])
+}
+
+func TestGitHubCollector_Probe(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprint(w, `{"message":"Bad credentials"}`)
+			return
+		}
+		fmt.Fprint(w, `{"login":"octocat","id":1}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := evidence.NewGitHubCollector("test-token").SetBaseURL(srv.URL)
+	info, err := c.Probe(context.Background())
+	require.NoError(t, err)
+	assert.Contains(t, info, "octocat")
+
+	bad := evidence.NewGitHubCollector("nope").SetBaseURL(srv.URL)
+	_, err = bad.Probe(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "401")
 }
 
 func TestGitHubCollector_EnvSubstitution(t *testing.T) {

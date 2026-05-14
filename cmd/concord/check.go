@@ -121,6 +121,9 @@ func buildRegistry(fixturesOnly bool) *evidence.Registry {
 	if org, token := os.Getenv("OKTA_ORG_URL"), os.Getenv("OKTA_API_TOKEN"); org != "" && token != "" {
 		reg.Register("okta", evidence.NewOktaCollector(org, token))
 	}
+	if tok := os.Getenv("SNYK_TOKEN"); tok != "" {
+		reg.Register("snyk", evidence.NewSnykCollector(tok))
+	}
 	return reg
 }
 

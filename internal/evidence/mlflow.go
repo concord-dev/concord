@@ -30,6 +30,17 @@ func NewMLflowCollector(baseURL, token string) *MLflowCollector {
 	}
 }
 
+// Probe calls registered-models/search with max_results=1 as a low-cost
+// reachability + auth check.
+func (c *MLflowCollector) Probe(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if _, err := c.get(ctx, "/api/2.0/mlflow/registered-models/search?max_results=1"); err != nil {
+		return "", err
+	}
+	return "tracking server reachable at " + c.baseURL, nil
+}
+
 // Collect dispatches based on ref.Type.
 func (c *MLflowCollector) Collect(cctx Context, ref apiv1.EvidenceRef) (any, error) {
 	switch ref.Type {
