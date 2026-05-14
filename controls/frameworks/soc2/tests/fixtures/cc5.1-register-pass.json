@@ -1,0 +1,60 @@
+{
+  "scanned_paths": ["docs/control-activities"],
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "docs": [
+    {
+      "path": "docs/control-activities/mfa-enforcement.md",
+      "control_id": "CC6.1",
+      "title": "MFA enforced on identity provider",
+      "owner": "it-security",
+      "status": "implemented",
+      "evidence_source": "Okta API + Concord SOC2-CC6.1",
+      "last_audited_at": "2026-04-15T00:00:00Z"
+    },
+    {
+      "path": "docs/control-activities/branch-protection.md",
+      "control_id": "CC8.1",
+      "title": "Default branch protected with required reviews",
+      "owner": "platform",
+      "status": "implemented",
+      "evidence_source": "GitHub API + Concord SOC2-CC8.1",
+      "last_audited_at": "2026-04-22T00:00:00Z"
+    },
+    {
+      "path": "docs/control-activities/cloudtrail-multi-region.md",
+      "control_id": "CC4.1",
+      "title": "CloudTrail logging across every region",
+      "owner": "platform",
+      "status": "implemented",
+      "evidence_source": "AWS CloudTrail API + Concord CIS-AWS-3.1",
+      "last_audited_at": "2026-04-22T00:00:00Z"
+    },
+    {
+      "path": "docs/control-activities/incident-response.md",
+      "control_id": "CC7.2",
+      "title": "Incident response runbook + on-call rotation",
+      "owner": "platform",
+      "status": "implemented",
+      "evidence_source": "docs/incident-response/main.md + PagerDuty",
+      "last_audited_at": "2026-02-15T00:00:00Z"
+    },
+    {
+      "path": "docs/control-activities/risk-register.md",
+      "control_id": "CC9.2",
+      "title": "Risk register maintained quarterly",
+      "owner": "security",
+      "status": "implemented",
+      "evidence_source": "docs/risk-register/*.md + Concord SOC2-CC9.2",
+      "last_audited_at": "2026-04-01T00:00:00Z"
+    },
+    {
+      "path": "docs/control-activities/vulnerability-management.md",
+      "control_id": "CC7.1",
+      "title": "Trivy scan on every CI run with threshold enforcement",
+      "owner": "platform",
+      "status": "implemented",
+      "evidence_source": "Trivy CI step + Concord SOC2-CC7.1",
+      "last_audited_at": "2026-04-22T00:00:00Z"
+    }
+  ]
+}

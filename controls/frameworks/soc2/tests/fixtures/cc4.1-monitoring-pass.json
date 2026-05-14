@@ -1,0 +1,15 @@
+{
+  "scanned_paths": ["docs/monitoring"],
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "docs": [
+    {
+      "path": "docs/monitoring/strategy.md",
+      "title": "Concord monitoring strategy",
+      "scope": "Production API SLOs, AWS infra health, CloudTrail security events, MLflow model drift",
+      "alert_owner": "platform-oncall@example.com",
+      "review_cadence": "Quarterly review of alert thresholds, monthly review of new alerts added",
+      "alert_quality_review": "Tracked in Datadog dashboard. FP rate < 15%, MTTA < 5min for SEV-1.",
+      "last_reviewed_at": "2026-03-15T00:00:00Z"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "scanned_paths": ["docs/policies"],
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "docs": [
+    {
+      "path": "docs/policies/information-security.md",
+      "policy_name": "information-security",
+      "version": "2.0",
+      "approved_by": "cto@example.com",
+      "approved_at": "2025-11-01T00:00:00Z",
+      "last_reviewed_at": "2026-02-01T00:00:00Z"
+    },
+    {
+      "path": "docs/policies/acceptable-use.md",
+      "policy_name": "acceptable-use",
+      "version": "1.1",
+      "approved_by": "ceo@example.com",
+      "approved_at": "2025-11-01T00:00:00Z",
+      "last_reviewed_at": "2026-02-01T00:00:00Z"
+    },
+    {
+      "path": "docs/policies/data-protection.md",
+      "policy_name": "data-protection",
+      "version": "1.0",
+      "approved_by": "cto@example.com",
+      "approved_at": "2025-11-01T00:00:00Z",
+      "last_reviewed_at": "2026-03-15T00:00:00Z"
+    },
+    {
+      "path": "docs/policies/access-control.md",
+      "policy_name": "access-control",
+      "version": "1.2",
+      "approved_by": "head-of-security@example.com",
+      "approved_at": "2025-11-01T00:00:00Z",
+      "last_reviewed_at": "2026-04-01T00:00:00Z"
+    }
+  ]
+}

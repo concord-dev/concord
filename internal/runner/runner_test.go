@@ -265,6 +265,54 @@ func TestRunCC7_2_MissingOwnerFails(t *testing.T) {
 	assert.Contains(t, f.Messages, `IR runbook "docs/incident-response/main.md" is missing required field "on_call_owner"`)
 }
 
+// --- SOC2-CC2.1 — Required policies published ---
+
+const cc21Path = "controls/frameworks/soc2/cc2.1-policy-communication.yaml"
+
+func TestRunCC2_1_Pass(t *testing.T) {
+	f := runSingleEv(t, cc21Path, "cc2.1-policies-pass.json")
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
+}
+
+func TestRunCC2_1_MissingPoliciesFails(t *testing.T) {
+	f := runSingleEv(t, cc21Path, "cc2.1-policies-missing.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, `required policy "acceptable-use" is missing from docs/policies/`)
+	assert.Contains(t, f.Messages, `required policy "access-control" is missing from docs/policies/`)
+	assert.Contains(t, f.Messages, `policy "docs/policies/data-protection.md" is missing required field "approved_by"`)
+}
+
+// --- SOC2-CC4.1 — Monitoring strategy ---
+
+const cc41Path = "controls/frameworks/soc2/cc4.1-monitoring-strategy.yaml"
+
+func TestRunCC4_1_Pass(t *testing.T) {
+	f := runSingleEv(t, cc41Path, "cc4.1-monitoring-pass.json")
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
+}
+
+func TestRunCC4_1_EmptyFails(t *testing.T) {
+	f := runSingleEv(t, cc41Path, "cc4.1-monitoring-empty.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, "no monitoring strategy doc found under docs/monitoring/")
+}
+
+// --- SOC2-CC5.1 — Control activities register ---
+
+const cc51Path = "controls/frameworks/soc2/cc5.1-control-activities-register.yaml"
+
+func TestRunCC5_1_Pass(t *testing.T) {
+	f := runSingleEv(t, cc51Path, "cc5.1-register-pass.json")
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
+}
+
+func TestRunCC5_1_TooFewEntriesFails(t *testing.T) {
+	f := runSingleEv(t, cc51Path, "cc5.1-register-too-few.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, "control-activities register has 2 entries; minimum is 5")
+	assert.Contains(t, f.Warnings, `control register entry "docs/control-activities/branch-protection.md" is ad_hoc — consider formalizing for audit`)
+}
+
 // runSingleEv is the helper for single-evidence controls.
 func runSingleEv(t *testing.T, controlRelPath, fixture string) apiv1.Finding {
 	t.Helper()

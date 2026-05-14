@@ -1,0 +1,22 @@
+{
+  "scanned_paths": ["docs/control-activities"],
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "docs": [
+    {
+      "path": "docs/control-activities/mfa-enforcement.md",
+      "control_id": "CC6.1",
+      "title": "MFA enforced on identity provider",
+      "owner": "it-security",
+      "status": "implemented",
+      "last_audited_at": "2026-04-15T00:00:00Z"
+    },
+    {
+      "path": "docs/control-activities/branch-protection.md",
+      "control_id": "CC8.1",
+      "title": "Default branch protected",
+      "owner": "platform",
+      "status": "ad_hoc",
+      "last_audited_at": "2026-04-22T00:00:00Z"
+    }
+  ]
+}
