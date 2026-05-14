@@ -163,6 +163,27 @@ func TestAWSCollector_S3_ListBucketsErrorPropagates(t *testing.T) {
 	assert.Contains(t, err.Error(), "access denied")
 }
 
+// accessDeniedErr fakes the smithy.APIError shape AWS returns on 403.
+type accessDeniedErr struct{ msg string }
+
+func (e *accessDeniedErr) Error() string                 { return e.msg }
+func (e *accessDeniedErr) ErrorCode() string             { return "AccessDenied" }
+func (e *accessDeniedErr) ErrorMessage() string          { return e.msg }
+func (e *accessDeniedErr) ErrorFault() smithy.ErrorFault { return smithy.FaultClient }
+
+func TestAWSCollector_AccessDeniedSurfacesIAMAction(t *testing.T) {
+	m := &mockS3{listErr: &accessDeniedErr{
+		msg: "User: arn:aws:iam::123:user/x is not authorized to perform: s3:ListAllMyBuckets because no identity-based policy allows the s3:ListAllMyBuckets action",
+	}}
+	c := evidence.NewAWSCollectorWith(evidence.WithS3(m))
+	_, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{Source: "aws", Type: "s3_bucket_encryption"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `missing IAM permission "s3:ListAllMyBuckets"`)
+	assert.Contains(t, err.Error(), "examples/iam-readonly-policy.json")
+	// Original verbose AWS arn line should NOT appear in the wrapped message.
+	assert.NotContains(t, err.Error(), "arn:aws:iam::")
+}
+
 // --- S3 public access block tests ---
 
 func TestAWSCollector_S3_PublicAccessBlock_AllConfigured(t *testing.T) {

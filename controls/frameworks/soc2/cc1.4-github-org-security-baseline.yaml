@@ -38,7 +38,10 @@ spec:
       type: org_security_policy
       fixture: ./tests/fixtures/cc1.4-org-pass.json
       params:
+        # Either set CONCORD_GITHUB_ORG explicitly, or let the collector
+        # auto-derive the org from CONCORD_REPO ("owner/repo" → "owner").
         org: ${env.CONCORD_GITHUB_ORG}
+        repo: ${env.CONCORD_REPO}
 
   policy:
     engine: rego

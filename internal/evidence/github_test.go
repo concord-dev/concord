@@ -351,6 +351,23 @@ func TestGitHubCollector_OrgSecurityPolicy_MissingOrgErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "org")
 }
 
+func TestGitHubCollector_OrgSecurityPolicy_DerivesOrgFromRepo(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/orgs/concord-dev", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"login":"concord-dev","two_factor_requirement_enabled":true}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := evidence.NewGitHubCollector("t").SetBaseURL(srv.URL)
+	v, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{
+		Source: "github", Type: "org_security_policy",
+		Params: map[string]any{"repo": "concord-dev/concord"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "concord-dev", v.(map[string]any)["org"])
+}
+
 func TestGitHubCollector_EnvSubstitution(t *testing.T) {
 	t.Setenv("CONCORD_TEST_REPO", "owner/repo")
 

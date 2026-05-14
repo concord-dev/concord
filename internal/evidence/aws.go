@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -104,7 +105,7 @@ func (c *AWSCollector) collectS3BucketEncryption(ref apiv1.EvidenceRef) (any, er
 
 	listOut, err := c.s3.ListBuckets(ctx, &s3.ListBucketsInput{})
 	if err != nil {
-		return nil, fmt.Errorf("listing buckets: %w", err)
+		return nil, wrapAWSError("listing buckets", err)
 	}
 
 	buckets := make([]map[string]any, 0, len(listOut.Buckets))
@@ -122,7 +123,7 @@ func (c *AWSCollector) collectS3BucketEncryption(ref apiv1.EvidenceRef) (any, er
 		case isNoEncryptionError(err):
 			bucket["encryption"] = map[string]any{"configured": false, "rules": []any{}}
 		default:
-			return nil, fmt.Errorf("getting encryption for %s: %w", name, err)
+			return nil, wrapAWSError(fmt.Sprintf("getting encryption for %s", name), err)
 		}
 
 		buckets = append(buckets, bucket)
@@ -162,6 +163,43 @@ func isNoEncryptionError(err error) bool {
 	return false
 }
 
+// wrapAWSError improves AWS API error messages. AccessDenied errors are
+// reduced to "missing IAM permission <action>" so users see immediately
+// which IAM action to grant. Other errors propagate with a stage prefix.
+func wrapAWSError(stage string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		code := apiErr.ErrorCode()
+		if code == "AccessDenied" || code == "AccessDeniedException" {
+			if action := extractDeniedAction(apiErr.ErrorMessage()); action != "" {
+				return fmt.Errorf("%s: missing IAM permission %q — attach a policy with this action (see examples/iam-readonly-policy.json)", stage, action)
+			}
+			return fmt.Errorf("%s: access denied — %s", stage, apiErr.ErrorMessage())
+		}
+	}
+	return fmt.Errorf("%s: %w", stage, err)
+}
+
+// extractDeniedAction pulls the IAM action name from an AccessDenied message like
+// "User: arn:... is not authorized to perform: iam:GetAccountSummary on resource: * ..."
+// Returns "" when the message is unparseable.
+func extractDeniedAction(msg string) string {
+	const marker = "is not authorized to perform: "
+	i := strings.Index(msg, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := msg[i+len(marker):]
+	end := strings.IndexAny(rest, " \t\n")
+	if end < 0 {
+		return rest
+	}
+	return rest[:end]
+}
+
 // ---------------- S3 public access block ----------------
 
 func (c *AWSCollector) collectS3PublicAccessBlock(ref apiv1.EvidenceRef) (any, error) {
@@ -170,7 +208,7 @@ func (c *AWSCollector) collectS3PublicAccessBlock(ref apiv1.EvidenceRef) (any, e
 
 	listOut, err := c.s3.ListBuckets(ctx, &s3.ListBucketsInput{})
 	if err != nil {
-		return nil, fmt.Errorf("listing buckets: %w", err)
+		return nil, wrapAWSError("listing buckets", err)
 	}
 
 	buckets := make([]map[string]any, 0, len(listOut.Buckets))
@@ -190,7 +228,7 @@ func (c *AWSCollector) collectS3PublicAccessBlock(ref apiv1.EvidenceRef) (any, e
 				"restrict_public_buckets": false,
 			}
 		default:
-			return nil, fmt.Errorf("getting public access block for %s: %w", name, err)
+			return nil, wrapAWSError(fmt.Sprintf("getting public access block for %s", name), err)
 		}
 		buckets = append(buckets, entry)
 	}
@@ -228,7 +266,7 @@ func (c *AWSCollector) collectIAMAccountSummary(ref apiv1.EvidenceRef) (any, err
 
 	out, err := c.iam.GetAccountSummary(ctx, &iam.GetAccountSummaryInput{})
 	if err != nil {
-		return nil, fmt.Errorf("get account summary: %w", err)
+		return nil, wrapAWSError("get account summary", err)
 	}
 
 	summary := map[string]any{}
@@ -250,7 +288,7 @@ func (c *AWSCollector) collectCloudTrailTrails(ref apiv1.EvidenceRef) (any, erro
 
 	out, err := c.cloudtrail.DescribeTrails(ctx, &cloudtrail.DescribeTrailsInput{})
 	if err != nil {
-		return nil, fmt.Errorf("describing trails: %w", err)
+		return nil, wrapAWSError("describing trails", err)
 	}
 
 	trails := make([]map[string]any, 0, len(out.TrailList))
@@ -267,7 +305,7 @@ func (c *AWSCollector) collectCloudTrailTrails(ref apiv1.EvidenceRef) (any, erro
 
 		status, err := c.cloudtrail.GetTrailStatus(ctx, &cloudtrail.GetTrailStatusInput{Name: t.TrailARN})
 		if err != nil {
-			return nil, fmt.Errorf("getting status for trail %s: %w", name, err)
+			return nil, wrapAWSError(fmt.Sprintf("getting status for trail %s", name), err)
 		}
 		trail["is_logging"] = aws.ToBool(status.IsLogging)
 		trails = append(trails, trail)

@@ -96,7 +96,14 @@ func (c *GitHubCollector) collectBranchProtection(ref apiv1.EvidenceRef) (any, e
 func (c *GitHubCollector) collectOrgSecurityPolicy(ref apiv1.EvidenceRef) (any, error) {
 	org := StringParam(ref.Params, "org", "")
 	if org == "" {
-		return nil, fmt.Errorf("missing required param %q", "org")
+		// Auto-derive from a "owner/repo" string if provided.
+		repo := StringParam(ref.Params, "repo", "")
+		if idx := strings.Index(repo, "/"); idx > 0 {
+			org = repo[:idx]
+		}
+	}
+	if org == "" {
+		return nil, fmt.Errorf("missing required param %q (set explicitly or supply %q to auto-derive)", "org", "repo")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
