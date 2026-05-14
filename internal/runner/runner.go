@@ -16,11 +16,19 @@ import (
 type Runner struct {
 	engine    *policy.Engine
 	collector evidence.Collector
+	params    map[string]map[string]any
 }
 
 // New constructs a Runner.
 func New(engine *policy.Engine, collector evidence.Collector) *Runner {
 	return &Runner{engine: engine, collector: collector}
+}
+
+// SetParams installs a per-control parameter override map. Each control's
+// params (keyed by control ID) are exposed to Rego at input._concord.params.
+func (r *Runner) SetParams(p map[string]map[string]any) *Runner {
+	r.params = p
+	return r
 }
 
 // Run evaluates a single control and returns its finding.
@@ -32,6 +40,7 @@ func (r *Runner) Run(ctx context.Context, loaded controls.Loaded) apiv1.Finding 
 		Title:       c.Metadata.Title,
 		Framework:   c.Metadata.Framework,
 		Severity:    c.Metadata.Severity,
+		Mappings:    c.Spec.Mappings,
 		EvaluatedAt: start.UTC(),
 	}
 
@@ -44,6 +53,16 @@ func (r *Runner) Run(ctx context.Context, loaded controls.Loaded) apiv1.Finding 
 		f.DurationMs = time.Since(start).Milliseconds()
 		return f
 	}
+
+	params := map[string]any{}
+	if r.params != nil {
+		if p, ok := r.params[c.Metadata.ID]; ok {
+			for k, v := range p {
+				params[k] = v
+			}
+		}
+	}
+	input["_concord"] = map[string]any{"params": params}
 
 	regoPath := c.Spec.Policy.File
 	if !filepath.IsAbs(regoPath) {

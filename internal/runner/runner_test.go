@@ -50,6 +50,35 @@ func TestRunCC8_1ForcePushAndAdminBypass(t *testing.T) {
 	assert.Contains(t, f.Messages, "branch protection does not apply to administrators (enforce_admins is off)")
 }
 
+func TestRunCC8_1ParamOverride_StricterReviewerCount(t *testing.T) {
+	controlPath := filepath.Join(repoRoot(t), cc81Path)
+	c, err := controls.LoadFile(controlPath)
+	require.NoError(t, err)
+	c.Spec.Evidence[0].Fixture = "./tests/fixtures/cc8.1-pass.json"
+
+	// The pass fixture has required_approving_review_count = 2.
+	// With default min_reviewers = 1, this passes. With override min_reviewers = 3, it must fail.
+	r := New(policy.New(), evidence.NewFileCollector()).SetParams(map[string]map[string]any{
+		"SOC2-CC8.1": {"min_reviewers": 3},
+	})
+	f := r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
+
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, "default branch requires 2 approving reviews; minimum is 3")
+}
+
+func TestRunCC8_1ParamOverride_DefaultStillWorks(t *testing.T) {
+	controlPath := filepath.Join(repoRoot(t), cc81Path)
+	c, err := controls.LoadFile(controlPath)
+	require.NoError(t, err)
+	c.Spec.Evidence[0].Fixture = "./tests/fixtures/cc8.1-pass.json"
+
+	// No params installed → default of 1 applies → fixture (which has 2 reviewers) passes.
+	r := New(policy.New(), evidence.NewFileCollector())
+	f := r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v", f.Messages)
+}
+
 func runFixture(t *testing.T, fixture string) apiv1.Finding {
 	t.Helper()
 	controlPath := filepath.Join(repoRoot(t), cc81Path)

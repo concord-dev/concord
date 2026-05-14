@@ -20,7 +20,11 @@ func sampleFindings() []apiv1.Finding {
 		{
 			ControlID: "SOC2-CC8.1", Title: "Default branch is protected",
 			Framework: "soc2", Severity: "high",
-			Status:      apiv1.StatusPass,
+			Status: apiv1.StatusPass,
+			Mappings: map[string][]string{
+				"iso27001": {"A.8.30", "A.8.32"},
+				"nist_csf": {"PR.IP-3"},
+			},
 			EvaluatedAt: t0, DurationMs: 3,
 		},
 		{
@@ -121,6 +125,19 @@ func TestOSCALRenderer_ProducesValidEnvelope(t *testing.T) {
 
 	observations := r0["observations"].([]any)
 	assert.GreaterOrEqual(t, len(observations), 2, "expected observations for fail + error findings")
+
+	// Crosswalk: SOC2-CC8.1 has mappings to iso27001 and nist_csf — both should appear as props.
+	props := first["props"].([]any)
+	var mappedValues []string
+	for _, p := range props {
+		pm := p.(map[string]any)
+		if pm["name"] == "mapped-control" {
+			mappedValues = append(mappedValues, pm["value"].(string))
+		}
+	}
+	assert.Contains(t, mappedValues, "iso27001:A.8.30")
+	assert.Contains(t, mappedValues, "iso27001:A.8.32")
+	assert.Contains(t, mappedValues, "nist_csf:PR.IP-3")
 }
 
 func TestMarkdownRenderer(t *testing.T) {

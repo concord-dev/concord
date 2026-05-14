@@ -7,7 +7,12 @@ import rego.v1
 #   input.model_registry.models[]      — production AI inventory from MLflow/W&B/HF
 #   input.risk_assessments.docs[]      — parsed risk-assessment documents
 
-max_age_days := 365
+# Configurable: maximum age of a risk assessment in days.
+# Override per-repo via concord.yaml: controls.params.ISO42001-6.1.max_age_days
+max_age_days := n if {
+    n := input._concord.params.max_age_days
+} else := 365
+
 valid_tiers := {"minimal", "limited", "high", "prohibited"}
 required_doc_fields := ["intended_use", "foreseeable_misuse", "affected_populations", "residual_risk"]
 nanos_per_day := 86400000000000

@@ -1,0 +1,32 @@
+{
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "buckets": [
+    {
+      "name": "concord-legacy-backups",
+      "creation_date": "2023-06-10T00:00:00Z",
+      "encryption": {
+        "configured": true,
+        "rules": [
+          {
+            "sse_algorithm": "AES256",
+            "bucket_key_enabled": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "concord-kms-no-bucket-key",
+      "creation_date": "2024-12-01T00:00:00Z",
+      "encryption": {
+        "configured": true,
+        "rules": [
+          {
+            "sse_algorithm": "aws:kms",
+            "kms_key": "arn:aws:kms:us-east-1:123456789012:key/legacy",
+            "bucket_key_enabled": false
+          }
+        ]
+      }
+    }
+  ]
+}

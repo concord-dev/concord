@@ -73,13 +73,14 @@ const (
 
 // Finding is the result of evaluating a single control.
 type Finding struct {
-	ControlID   string        `json:"control_id"`
-	Title       string        `json:"title"`
-	Framework   string        `json:"framework"`
-	Severity    string        `json:"severity"`
-	Status      FindingStatus `json:"status"`
-	Messages    []string      `json:"messages,omitempty"`
-	Warnings    []string      `json:"warnings,omitempty"`
-	EvaluatedAt time.Time     `json:"evaluated_at"`
-	DurationMs  int64         `json:"duration_ms"`
+	ControlID   string              `json:"control_id"`
+	Title       string              `json:"title"`
+	Framework   string              `json:"framework"`
+	Severity    string              `json:"severity"`
+	Status      FindingStatus       `json:"status"`
+	Messages    []string            `json:"messages,omitempty"`
+	Warnings    []string            `json:"warnings,omitempty"`
+	Mappings    map[string][]string `json:"mappings,omitempty"`
+	EvaluatedAt time.Time           `json:"evaluated_at"`
+	DurationMs  int64               `json:"duration_ms"`
 }

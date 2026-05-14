@@ -6,7 +6,11 @@ import rego.v1
 # Input shape: input.branch_protection is the normalized GitHub branch
 # protection response: { repo, branch, protected, protection: {...} }.
 
-default_min_reviewers := 1
+# Configurable: minimum approving reviews required on the default branch.
+# Override per-repo via concord.yaml: controls.params.SOC2-CC8.1.min_reviewers
+min_reviewers := n if {
+    n := input._concord.params.min_reviewers
+} else := 1
 
 deny contains msg if {
     not input.branch_protection
@@ -28,8 +32,8 @@ deny contains msg if {
 deny contains msg if {
     input.branch_protection.protected == true
     reviews := input.branch_protection.protection.required_pull_request_reviews.required_approving_review_count
-    reviews < default_min_reviewers
-    msg := sprintf("default branch requires %d approving reviews; minimum is %d", [reviews, default_min_reviewers])
+    reviews < min_reviewers
+    msg := sprintf("default branch requires %d approving reviews; minimum is %d", [reviews, min_reviewers])
 }
 
 deny contains msg if {

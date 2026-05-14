@@ -3,6 +3,7 @@ package report
 import (
 	"encoding/json"
 	"io"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -79,11 +80,40 @@ func buildOSCALResult(findings []apiv1.Finding, ts string) oscalResult {
 			UUID:                uuid.NewString(),
 			Title:               f.ControlID + " — " + f.Title,
 			Description:         f.Title,
+			Props:               buildMappingProps(f),
 			Target:              oscalTarget{Type: "objective-id", TargetID: f.ControlID, Status: oscalStatus{State: state}},
 			RelatedObservations: obsRefs,
 		})
 	}
 	return res
+}
+
+// buildMappingProps emits the control's crosswalk to other frameworks as
+// OSCAL `props`. Auditors use these to see that one Concord evaluation
+// covers multiple framework requirements (e.g., SOC 2 + ISO 27001 + NIST).
+func buildMappingProps(f apiv1.Finding) []oscalProp {
+	props := []oscalProp{
+		{Name: "framework", Value: f.Framework, NS: "https://concord.dev/ns"},
+		{Name: "severity", Value: f.Severity, NS: "https://concord.dev/ns"},
+	}
+	if len(f.Mappings) == 0 {
+		return props
+	}
+	keys := make([]string, 0, len(f.Mappings))
+	for k := range f.Mappings {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, framework := range keys {
+		for _, controlRef := range f.Mappings[framework] {
+			props = append(props, oscalProp{
+				Name:  "mapped-control",
+				Value: framework + ":" + controlRef,
+				NS:    "https://concord.dev/ns/crosswalk",
+			})
+		}
+	}
+	return props
 }
 
 type oscalEnvelope struct {
@@ -123,8 +153,15 @@ type oscalFinding struct {
 	UUID                string                `json:"uuid"`
 	Title               string                `json:"title"`
 	Description         string                `json:"description"`
+	Props               []oscalProp           `json:"props,omitempty"`
 	Target              oscalTarget           `json:"target"`
 	RelatedObservations []oscalObservationRef `json:"related-observations,omitempty"`
+}
+
+type oscalProp struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+	NS    string `json:"ns,omitempty"`
 }
 
 type oscalTarget struct {

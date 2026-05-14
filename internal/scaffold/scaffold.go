@@ -137,13 +137,21 @@ metadata:
 controls:
   path: ./controls
 
-evidence:
-  collectors:
-    github:
-      enabled: true
-      # Concord reads CONCORD_GITHUB_TOKEN (preferred) or GITHUB_TOKEN.
-      # Set CONCORD_REPO=owner/name in env to override the ${env.CONCORD_REPO}
-      # references in shipped controls.
+  # Override per-control policy parameters here. Each entry below is keyed
+  # by control ID and contains parameters the control's Rego policy reads
+  # from input._concord.params. Defaults are defined in each .rego file
+  # — uncomment to tighten or loosen.
+  #
+  # params:
+  #   SOC2-CC8.1:
+  #     min_reviewers: 2
+  #   ISO42001-6.1:
+  #     max_age_days: 90
+
+# Concord reads CONCORD_GITHUB_TOKEN (preferred) or GITHUB_TOKEN for the
+# github collector. For AWS the standard credential chain (env vars,
+# ~/.aws/credentials, IAM role) is honored. Set CONCORD_REPO=owner/name
+# in env to populate the ${env.CONCORD_REPO} references in shipped controls.
 `
 
 const githubActionTemplate = `name: Concord Compliance Check
