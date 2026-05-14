@@ -30,10 +30,11 @@ spec:
   evidence:
     - id: branch_protection
       source: github
-      type: api
+      type: branch_protection
       fixture: ./tests/fixtures/cc8.1-pass.json
       params:
-        endpoint: /repos/{owner}/{repo}/branches/{branch}/protection
+        repo: ${env.CONCORD_REPO}
+        branch: main
 
   policy:
     engine: rego
