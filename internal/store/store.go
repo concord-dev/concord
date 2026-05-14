@@ -12,7 +12,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/netip"
 	"time"
 
 	"github.com/google/uuid"
@@ -643,21 +642,24 @@ func (s *Store) RevokeAPIToken(ctx context.Context, orgID, tokenID uuid.UUID) er
 // ─── User sessions ──────────────────────────────────────────────────────
 
 // Session is one browser session. The plaintext token is returned only at
-// creation; the row stores its sha256 hash.
+// creation; the row stores its sha256 hash. IP is read back via INET::text
+// because pgx's default codec for netip.Addr in nullable columns isn't
+// reliable across versions — string round-trips cleanly.
 type Session struct {
 	ID         uuid.UUID  `json:"id"`
 	UserID     uuid.UUID  `json:"user_id"`
 	ExpiresAt  time.Time  `json:"expires_at"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
-	IP         *netip.Addr `json:"ip,omitempty"`
+	IP         string     `json:"ip,omitempty"`
 	UserAgent  string     `json:"user_agent,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
 // CreateSession mints a new session token for userID. ttl is how long the
 // session is valid (typical: 24h–7d). ip/userAgent are recorded for the
-// "active sessions" UI; either may be empty.
+// "active sessions" UI; either may be empty. ip must parse as INET or
+// Postgres rejects the insert — pass an empty string when unknown.
 func (s *Store) CreateSession(ctx context.Context, userID uuid.UUID, ttl time.Duration, ip, userAgent string) (Session, string, error) {
 	plaintext, err := auth.GenerateSecret(auth.SessionTokenPrefix, 32)
 	if err != nil {
@@ -666,20 +668,13 @@ func (s *Store) CreateSession(ctx context.Context, userID uuid.UUID, ttl time.Du
 	hash := auth.HashSecret(plaintext)
 	expires := time.Now().UTC().Add(ttl)
 
-	var ipPtr *netip.Addr
-	if ip != "" {
-		parsed, err := netip.ParseAddr(ip)
-		if err == nil {
-			ipPtr = &parsed
-		}
-	}
-
 	var sess Session
 	err = s.pool.QueryRow(ctx,
 		`INSERT INTO user_session(user_id, token_hash, expires_at, ip, user_agent)
-		 VALUES ($1, $2, $3, $4, NULLIF($5,''))
-		 RETURNING id, user_id, expires_at, last_used_at, revoked_at, ip, user_agent, created_at`,
-		userID, hash, expires, ipPtr, userAgent,
+		 VALUES ($1, $2, $3, NULLIF($4,'')::inet, NULLIF($5,''))
+		 RETURNING id, user_id, expires_at, last_used_at, revoked_at,
+		           COALESCE(host(ip), ''), COALESCE(user_agent,''), created_at`,
+		userID, hash, expires, ip, userAgent,
 	).Scan(&sess.ID, &sess.UserID, &sess.ExpiresAt, &sess.LastUsedAt,
 		&sess.RevokedAt, &sess.IP, &sess.UserAgent, &sess.CreatedAt)
 	if err != nil {
@@ -696,7 +691,8 @@ func (s *Store) ResolveSession(ctx context.Context, plaintext string) (Session, 
 	err := s.pool.QueryRow(ctx,
 		`UPDATE user_session SET last_used_at = now()
 		 WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
-		 RETURNING id, user_id, expires_at, last_used_at, revoked_at, ip, user_agent, created_at`,
+		 RETURNING id, user_id, expires_at, last_used_at, revoked_at,
+		           COALESCE(host(ip), ''), COALESCE(user_agent,''), created_at`,
 		hash,
 	).Scan(&sess.ID, &sess.UserID, &sess.ExpiresAt, &sess.LastUsedAt,
 		&sess.RevokedAt, &sess.IP, &sess.UserAgent, &sess.CreatedAt)

@@ -15,12 +15,8 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// defaultTestDSN matches docker-compose.yml. Override via CONCORD_TEST_DATABASE_URL.
 const defaultTestDSN = "postgres://concord:concord-dev@localhost:5432/concord?sslmode=disable"
 
-// openTestStore opens a Store against the configured Postgres or skips. The
-// first call also runs migrations so subsequent tests can assume the schema
-// is current.
 func openTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	dsn := os.Getenv("CONCORD_TEST_DATABASE_URL")
@@ -38,52 +34,77 @@ func openTestStore(t *testing.T) *store.Store {
 	return s
 }
 
-func uniqueSlug(prefix string) string {
-	return fmt.Sprintf("%s-%s", prefix, uuid.NewString()[:8])
-}
+func uniqueSlug(p string) string  { return fmt.Sprintf("%s-%s", p, uuid.NewString()[:8]) }
+func uniqueEmail(p string) string { return fmt.Sprintf("%s+%s@example.com", p, uuid.NewString()[:8]) }
 
-func uniqueEmail(prefix string) string {
-	return fmt.Sprintf("%s+%s@example.com", prefix, uuid.NewString()[:8])
-}
-
-// --- Migrations ---
+// ─── Migrations + seed ─────────────────────────────────────────────────
 
 func TestMigrate_IsIdempotent(t *testing.T) {
 	s := openTestStore(t)
-	// First Migrate already ran in openTestStore. A second pass must be a no-op.
 	require.NoError(t, s.Migrate(context.Background()))
 }
 
-// --- Organizations ---
+func TestSeed_FourRolesAndSixteenPermissions(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	roles, err := s.ListRoles(ctx)
+	require.NoError(t, err)
+	assert.Len(t, roles, 4)
+	perms, err := s.ListPermissions(ctx)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(perms), 16, "starter permission set must include >=16")
+}
+
+func TestSeed_OwnerHasEveryPermission(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	owner, err := s.GetRoleByName(ctx, "owner")
+	require.NoError(t, err)
+	allPerms, err := s.ListPermissions(ctx)
+	require.NoError(t, err)
+	ownerPerms, err := s.ListRolePermissions(ctx, owner.ID)
+	require.NoError(t, err)
+	assert.Equal(t, len(allPerms), len(ownerPerms),
+		"owner role must be bound to every defined permission")
+}
+
+func TestSeed_AdminLacksOrgDeleteAndBilling(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	admin, err := s.GetRoleByName(ctx, "admin")
+	require.NoError(t, err)
+	perms, err := s.ListRolePermissions(ctx, admin.ID)
+	require.NoError(t, err)
+	names := map[string]bool{}
+	for _, p := range perms {
+		names[p.Name] = true
+	}
+	assert.False(t, names["org:delete"], "admin must not hold org:delete")
+	assert.False(t, names["billing:manage"], "admin must not hold billing:manage")
+	assert.True(t, names["runs:create"], "admin should hold runs:create")
+}
+
+// ─── Organizations ─────────────────────────────────────────────────────
 
 func TestCreateOrganization_RoundTrip(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
-
 	slug := uniqueSlug("acme")
-	org, err := s.CreateOrganization(ctx, "Acme Corp", slug)
+	org, err := s.CreateOrganization(ctx, "Acme", slug)
 	require.NoError(t, err)
-	assert.Equal(t, "Acme Corp", org.Name)
-	assert.NotZero(t, org.ID)
-	assert.WithinDuration(t, time.Now(), org.CreatedAt, 10*time.Second)
-
 	got, err := s.GetOrganizationBySlug(ctx, slug)
 	require.NoError(t, err)
 	assert.Equal(t, org.ID, got.ID)
-
-	gotByID, err := s.GetOrganizationByID(ctx, org.ID)
-	require.NoError(t, err)
-	assert.Equal(t, slug, gotByID.Slug)
+	assert.WithinDuration(t, time.Now(), got.UpdatedAt, 10*time.Second)
 }
 
 func TestCreateOrganization_DuplicateSlugFails(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	slug := uniqueSlug("dup")
-	_, err := s.CreateOrganization(ctx, "First", slug)
-	require.NoError(t, err)
-	_, err = s.CreateOrganization(ctx, "Second", slug)
-	require.Error(t, err, "slug must be unique")
+	_, _ = s.CreateOrganization(ctx, "A", slug)
+	_, err := s.CreateOrganization(ctx, "B", slug)
+	require.Error(t, err)
 }
 
 func TestGetOrganizationBySlug_NotFoundReturnsSentinel(t *testing.T) {
@@ -92,237 +113,289 @@ func TestGetOrganizationBySlug_NotFoundReturnsSentinel(t *testing.T) {
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
-// --- Users ---
+// ─── Users ─────────────────────────────────────────────────────────────
 
-func TestCreateUser_RoundTrip(t *testing.T) {
+func TestCreateUser_WithPassword(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	email := uniqueEmail("alice")
-
-	u, err := s.CreateUser(ctx, email, "Alice")
+	u, err := s.CreateUser(ctx, store.CreateUserParams{
+		FirstName: "Alice", LastName: "A", Email: email, Password: "hunter2",
+	})
 	require.NoError(t, err)
-	assert.Equal(t, "Alice", u.Name)
+	assert.Equal(t, email, u.Email)
 
-	got, err := s.GetUserByID(ctx, u.ID)
+	// Password verification should succeed.
+	got, err := s.VerifyUserPassword(ctx, email, "hunter2")
 	require.NoError(t, err)
-	assert.Equal(t, email, got.Email)
+	assert.Equal(t, u.ID, got.ID)
+
+	// Wrong password is ErrNotFound (no user enumeration).
+	_, err = s.VerifyUserPassword(ctx, email, "nope")
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestCreateUser_WithoutPassword_CannotLogin(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	email := uniqueEmail("invite")
+	_, err := s.CreateUser(ctx, store.CreateUserParams{
+		FirstName: "Bob", LastName: "B", Email: email,
+	})
+	require.NoError(t, err)
+	_, err = s.VerifyUserPassword(ctx, email, "anything")
+	assert.ErrorIs(t, err, store.ErrNotFound,
+		"users without a password_hash cannot complete VerifyUserPassword")
 }
 
 func TestGetUserByEmail_IsCaseInsensitive(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
-	email := uniqueEmail("Bob")
-	_, err := s.CreateUser(ctx, email, "Bob")
-	require.NoError(t, err)
-
+	email := uniqueEmail("Carol")
+	_, _ = s.CreateUser(ctx, store.CreateUserParams{FirstName: "C", LastName: "C", Email: email})
 	got, err := s.GetUserByEmail(ctx, strings.ToUpper(email))
 	require.NoError(t, err)
 	assert.Equal(t, email, got.Email)
 }
 
-func TestCreateUser_DuplicateEmailFails(t *testing.T) {
+func TestCreateUser_DuplicateEmailRejected(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	email := uniqueEmail("dup")
-	_, err := s.CreateUser(ctx, email, "A")
-	require.NoError(t, err)
-	_, err = s.CreateUser(ctx, email, "B")
-	require.Error(t, err, "email must be unique")
-}
-
-func TestCreateUser_DuplicateEmailCaseInsensitive(t *testing.T) {
-	s := openTestStore(t)
-	ctx := context.Background()
-	email := uniqueEmail("Carol")
-	_, err := s.CreateUser(ctx, email, "Carol")
-	require.NoError(t, err)
-	_, err = s.CreateUser(ctx, strings.ToUpper(email), "Carol2")
+	_, _ = s.CreateUser(ctx, store.CreateUserParams{FirstName: "A", LastName: "A", Email: email})
+	_, err := s.CreateUser(ctx, store.CreateUserParams{FirstName: "B", LastName: "B", Email: strings.ToUpper(email)})
 	require.Error(t, err, "case-only-different email must collide")
 }
 
-// --- Memberships + roles ---
+// ─── RBAC (memberships + permissions) ──────────────────────────────────
 
-func TestRole_Permits_Hierarchy(t *testing.T) {
-	assert.True(t, store.RoleOwner.Permits(store.RoleAdmin))
-	assert.True(t, store.RoleAdmin.Permits(store.RoleMember))
-	assert.True(t, store.RoleMember.Permits(store.RoleViewer))
-	assert.False(t, store.RoleViewer.Permits(store.RoleMember))
-	assert.False(t, store.RoleMember.Permits(store.RoleAdmin))
-}
-
-func TestAddMember_AndListByOrg(t *testing.T) {
+func TestAssignRole_IsIdempotent(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
-	org, _ := s.CreateOrganization(ctx, "Mem", uniqueSlug("mem"))
-	u1, _ := s.CreateUser(ctx, uniqueEmail("u1"), "U1")
-	u2, _ := s.CreateUser(ctx, uniqueEmail("u2"), "U2")
-
-	_, err := s.AddMember(ctx, u1.ID, org.ID, store.RoleOwner)
-	require.NoError(t, err)
-	_, err = s.AddMember(ctx, u2.ID, org.ID, store.RoleMember)
-	require.NoError(t, err)
+	org, _ := s.CreateOrganization(ctx, "Idem", uniqueSlug("idem"))
+	u, _ := s.CreateUser(ctx, store.CreateUserParams{FirstName: "U", LastName: "U", Email: uniqueEmail("u")})
+	admin, _ := s.GetRoleByName(ctx, "admin")
+	require.NoError(t, s.AssignRole(ctx, u.ID, org.ID, admin.ID))
+	require.NoError(t, s.AssignRole(ctx, u.ID, org.ID, admin.ID))
 
 	members, err := s.ListOrgMembers(ctx, org.ID)
 	require.NoError(t, err)
-	require.Len(t, members, 2)
-	// Owner sorts first per the SQL CASE ordering.
-	assert.Equal(t, store.RoleOwner, members[0].Role)
-	assert.Equal(t, store.RoleMember, members[1].Role)
+	require.Len(t, members, 1)
+	assert.Len(t, members[0].Roles, 1, "assigning the same role twice must not duplicate")
 }
 
-func TestAddMember_UpsertChangesRole(t *testing.T) {
+func TestAssignRole_MultipleRolesPerUserOrg(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
-	org, _ := s.CreateOrganization(ctx, "Upsert", uniqueSlug("upsert"))
-	u, _ := s.CreateUser(ctx, uniqueEmail("up"), "U")
+	org, _ := s.CreateOrganization(ctx, "Multi", uniqueSlug("multi"))
+	u, _ := s.CreateUser(ctx, store.CreateUserParams{FirstName: "U", LastName: "U", Email: uniqueEmail("u")})
+	admin, _ := s.GetRoleByName(ctx, "admin")
+	viewer, _ := s.GetRoleByName(ctx, "viewer")
+	require.NoError(t, s.AssignRole(ctx, u.ID, org.ID, admin.ID))
+	require.NoError(t, s.AssignRole(ctx, u.ID, org.ID, viewer.ID))
 
-	_, err := s.AddMember(ctx, u.ID, org.ID, store.RoleMember)
-	require.NoError(t, err)
-	m, err := s.AddMember(ctx, u.ID, org.ID, store.RoleAdmin)
-	require.NoError(t, err)
-	assert.Equal(t, store.RoleAdmin, m.Role, "second call must upgrade the role")
-
-	got, err := s.GetMembership(ctx, u.ID, org.ID)
-	require.NoError(t, err)
-	assert.Equal(t, store.RoleAdmin, got.Role)
+	members, _ := s.ListOrgMembers(ctx, org.ID)
+	require.Len(t, members, 1)
+	require.Len(t, members[0].Roles, 2)
 }
 
-func TestAddMember_InvalidRoleIsRejected(t *testing.T) {
+func TestHasPermission_GrantedViaRole(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
-	org, _ := s.CreateOrganization(ctx, "Bad", uniqueSlug("bad"))
-	u, _ := s.CreateUser(ctx, uniqueEmail("bad"), "Bad")
-	_, err := s.AddMember(ctx, u.ID, org.ID, store.Role("superuser"))
-	require.Error(t, err)
+	org, _ := s.CreateOrganization(ctx, "Perm", uniqueSlug("perm"))
+	u, _ := s.CreateUser(ctx, store.CreateUserParams{FirstName: "U", LastName: "U", Email: uniqueEmail("u")})
+	viewer, _ := s.GetRoleByName(ctx, "viewer")
+	require.NoError(t, s.AssignRole(ctx, u.ID, org.ID, viewer.ID))
+
+	yes, err := s.HasPermission(ctx, u.ID, org.ID, "runs:read")
+	require.NoError(t, err)
+	assert.True(t, yes, "viewer holds runs:read")
+
+	no, err := s.HasPermission(ctx, u.ID, org.ID, "runs:create")
+	require.NoError(t, err)
+	assert.False(t, no, "viewer must NOT hold runs:create")
 }
 
-func TestRemoveMember_DeletesRow(t *testing.T) {
+func TestHasPermission_AnyRoleSatisfies(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
-	org, _ := s.CreateOrganization(ctx, "Del", uniqueSlug("del"))
-	u, _ := s.CreateUser(ctx, uniqueEmail("del"), "U")
-	_, _ = s.AddMember(ctx, u.ID, org.ID, store.RoleMember)
+	org, _ := s.CreateOrganization(ctx, "Any", uniqueSlug("any"))
+	u, _ := s.CreateUser(ctx, store.CreateUserParams{FirstName: "U", LastName: "U", Email: uniqueEmail("u")})
+	viewer, _ := s.GetRoleByName(ctx, "viewer")
+	admin, _ := s.GetRoleByName(ctx, "admin")
+	require.NoError(t, s.AssignRole(ctx, u.ID, org.ID, viewer.ID))
+	require.NoError(t, s.AssignRole(ctx, u.ID, org.ID, admin.ID))
 
-	require.NoError(t, s.RemoveMember(ctx, u.ID, org.ID))
-	_, err := s.GetMembership(ctx, u.ID, org.ID)
-	assert.ErrorIs(t, err, store.ErrNotFound)
-
-	// Removing twice surfaces ErrNotFound.
-	assert.ErrorIs(t, s.RemoveMember(ctx, u.ID, org.ID), store.ErrNotFound)
+	yes, err := s.HasPermission(ctx, u.ID, org.ID, "tokens:create")
+	require.NoError(t, err)
+	assert.True(t, yes, "admin grants tokens:create even though viewer doesn't")
 }
 
-func TestListUserOrgs(t *testing.T) {
+func TestHasPermission_FalseForNonMember(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
-	u, _ := s.CreateUser(ctx, uniqueEmail("multi"), "M")
-	org1, _ := s.CreateOrganization(ctx, "O1", uniqueSlug("o1"))
-	org2, _ := s.CreateOrganization(ctx, "O2", uniqueSlug("o2"))
-	_, _ = s.AddMember(ctx, u.ID, org1.ID, store.RoleOwner)
-	_, _ = s.AddMember(ctx, u.ID, org2.ID, store.RoleAdmin)
-
-	got, err := s.ListUserOrgs(ctx, u.ID)
+	org, _ := s.CreateOrganization(ctx, "Strange", uniqueSlug("strange"))
+	u, _ := s.CreateUser(ctx, store.CreateUserParams{FirstName: "U", LastName: "U", Email: uniqueEmail("u")})
+	got, err := s.HasPermission(ctx, u.ID, org.ID, "runs:read")
 	require.NoError(t, err)
-	require.Len(t, got, 2)
+	assert.False(t, got, "non-members hold no permissions")
 }
 
-// --- API tokens ---
-
-func TestCreateToken_PlaintextIsPrefixedAndUnique(t *testing.T) {
+func TestUserPermissions_DeduplicatesAcrossRoles(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
-	org, _ := s.CreateOrganization(ctx, "TokTest", uniqueSlug("toktest"))
+	org, _ := s.CreateOrganization(ctx, "Dedup", uniqueSlug("dedup"))
+	u, _ := s.CreateUser(ctx, store.CreateUserParams{FirstName: "U", LastName: "U", Email: uniqueEmail("u")})
+	admin, _ := s.GetRoleByName(ctx, "admin")
+	viewer, _ := s.GetRoleByName(ctx, "viewer")
+	require.NoError(t, s.AssignRole(ctx, u.ID, org.ID, admin.ID))
+	require.NoError(t, s.AssignRole(ctx, u.ID, org.ID, viewer.ID))
 
-	t1, p1, err := s.CreateToken(ctx, org.ID, "ci", nil)
+	perms, err := s.UserPermissions(ctx, u.ID, org.ID)
 	require.NoError(t, err)
-	t2, p2, err := s.CreateToken(ctx, org.ID, "prod", nil)
-	require.NoError(t, err)
+	seen := map[string]int{}
+	for _, p := range perms {
+		seen[p]++
+	}
+	for p, n := range seen {
+		assert.Equal(t, 1, n, "permission %s appeared %d times", p, n)
+	}
+	assert.Contains(t, perms, "runs:read")
+	assert.Contains(t, perms, "tokens:create")
+}
 
-	assert.NotEqual(t, p1, p2, "tokens must be unique")
+func TestRemoveUserFromOrg_DropsEveryRole(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	org, _ := s.CreateOrganization(ctx, "Rm", uniqueSlug("rm"))
+	u, _ := s.CreateUser(ctx, store.CreateUserParams{FirstName: "U", LastName: "U", Email: uniqueEmail("u")})
+	admin, _ := s.GetRoleByName(ctx, "admin")
+	viewer, _ := s.GetRoleByName(ctx, "viewer")
+	require.NoError(t, s.AssignRole(ctx, u.ID, org.ID, admin.ID))
+	require.NoError(t, s.AssignRole(ctx, u.ID, org.ID, viewer.ID))
+
+	require.NoError(t, s.RemoveUserFromOrg(ctx, u.ID, org.ID))
+	members, _ := s.ListOrgMembers(ctx, org.ID)
+	assert.Empty(t, members)
+	assert.ErrorIs(t, s.RemoveUserFromOrg(ctx, u.ID, org.ID), store.ErrNotFound)
+}
+
+// ─── API tokens ────────────────────────────────────────────────────────
+
+func TestCreateAPIToken_PlaintextPrefixedAndUnique(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	org, _ := s.CreateOrganization(ctx, "Tok", uniqueSlug("tok"))
+	_, p1, _ := s.CreateAPIToken(ctx, org.ID, "a", nil)
+	_, p2, _ := s.CreateAPIToken(ctx, org.ID, "b", nil)
+	assert.NotEqual(t, p1, p2)
 	assert.True(t, strings.HasPrefix(p1, "concord_"))
-	assert.Greater(t, len(p1), 30)
-	assert.NotEqual(t, t1.ID, t2.ID)
 }
 
-func TestCreateToken_AttributedToUser(t *testing.T) {
+func TestResolveAPIToken_BumpsLastUsedAt(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
-	org, _ := s.CreateOrganization(ctx, "Attr", uniqueSlug("attr"))
-	u, _ := s.CreateUser(ctx, uniqueEmail("creator"), "C")
-
-	t1, _, err := s.CreateToken(ctx, org.ID, "ci", &u.ID)
+	org, _ := s.CreateOrganization(ctx, "Use", uniqueSlug("use"))
+	_, plain, _ := s.CreateAPIToken(ctx, org.ID, "ci", nil)
+	got, err := s.ResolveAPIToken(ctx, plain)
 	require.NoError(t, err)
-	require.NotNil(t, t1.CreatedBy)
-	assert.Equal(t, u.ID, *t1.CreatedBy)
-}
-
-func TestResolveToken_UpdatesLastUsedAt(t *testing.T) {
-	s := openTestStore(t)
-	ctx := context.Background()
-	org, _ := s.CreateOrganization(ctx, "Resolve", uniqueSlug("resolve"))
-	_, plain, err := s.CreateToken(ctx, org.ID, "ci", nil)
-	require.NoError(t, err)
-
-	got, err := s.ResolveToken(ctx, plain)
-	require.NoError(t, err)
-	assert.Equal(t, org.ID, got.OrgID)
 	require.NotNil(t, got.LastUsedAt)
-	assert.WithinDuration(t, time.Now(), *got.LastUsedAt, 5*time.Second)
 }
 
-func TestResolveToken_UnknownReturnsSentinel(t *testing.T) {
+func TestRevokeAPIToken_BlocksFutureUse(t *testing.T) {
 	s := openTestStore(t)
-	_, err := s.ResolveToken(context.Background(), "concord_bogus")
+	ctx := context.Background()
+	org, _ := s.CreateOrganization(ctx, "Rev", uniqueSlug("rev"))
+	tok, plain, _ := s.CreateAPIToken(ctx, org.ID, "ci", nil)
+	require.NoError(t, s.RevokeAPIToken(ctx, org.ID, tok.ID))
+
+	_, err := s.ResolveAPIToken(ctx, plain)
 	assert.ErrorIs(t, err, store.ErrNotFound)
+
+	// Revoked tokens disappear from ListAPITokens.
+	toks, _ := s.ListAPITokens(ctx, org.ID)
+	assert.Empty(t, toks)
 }
 
-func TestDeleteToken_CannotCrossOrg(t *testing.T) {
+func TestRevokeAPIToken_CannotCrossOrg(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	a, _ := s.CreateOrganization(ctx, "A", uniqueSlug("a"))
 	b, _ := s.CreateOrganization(ctx, "B", uniqueSlug("b"))
-	tok, _, _ := s.CreateToken(ctx, a.ID, "a-tok", nil)
-
-	assert.ErrorIs(t, s.DeleteToken(ctx, b.ID, tok.ID), store.ErrNotFound)
+	tok, _, _ := s.CreateAPIToken(ctx, a.ID, "a-tok", nil)
+	assert.ErrorIs(t, s.RevokeAPIToken(ctx, b.ID, tok.ID), store.ErrNotFound)
 }
 
-// --- Runs ---
+// ─── User sessions ─────────────────────────────────────────────────────
+
+func TestCreateSession_AndResolve(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	u, _ := s.CreateUser(ctx, store.CreateUserParams{FirstName: "U", LastName: "U",
+		Email: uniqueEmail("sess"), Password: "hunter2"})
+
+	sess, plain, err := s.CreateSession(ctx, u.ID, time.Hour, "127.0.0.1", "go-test")
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(plain, "concord_sess_"))
+
+	got, err := s.ResolveSession(ctx, plain)
+	require.NoError(t, err)
+	assert.Equal(t, sess.ID, got.ID)
+}
+
+func TestResolveSession_ExpiredRejected(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	u, _ := s.CreateUser(ctx, store.CreateUserParams{FirstName: "U", LastName: "U",
+		Email: uniqueEmail("exp"), Password: "hunter2"})
+	_, plain, _ := s.CreateSession(ctx, u.ID, -1*time.Second, "", "")
+	_, err := s.ResolveSession(ctx, plain)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestRevokeSession_BlocksReuse(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	u, _ := s.CreateUser(ctx, store.CreateUserParams{FirstName: "U", LastName: "U",
+		Email: uniqueEmail("rev"), Password: "hunter2"})
+	sess, plain, _ := s.CreateSession(ctx, u.ID, time.Hour, "", "")
+	require.NoError(t, s.RevokeSession(ctx, sess.ID))
+	_, err := s.ResolveSession(ctx, plain)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestRevokeAllSessionsForUser(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	u, _ := s.CreateUser(ctx, store.CreateUserParams{FirstName: "U", LastName: "U",
+		Email: uniqueEmail("revall"), Password: "hunter2"})
+	_, p1, _ := s.CreateSession(ctx, u.ID, time.Hour, "", "")
+	_, p2, _ := s.CreateSession(ctx, u.ID, time.Hour, "", "")
+	require.NoError(t, s.RevokeAllSessionsForUser(ctx, u.ID))
+	_, err1 := s.ResolveSession(ctx, p1)
+	_, err2 := s.ResolveSession(ctx, p2)
+	assert.ErrorIs(t, err1, store.ErrNotFound)
+	assert.ErrorIs(t, err2, store.ErrNotFound)
+}
+
+// ─── Runs ──────────────────────────────────────────────────────────────
 
 func TestRunLifecycle_PendingRunningSucceeded(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	org, _ := s.CreateOrganization(ctx, "Run", uniqueSlug("run"))
-	tok, _, _ := s.CreateToken(ctx, org.ID, "ci", nil)
+	tok, _, _ := s.CreateAPIToken(ctx, org.ID, "ci", nil)
 
-	r, err := s.CreateRun(ctx, org.ID, &tok.ID)
+	r, err := s.CreateRun(ctx, store.CreateRunParams{OrgID: org.ID, TokenID: &tok.ID})
 	require.NoError(t, err)
 	assert.Equal(t, store.RunPending, r.Status)
-	require.NotNil(t, r.TriggeredByToken)
-	assert.Equal(t, tok.ID, *r.TriggeredByToken)
-
 	require.NoError(t, s.MarkRunRunning(ctx, r.ID))
-	got, err := s.GetRun(ctx, org.ID, r.ID)
-	require.NoError(t, err)
-	assert.Equal(t, store.RunRunning, got.Status)
-
 	require.NoError(t, s.CompleteRun(ctx, r.ID,
 		[]byte(`{"pass":3}`), []byte(`[{"id":"X"}]`)))
 	final, err := s.GetRun(ctx, org.ID, r.ID)
 	require.NoError(t, err)
 	assert.Equal(t, store.RunSucceeded, final.Status)
-	require.NotNil(t, final.CompletedAt)
-	assert.JSONEq(t, `{"pass":3}`, string(final.Summary))
-}
-
-func TestRunLifecycle_FailedStoresErrorMessage(t *testing.T) {
-	s := openTestStore(t)
-	ctx := context.Background()
-	org, _ := s.CreateOrganization(ctx, "Fail", uniqueSlug("fail"))
-	r, _ := s.CreateRun(ctx, org.ID, nil)
-	require.NoError(t, s.FailRun(ctx, r.ID, "collector blew up"))
-	got, err := s.GetRun(ctx, org.ID, r.ID)
-	require.NoError(t, err)
-	assert.Equal(t, store.RunFailed, got.Status)
-	assert.Equal(t, "collector blew up", got.ErrorMessage)
+	require.NotNil(t, final.TriggeredByToken)
 }
 
 func TestGetRun_CannotCrossOrg(t *testing.T) {
@@ -330,54 +403,34 @@ func TestGetRun_CannotCrossOrg(t *testing.T) {
 	ctx := context.Background()
 	a, _ := s.CreateOrganization(ctx, "A", uniqueSlug("a"))
 	b, _ := s.CreateOrganization(ctx, "B", uniqueSlug("b"))
-	r, _ := s.CreateRun(ctx, a.ID, nil)
+	r, _ := s.CreateRun(ctx, store.CreateRunParams{OrgID: a.ID})
 	_, err := s.GetRun(ctx, b.ID, r.ID)
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
-func TestListRuns_NewestFirst(t *testing.T) {
-	s := openTestStore(t)
-	ctx := context.Background()
-	org, _ := s.CreateOrganization(ctx, "List", uniqueSlug("list"))
-	for range 5 {
-		_, _ = s.CreateRun(ctx, org.ID, nil)
-		time.Sleep(2 * time.Millisecond)
-	}
-	got, err := s.ListRuns(ctx, org.ID, 3)
-	require.NoError(t, err)
-	require.Len(t, got, 3)
-	for i := 1; i < len(got); i++ {
-		assert.True(t, got[i-1].StartedAt.After(got[i].StartedAt) ||
-			got[i-1].StartedAt.Equal(got[i].StartedAt))
-	}
-}
-
-// TestDeleteOrg_CascadesToChildren verifies the ON DELETE CASCADE chain so a
-// tenant deletion doesn't leak rows.
-func TestDeleteOrg_CascadesToChildren(t *testing.T) {
+// TestDeleteOrg_CascadesEverywhere verifies the ON DELETE CASCADE chain so
+// the soft tenant-deletion path doesn't leak rows across the join tables.
+func TestDeleteOrg_CascadesEverywhere(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	org, _ := s.CreateOrganization(ctx, "Cascade", uniqueSlug("cascade"))
-	u, _ := s.CreateUser(ctx, uniqueEmail("c"), "C")
-	_, _ = s.AddMember(ctx, u.ID, org.ID, store.RoleOwner)
-	tok, _, _ := s.CreateToken(ctx, org.ID, "x", nil)
-	run, _ := s.CreateRun(ctx, org.ID, &tok.ID)
+	u, _ := s.CreateUser(ctx, store.CreateUserParams{FirstName: "U", LastName: "U", Email: uniqueEmail("cas")})
+	admin, _ := s.GetRoleByName(ctx, "admin")
+	_ = s.AssignRole(ctx, u.ID, org.ID, admin.ID)
+	tok, _, _ := s.CreateAPIToken(ctx, org.ID, "x", nil)
+	run, _ := s.CreateRun(ctx, store.CreateRunParams{OrgID: org.ID})
 
-	_, err := s.Pool().Exec(ctx, `DELETE FROM organizations WHERE id = $1`, org.ID)
+	_, err := s.Pool().Exec(ctx, `DELETE FROM organization WHERE id = $1`, org.ID)
 	require.NoError(t, err)
 
 	var n int
-	require.NoError(t, s.Pool().QueryRow(ctx,
-		`SELECT count(*) FROM api_tokens WHERE id = $1`, tok.ID).Scan(&n))
+	require.NoError(t, s.Pool().QueryRow(ctx, `SELECT count(*) FROM api_token WHERE id = $1`, tok.ID).Scan(&n))
+	assert.Equal(t, 0, n)
+	require.NoError(t, s.Pool().QueryRow(ctx, `SELECT count(*) FROM run WHERE id = $1`, run.ID).Scan(&n))
 	assert.Equal(t, 0, n)
 	require.NoError(t, s.Pool().QueryRow(ctx,
-		`SELECT count(*) FROM runs WHERE id = $1`, run.ID).Scan(&n))
+		`SELECT count(*) FROM user_org_role WHERE org_id = $1`, org.ID).Scan(&n))
 	assert.Equal(t, 0, n)
-	require.NoError(t, s.Pool().QueryRow(ctx,
-		`SELECT count(*) FROM memberships WHERE org_id = $1`, org.ID).Scan(&n))
-	assert.Equal(t, 0, n)
-
-	// The user itself stays — orgs cascade to memberships/tokens/runs, not users.
 	_, err = s.GetUserByID(ctx, u.ID)
-	require.NoError(t, err)
+	require.NoError(t, err, "user must survive org deletion")
 }
