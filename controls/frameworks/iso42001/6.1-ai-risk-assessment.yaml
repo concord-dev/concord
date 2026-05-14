@@ -1,0 +1,81 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: ISO42001-6.1
+  name: ai-risk-assessment
+  title: Production AI systems carry a current risk assessment with EU AI Act tier
+  framework: iso42001
+  category: Plan
+  severity: high
+  tags:
+    - ai
+    - risk-assessment
+    - eu-ai-act
+    - nist-ai-rmf
+  owners:
+    - team: ml-platform
+    - role: ai-governance-lead
+
+spec:
+  description: |
+    Every AI system running in production MUST carry a documented risk
+    assessment that names a human reviewer, declares intended use,
+    foreseeable misuse, affected populations, and residual risk, and
+    is mapped to one of the four EU AI Act risk tiers (minimal,
+    limited, high, prohibited). The assessment must be no older than
+    one year, and prohibited-tier systems may not run in production.
+
+  rationale: |
+    ISO 42001 §6.1 and EU AI Act Article 9 both require an explicit
+    risk assessment per AI system before deployment. Without one, the
+    organization cannot demonstrate due diligence under product
+    liability law, cannot determine which AI Act conformity regime
+    applies, and cannot defend the model against adversarial review.
+    A stale assessment is operationally equivalent to no assessment
+    because the system, data, and threat surface have likely drifted.
+
+  evidence:
+    - id: model_registry
+      source: mlflow
+      type: query
+      fixture: ./tests/fixtures/models-baseline.json
+      params:
+        registry_uri: ${env.MLFLOW_REGISTRY_URI}
+        select: production_models
+
+    - id: risk_assessments
+      source: github
+      type: file_glob
+      fixture: ./tests/fixtures/docs-baseline.json
+      params:
+        repo: ${env.REPO}
+        paths:
+          - "docs/ai/risk-assessments/*.md"
+        parse: frontmatter
+
+  policy:
+    engine: rego
+    package: concord.iso42001.risk_assessment
+    file: ./policies/risk_assessment.rego
+
+  remediation:
+    runbook: docs/remediation/iso42001-6.1.md
+    auto_fix: false
+    estimated_effort: 4h
+
+  mappings:
+    nist_ai_rmf:
+      - MAP-1.1
+      - MAP-2.3
+      - MEASURE-2.1
+    eu_ai_act:
+      - Article-9
+      - Annex-IV-3
+    soc2:
+      - CC3.2
+    iso27001:
+      - A.5.7
+
+  status: stable
+  blocking: true

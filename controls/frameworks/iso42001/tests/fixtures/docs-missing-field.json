@@ -1,0 +1,28 @@
+{
+  "scanned_path": "docs/ai/risk-assessments",
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "docs": [
+    {
+      "path": "docs/ai/risk-assessments/fraud-detector.md",
+      "model": "fraud-detector",
+      "reviewer": "alice@example.com",
+      "secondary_reviewer": "bob@example.com",
+      "reviewed_at": "2026-04-01T00:00:00Z",
+      "intended_use": "Detect fraudulent payment patterns in real time on the consumer checkout flow.",
+      "affected_populations": "Consumer payments customers, approximately 12M monthly active users globally.",
+      "residual_risk": "medium",
+      "eu_ai_act_tier": "high"
+    },
+    {
+      "path": "docs/ai/risk-assessments/spam-classifier.md",
+      "model": "spam-classifier",
+      "reviewer": "carol@example.com",
+      "reviewed_at": "2026-04-15T00:00:00Z",
+      "intended_use": "Flag inbound user messages with high spam probability for downstream moderation review.",
+      "foreseeable_misuse": "May over-block legitimate user expression, especially in non-English languages.",
+      "affected_populations": "All platform users (~50M monthly).",
+      "residual_risk": "low",
+      "eu_ai_act_tier": "limited"
+    }
+  ]
+}

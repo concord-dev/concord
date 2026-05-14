@@ -1,0 +1,21 @@
+{
+  "registry": "mlflow://prod",
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "models": [
+    {
+      "name": "fraud-detector",
+      "version": "1.4.0",
+      "production": true,
+      "eu_ai_act_tier": "prohibited",
+      "evaluation_report": "s3://concord-reports/fraud-detector-v1.4.0-eval.json",
+      "owner": "ml-platform"
+    },
+    {
+      "name": "spam-classifier",
+      "version": "2.1.0",
+      "production": true,
+      "eu_ai_act_tier": "limited",
+      "owner": "trust-and-safety"
+    }
+  ]
+}
