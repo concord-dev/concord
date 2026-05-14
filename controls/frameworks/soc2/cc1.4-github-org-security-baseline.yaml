@@ -1,0 +1,66 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: SOC2-CC1.4
+  name: github-org-security-baseline
+  title: GitHub organization enforces a security baseline (2FA, secret scanning, default permissions)
+  framework: soc2
+  category: Control Environment
+  severity: critical
+  tags:
+    - github
+    - org-policy
+    - 2fa
+    - secret-scanning
+  owners:
+    - team: platform
+
+spec:
+  description: |
+    SOC 2 CC1.4 requires the organization to demonstrate a commitment
+    to attract, develop, and retain competent personnel, supported by
+    a control environment. For an engineering organization that lives
+    on GitHub, the operational baseline is org-wide 2FA enforcement
+    plus repo default permissions that aren't 'admin', plus
+    Dependabot / secret-scanning enabled on new repos by default.
+
+  rationale: |
+    These four toggles together kill the most common org-level access
+    failures: (1) a contractor with no 2FA gets phished, (2) someone
+    creates a public repo by accident, (3) a developer pastes a secret
+    into a new repo with no scanning, (4) a new repo inherits admin
+    permissions for every org member. Concord catches each.
+
+  evidence:
+    - id: org_security
+      source: github
+      type: org_security_policy
+      fixture: ./tests/fixtures/cc1.4-org-pass.json
+      params:
+        org: ${env.CONCORD_GITHUB_ORG}
+
+  policy:
+    engine: rego
+    package: concord.soc2.cc1_4
+    file: ./policies/cc1_4.rego
+
+  remediation:
+    runbook: docs/remediation/soc2-cc1.4.md
+    auto_fix: false
+    estimated_effort: 30m
+
+  mappings:
+    iso27001:
+      - "A.5.17"
+      - "A.5.20"
+    nist_csf:
+      - "PR.AC-1"
+      - "PR.AC-7"
+      - "PR.IP-3"
+    cis_controls:
+      - "6.5"
+      - "16.5"
+
+  status: stable
+  blocking: true

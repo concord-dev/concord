@@ -1,0 +1,13 @@
+{
+  "scanned_paths": ["docs/incident-response"],
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "docs": [
+    {
+      "path": "docs/incident-response/main.md",
+      "title": "Concord incident response runbook",
+      "severity_levels": "SEV-1, SEV-2, SEV-3",
+      "escalation_path": "On-call rotation",
+      "reviewed_at": "2026-02-15T00:00:00Z"
+    }
+  ]
+}

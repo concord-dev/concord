@@ -1,0 +1,16 @@
+{
+  "scanned_paths": ["docs/incident-response"],
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "docs": [
+    {
+      "path": "docs/incident-response/main.md",
+      "title": "Concord incident response runbook",
+      "severity_levels": "SEV-1 (data exposure, prod down), SEV-2 (degraded), SEV-3 (cosmetic)",
+      "escalation_path": "SEV-1 → CTO + Eng Manager within 15min. SEV-2 → On-call → Eng Manager. SEV-3 → JIRA.",
+      "on_call_owner": "platform-oncall@example.com (rotation managed in PagerDuty)",
+      "communication_plan": "SEV-1 status page updates every 30min until resolved. Customer notification within 4h for confirmed data exposure.",
+      "post_mortem_template": "docs/incident-response/templates/post-mortem.md",
+      "reviewed_at": "2026-02-15T00:00:00Z"
+    }
+  ]
+}

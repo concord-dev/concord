@@ -1,0 +1,11 @@
+{
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "org": "concord-dev",
+  "policy": {
+    "two_factor_requirement_enabled": false,
+    "default_repository_permission": "write",
+    "secret_scanning_enabled_for_new_repositories": false,
+    "dependabot_alerts_enabled_for_new_repositories": false,
+    "web_commit_signoff_required": false
+  }
+}

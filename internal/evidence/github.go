@@ -46,6 +46,8 @@ func (c *GitHubCollector) Collect(cctx Context, ref apiv1.EvidenceRef) (any, err
 		return c.collectBranchProtection(ref)
 	case "file_glob":
 		return c.collectFileGlob(ref)
+	case "org_security_policy":
+		return c.collectOrgSecurityPolicy(ref)
 	case "":
 		return nil, fmt.Errorf("github collector requires evidence type")
 	default:
@@ -89,6 +91,51 @@ func (c *GitHubCollector) collectBranchProtection(ref apiv1.EvidenceRef) (any, e
 	}
 	result["protection"] = full
 	return result, nil
+}
+
+func (c *GitHubCollector) collectOrgSecurityPolicy(ref apiv1.EvidenceRef) (any, error) {
+	org := StringParam(ref.Params, "org", "")
+	if org == "" {
+		return nil, fmt.Errorf("missing required param %q", "org")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	raw, err := c.getJSON(ctx, fmt.Sprintf("/orgs/%s", org))
+	if err != nil {
+		return nil, fmt.Errorf("fetching org %s: %w", org, err)
+	}
+	obj, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected org response shape")
+	}
+
+	// Whitelist the security-relevant fields so policies have a stable, named surface.
+	keys := []string{
+		"two_factor_requirement_enabled",
+		"members_can_create_repositories",
+		"members_can_create_public_repositories",
+		"members_can_fork_private_repositories",
+		"default_repository_permission",
+		"web_commit_signoff_required",
+		"advanced_security_enabled_for_new_repositories",
+		"secret_scanning_enabled_for_new_repositories",
+		"secret_scanning_push_protection_enabled_for_new_repositories",
+		"dependency_graph_enabled_for_new_repositories",
+		"dependabot_alerts_enabled_for_new_repositories",
+		"dependabot_security_updates_enabled_for_new_repositories",
+	}
+	policy := map[string]any{}
+	for _, k := range keys {
+		if v, ok := obj[k]; ok {
+			policy[k] = v
+		}
+	}
+	return map[string]any{
+		"fetched_at": time.Now().UTC().Format(time.RFC3339),
+		"org":        org,
+		"policy":     policy,
+	}, nil
 }
 
 func (c *GitHubCollector) collectFileGlob(ref apiv1.EvidenceRef) (any, error) {

@@ -1,0 +1,68 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: SOC2-CC6.2
+  name: periodic-access-reviews
+  title: Periodic access reviews are documented and current
+  framework: soc2
+  category: Logical Access
+  severity: high
+  tags:
+    - identity
+    - access-review
+    - logical-access
+  owners:
+    - team: it-security
+
+spec:
+  description: |
+    SOC 2 CC6.2 requires the organization to authorize access and to
+    periodically review that access is still appropriate. Concord
+    enforces the operational artifact: a markdown file under
+    docs/access-reviews/<period>.md per review cycle, with reviewer,
+    scope, summary, and reviewed_at frontmatter. The most recent file
+    must be no older than 90 days by default — tighten in concord.yaml
+    if your policy demands quarterly or monthly.
+
+  rationale: |
+    Auditors do not accept "we reviewed access in our heads last week."
+    They want artifacts: who reviewed, what scope (production AWS,
+    SaaS admins, customer data access), and what changed. Git-tracked
+    markdown is the cheapest, most auditable form because the diff
+    history proves "we actually changed access based on the review."
+
+  evidence:
+    - id: access_reviews
+      source: github
+      type: file_glob
+      fixture: ./tests/fixtures/cc6.2-reviews-pass.json
+      params:
+        repo: ${env.CONCORD_REPO}
+        paths:
+          - "docs/access-reviews/*.md"
+        parse: frontmatter
+
+  policy:
+    engine: rego
+    package: concord.soc2.cc6_2
+    file: ./policies/cc6_2.rego
+
+  remediation:
+    runbook: docs/remediation/soc2-cc6.2.md
+    auto_fix: false
+    estimated_effort: 4h
+
+  mappings:
+    iso27001:
+      - "A.5.18"
+      - "A.5.19"
+    nist_csf:
+      - "PR.AC-4"
+      - "PR.AC-6"
+    nist_800_53:
+      - "AC-2(7)"
+      - "AC-6(7)"
+
+  status: stable
+  blocking: true

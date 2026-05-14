@@ -297,6 +297,55 @@ func TestGitHubCollector_FileGlob_NoParse(t *testing.T) {
 	assert.Equal(t, "hello world", docs[0]["content"])
 }
 
+// --- org_security_policy ---
+
+func TestGitHubCollector_OrgSecurityPolicy(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/orgs/concord-dev", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{
+			"login": "concord-dev",
+			"id": 42,
+			"two_factor_requirement_enabled": true,
+			"members_can_create_repositories": true,
+			"default_repository_permission": "read",
+			"web_commit_signoff_required": false,
+			"advanced_security_enabled_for_new_repositories": true,
+			"secret_scanning_enabled_for_new_repositories": true,
+			"secret_scanning_push_protection_enabled_for_new_repositories": true,
+			"dependabot_alerts_enabled_for_new_repositories": true
+		}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := evidence.NewGitHubCollector("t").SetBaseURL(srv.URL)
+	v, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{
+		Source: "github", Type: "org_security_policy",
+		Params: map[string]any{"org": "concord-dev"},
+	})
+	require.NoError(t, err)
+
+	out := v.(map[string]any)
+	assert.Equal(t, "concord-dev", out["org"])
+
+	policy := out["policy"].(map[string]any)
+	assert.Equal(t, true, policy["two_factor_requirement_enabled"])
+	assert.Equal(t, "read", policy["default_repository_permission"])
+	assert.Equal(t, true, policy["secret_scanning_enabled_for_new_repositories"])
+	// id is not in the whitelist — should not appear.
+	_, exists := policy["id"]
+	assert.False(t, exists, "non-security fields should be filtered out")
+}
+
+func TestGitHubCollector_OrgSecurityPolicy_MissingOrgErrors(t *testing.T) {
+	c := evidence.NewGitHubCollector("t")
+	_, err := c.Collect(evidence.Context{}, apiv1.EvidenceRef{
+		Source: "github", Type: "org_security_policy",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "org")
+}
+
 func TestGitHubCollector_EnvSubstitution(t *testing.T) {
 	t.Setenv("CONCORD_TEST_REPO", "owner/repo")
 

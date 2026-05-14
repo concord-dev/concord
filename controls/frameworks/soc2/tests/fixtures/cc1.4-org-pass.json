@@ -1,0 +1,17 @@
+{
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "org": "concord-dev",
+  "policy": {
+    "two_factor_requirement_enabled": true,
+    "members_can_create_repositories": true,
+    "members_can_create_public_repositories": false,
+    "default_repository_permission": "read",
+    "web_commit_signoff_required": true,
+    "advanced_security_enabled_for_new_repositories": true,
+    "secret_scanning_enabled_for_new_repositories": true,
+    "secret_scanning_push_protection_enabled_for_new_repositories": true,
+    "dependency_graph_enabled_for_new_repositories": true,
+    "dependabot_alerts_enabled_for_new_repositories": true,
+    "dependabot_security_updates_enabled_for_new_repositories": true
+  }
+}

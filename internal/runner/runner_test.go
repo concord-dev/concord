@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -200,6 +201,68 @@ func TestRunCC9_2_StaleAndMalformedFails(t *testing.T) {
 	assert.Contains(t, f.Messages, `risk register entry "docs/risk-register/recent-but-malformed.md" has invalid severity "moderate"`)
 	assert.Contains(t, f.Messages, `risk register entry "docs/risk-register/recent-but-malformed.md" has invalid mitigation_status "in-progress" (must be open|mitigated|accepted|transferred)`)
 	assert.Contains(t, f.Warnings, `risk register entry "docs/risk-register/old-risk.md" is high severity and still open — schedule treatment`)
+}
+
+// --- SOC2-CC1.4 — GitHub org security baseline ---
+
+const cc14Path = "controls/frameworks/soc2/cc1.4-github-org-security-baseline.yaml"
+
+func TestRunCC1_4_Pass(t *testing.T) {
+	f := runSingleEv(t, cc14Path, "cc1.4-org-pass.json")
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
+	assert.Empty(t, f.Warnings, "all hardened settings → no warnings")
+}
+
+func TestRunCC1_4_No2FAFails(t *testing.T) {
+	f := runSingleEv(t, cc14Path, "cc1.4-org-no-2fa.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, "GitHub org does not require two-factor authentication for members")
+	assert.Contains(t, f.Messages, "GitHub org default repository permission is 'write' (members can push to every repo by default — consider 'read' with explicit grants)")
+	assert.Contains(t, f.Warnings, "secret scanning is NOT enabled by default on new repositories")
+}
+
+// --- SOC2-CC6.2 — Periodic access reviews ---
+
+const cc62Path = "controls/frameworks/soc2/cc6.2-access-reviews.yaml"
+
+func TestRunCC6_2_Pass(t *testing.T) {
+	f := runSingleEv(t, cc62Path, "cc6.2-reviews-pass.json")
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
+}
+
+func TestRunCC6_2_StaleFails(t *testing.T) {
+	f := runSingleEv(t, cc62Path, "cc6.2-reviews-stale.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	// Exact day count depends on test date — match on substring.
+	found := false
+	for _, m := range f.Messages {
+		if strings.Contains(m, "most recent access-review") && strings.Contains(m, "schedule the next review cycle") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected freshness deny; got %v", f.Messages)
+}
+
+// --- SOC2-CC7.2 — Incident response runbook ---
+
+const cc72Path = "controls/frameworks/soc2/cc7.2-incident-response.yaml"
+
+func TestRunCC7_2_Pass(t *testing.T) {
+	f := runSingleEv(t, cc72Path, "cc7.2-runbook-pass.json")
+	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
+}
+
+func TestRunCC7_2_StaleFails(t *testing.T) {
+	f := runSingleEv(t, cc72Path, "cc7.2-runbook-stale.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, `IR runbook "docs/incident-response/main.md" has not been reviewed in over 365 days`)
+}
+
+func TestRunCC7_2_MissingOwnerFails(t *testing.T) {
+	f := runSingleEv(t, cc72Path, "cc7.2-runbook-missing-owner.json")
+	assert.Equal(t, apiv1.StatusFail, f.Status)
+	assert.Contains(t, f.Messages, `IR runbook "docs/incident-response/main.md" is missing required field "on_call_owner"`)
 }
 
 // runSingleEv is the helper for single-evidence controls.

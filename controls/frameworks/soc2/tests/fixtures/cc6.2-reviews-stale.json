@@ -1,0 +1,14 @@
+{
+  "scanned_paths": ["docs/access-reviews"],
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "docs": [
+    {
+      "path": "docs/access-reviews/2025-Q3.md",
+      "title": "Q3 2025 access review",
+      "reviewer": "alice@example.com",
+      "scope": "Production AWS, GitHub admins",
+      "summary": "...",
+      "reviewed_at": "2025-09-01T00:00:00Z"
+    }
+  ]
+}

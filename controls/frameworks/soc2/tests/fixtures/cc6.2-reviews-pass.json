@@ -1,0 +1,22 @@
+{
+  "scanned_paths": ["docs/access-reviews"],
+  "fetched_at": "2026-05-14T10:00:00Z",
+  "docs": [
+    {
+      "path": "docs/access-reviews/2026-Q1.md",
+      "title": "Q1 2026 access review",
+      "reviewer": "alice@example.com",
+      "scope": "Production AWS, GitHub admins, Datadog admins, Stripe dashboard",
+      "summary": "Removed 3 contractors from production AWS. Downgraded 1 engineer from admin to read on GitHub.",
+      "reviewed_at": "2026-04-15T00:00:00Z"
+    },
+    {
+      "path": "docs/access-reviews/2025-Q4.md",
+      "title": "Q4 2025 access review",
+      "reviewer": "alice@example.com",
+      "scope": "Same as Q1",
+      "summary": "No changes — all access still appropriate.",
+      "reviewed_at": "2026-01-15T00:00:00Z"
+    }
+  ]
+}
