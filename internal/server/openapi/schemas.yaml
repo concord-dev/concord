@@ -1,0 +1,256 @@
+components:
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    Organization:
+      type: object
+      required: [id, name, slug, created_at, updated_at]
+      properties:
+        id:         { type: string, format: uuid }
+        name:       { type: string }
+        slug:       { type: string, description: "URL-safe identifier" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    User:
+      type: object
+      required: [id, first_name, last_name, email, created_at, updated_at]
+      properties:
+        id:                 { type: string, format: uuid }
+        first_name:         { type: string }
+        last_name:          { type: string }
+        email:              { type: string, format: email }
+        email_verified_at:  { type: string, format: date-time, nullable: true }
+        created_at:         { type: string, format: date-time }
+        updated_at:         { type: string, format: date-time }
+
+    Role:
+      type: object
+      required: [id, name]
+      properties:
+        id:   { type: string, format: uuid }
+        name: { type: string, enum: [owner, admin, member, viewer] }
+
+    Permission:
+      type: object
+      required: [id, name]
+      properties:
+        id:   { type: string, format: uuid }
+        name: { type: string, description: "`<resource>:<verb>`, e.g. `runs:create`" }
+
+    RoleWithPermissions:
+      allOf:
+        - $ref: '#/components/schemas/Role'
+        - type: object
+          properties:
+            permissions:
+              type: array
+              items: { $ref: '#/components/schemas/Permission' }
+
+    OrgMember:
+      type: object
+      required: [user, roles]
+      properties:
+        user:  { $ref: '#/components/schemas/User' }
+        roles:
+          type: array
+          items: { $ref: '#/components/schemas/Role' }
+
+    UserOrg:
+      type: object
+      required: [organization, roles]
+      properties:
+        organization: { $ref: '#/components/schemas/Organization' }
+        roles:
+          type: array
+          items: { $ref: '#/components/schemas/Role' }
+
+    APIToken:
+      type: object
+      required: [id, org_id, name, created_at]
+      properties:
+        id:                  { type: string, format: uuid }
+        org_id:              { type: string, format: uuid }
+        name:                { type: string }
+        created_by_user_id:  { type: string, format: uuid, nullable: true }
+        last_used_at:        { type: string, format: date-time, nullable: true }
+        revoked_at:          { type: string, format: date-time, nullable: true }
+        created_at:          { type: string, format: date-time }
+        updated_at:          { type: string, format: date-time }
+
+    APITokenCreated:
+      allOf:
+        - $ref: '#/components/schemas/APIToken'
+        - type: object
+          required: [token]
+          properties:
+            token:
+              type: string
+              description: |
+                The plaintext token. Returned only once at creation; save it
+                immediately. Subsequent GETs never expose it again.
+            note: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:    { type: string, format: email }
+        password: { type: string, format: password }
+
+    Session:
+      type: object
+      required: [token, expires_at, user]
+      properties:
+        session_id: { type: string, format: uuid }
+        token:
+          type: string
+          description: "Plaintext session token (prefix `concord_sess_`); use it as Bearer."
+        expires_at: { type: string, format: date-time }
+        user:       { $ref: '#/components/schemas/User' }
+
+    OrgMe:
+      type: object
+      properties:
+        organization: { $ref: '#/components/schemas/Organization' }
+        token_id:     { type: string, format: uuid, nullable: true }
+        user_id:      { type: string, format: uuid, nullable: true }
+        permissions:
+          type: array
+          items: { type: string }
+          description: "Present only for session-authenticated callers."
+
+    FrameworkCount:
+      type: object
+      required: [framework, controls]
+      properties:
+        framework: { type: string }
+        controls:  { type: integer }
+
+    Control:
+      type: object
+      description: "Static control definition loaded from the controls library."
+
+    Finding:
+      type: object
+      required: [control_id, status]
+      properties:
+        control_id:   { type: string }
+        title:        { type: string }
+        framework:    { type: string }
+        severity:     { type: string }
+        status:       { type: string, enum: [pass, fail, error] }
+        messages:     { type: array, items: { type: string } }
+        warnings:     { type: array, items: { type: string } }
+        mappings:     { type: object, additionalProperties: { type: array, items: { type: string } } }
+        evaluated_at: { type: string, format: date-time }
+        duration_ms:  { type: integer }
+
+    Summary:
+      type: object
+      properties:
+        pass:     { type: integer }
+        fail:     { type: integer }
+        error:    { type: integer }
+        warnings: { type: integer }
+
+    RunEnvelope:
+      type: object
+      required: [run_id, status]
+      properties:
+        run_id:        { type: string, format: uuid }
+        status:        { type: string, enum: [pending, running, succeeded, failed] }
+        started_at:    { type: string, format: date-time }
+        completed_at:  { type: string, format: date-time, nullable: true }
+        error_message: { type: string }
+        summary:       { $ref: '#/components/schemas/Summary' }
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/Finding' }
+
+    RunListEntry:
+      type: object
+      required: [id, status, started_at]
+      properties:
+        id:            { type: string, format: uuid }
+        status:        { type: string, enum: [pending, running, succeeded, failed] }
+        started_at:    { type: string, format: date-time }
+        completed_at:  { type: string, format: date-time, nullable: true }
+        error_message: { type: string }
+
+    RunAccepted:
+      type: object
+      required: [run_id, status, poll_url]
+      properties:
+        run_id:     { type: string, format: uuid }
+        status:     { type: string, enum: [pending] }
+        poll_url:   { type: string }
+        started_at: { type: string, format: date-time }
+
+    ControlOverride:
+      type: object
+      required: [control_id, params]
+      properties:
+        id:         { type: string, format: uuid }
+        control_id: { type: string }
+        params:
+          type: object
+          additionalProperties: true
+          description: "Free-form param map consumed by Rego at `input._concord.params`."
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Schedule:
+      type: object
+      required: [id, org_id, cron_expr, enabled, next_fire_at]
+      properties:
+        id:            { type: string, format: uuid }
+        org_id:        { type: string, format: uuid }
+        cron_expr:
+          type: string
+          description: |
+            5-field cron expression or robfig descriptor (`@hourly`,
+            `@every 30m`). Validated server-side on PUT.
+        enabled:       { type: boolean }
+        last_fired_at: { type: string, format: date-time, nullable: true }
+        next_fire_at:  { type: string, format: date-time }
+        created_at:    { type: string, format: date-time }
+        updated_at:    { type: string, format: date-time }
+
+    Webhook:
+      type: object
+      required: [id, url, event_kinds, enabled]
+      properties:
+        id:            { type: string, format: uuid }
+        url:           { type: string, format: uri }
+        event_kinds:
+          type: array
+          items: { type: string }
+          description: |
+            Empty array = subscribe to every event kind. Otherwise an
+            allow-list of kind names (e.g. `["run.completed","run.failed"]`).
+        enabled:       { type: boolean }
+        last_fired_at: { type: string, format: date-time, nullable: true }
+        last_status:   { type: integer, nullable: true }
+        last_error:    { type: string }
+        created_at:    { type: string, format: date-time }
+        updated_at:    { type: string, format: date-time }
+
+    WebhookCreated:
+      type: object
+      required: [webhook, secret]
+      properties:
+        webhook: { $ref: '#/components/schemas/Webhook' }
+        secret:
+          type: string
+          description: |
+            HMAC signing secret. Verify the `X-Concord-Signature` header
+            against this on every received delivery. Returned ONLY at
+            creation; subsequent GETs never expose it.
+        note: { type: string }
+
+# ─── Paths ────────────────────────────────────────────────────────────────

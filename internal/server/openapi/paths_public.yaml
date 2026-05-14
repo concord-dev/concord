@@ -1,0 +1,93 @@
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+
+  /version:
+    get:
+      summary: Build metadata + control library size
+      operationId: getVersion
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:  { type: string }
+                  controls: { type: integer }
+
+  # ─── Auth ──────────────────────────────────────────────────────────────
+
+  /v1/auth/login:
+    post:
+      summary: Exchange email + password for a session token
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/auth/logout:
+    post:
+      summary: Revoke the current session
+      operationId: logout
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Session revoked }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ─── Session-scoped (user lives across multiple orgs) ──────────────────
+
+  /v1/me:
+    get:
+      summary: Currently authenticated user
+      operationId: getMe
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/me/orgs:
+    get:
+      summary: Orgs the current user belongs to, with their roles in each
+      operationId: listMyOrgs
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/UserOrg' }
+
+  # ─── Org API ───────────────────────────────────────────────────────────
+

@@ -1,0 +1,395 @@
+paths:
+  /v1/orgs/{slug}/me:
+    get:
+      summary: Resolved org + permissions for the current caller
+      operationId: getOrgMe
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrgMe' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/orgs/{slug}/frameworks:
+    get:
+      summary: Frameworks present in the control library, with counts
+      operationId: listFrameworks
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/FrameworkCount' }
+
+  /v1/orgs/{slug}/controls:
+    get:
+      summary: List controls (optionally filtered by framework)
+      operationId: listControls
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: framework
+          in: query
+          schema: { type: string }
+          description: e.g. `nist-800-53`
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Control' }
+
+  /v1/orgs/{slug}/controls/{id}:
+    get:
+      summary: Fetch one control by id (case-insensitive)
+      operationId: getControl
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Control' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/orgs/{slug}/check:
+    post:
+      summary: Enqueue a compliance run for the org
+      description: |
+        Returns `202 Accepted` immediately with a `run_id` and a `poll_url`.
+        The worker pool runs the checks asynchronously; subscribe to
+        `/v1/orgs/{slug}/events` or poll `/v1/orgs/{slug}/runs/{id}` for the
+        terminal outcome.
+      operationId: createRun
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '202':
+          description: Run enqueued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunAccepted' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503':
+          description: Worker queue full
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /v1/orgs/{slug}/findings:
+    get:
+      summary: Most recent succeeded run's findings (convenience shortcut)
+      operationId: getLatestFindings
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunEnvelope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/orgs/{slug}/runs:
+    get:
+      summary: Run history (most recent 50)
+      operationId: listRuns
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RunListEntry' }
+
+  /v1/orgs/{slug}/runs/{id}:
+    get:
+      summary: Single run, including summary + findings when complete
+      operationId: getRun
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunEnvelope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/orgs/{slug}/events:
+    get:
+      summary: Server-Sent Events stream of run lifecycle events
+      description: |
+        Long-poll over `text/event-stream`. Frames are formatted as:
+
+        ```
+        event: run.completed
+        data: {"kind":"run.completed","org_id":"...","run_id":"...","summary":{...}}
+        ```
+
+        Heartbeats fire every 15s as `: heartbeat` comments.
+      operationId: streamEvents
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+
+  /v1/orgs/{slug}/overrides:
+    get:
+      summary: List every control override the org has on file
+      operationId: listOverrides
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ControlOverride' }
+
+  /v1/orgs/{slug}/controls/{id}/overrides:
+    get:
+      summary: Read the override for one control
+      operationId: getOverride
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlOverride' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Upsert the override for one control
+      operationId: putOverride
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [params]
+              properties:
+                params:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Override upserted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlOverride' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Remove the override for one control
+      operationId: deleteOverride
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Override deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/orgs/{slug}/schedule:
+    get:
+      summary: Read the org's cron-driven schedule
+      operationId: getSchedule
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Schedule' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Install or replace the org's schedule
+      operationId: putSchedule
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cron_expr]
+              properties:
+                cron_expr: { type: string }
+                enabled:   { type: boolean, default: true }
+      responses:
+        '200':
+          description: Schedule upserted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Schedule' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    delete:
+      summary: Remove the org's schedule
+      operationId: deleteSchedule
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '204': { description: Schedule deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/orgs/{slug}/webhooks:
+    get:
+      summary: List the org's webhooks
+      operationId: listWebhooks
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Webhook' }
+    post:
+      summary: Create a webhook
+      description: |
+        Returns the new webhook AND its HMAC secret. Save the secret — it is
+        never exposed again. Outbound deliveries sign their JSON body with
+        HMAC-SHA256 and pass the signature in `X-Concord-Signature`.
+      operationId: createWebhook
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:         { type: string, format: uri }
+                event_kinds:
+                  type: array
+                  items: { type: string }
+                enabled:     { type: boolean, default: true }
+      responses:
+        '201':
+          description: Webhook created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WebhookCreated' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /v1/orgs/{slug}/webhooks/{id}:
+    get:
+      summary: Fetch one webhook (secret never returned)
+      operationId: getWebhook
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - { $ref: '#/components/parameters/UUIDPath' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Webhook' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Patch a webhook (URL, event_kinds, enabled)
+      operationId: updateWebhook
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - { $ref: '#/components/parameters/UUIDPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:         { type: string, format: uri }
+                event_kinds:
+                  type: array
+                  items: { type: string }
+                enabled:     { type: boolean }
+      responses:
+        '200':
+          description: Webhook updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Webhook' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Delete a webhook
+      operationId: deleteWebhook
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - { $ref: '#/components/parameters/UUIDPath' }
+      responses:
+        '204': { description: Webhook deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─── Admin (CONCORD_ADMIN_TOKEN) ───────────────────────────────────────
+

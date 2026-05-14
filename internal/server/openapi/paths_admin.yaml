@@ -1,0 +1,240 @@
+paths:
+  /admin/v1/orgs:
+    post:
+      summary: Create an organization
+      operationId: adminCreateOrg
+      security: [{ adminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug]
+              properties:
+                name: { type: string }
+                slug: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Organization' }
+        '409':
+          description: Slug already in use
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      summary: List every organization
+      operationId: adminListOrgs
+      security: [{ adminToken: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Organization' }
+
+  /admin/v1/orgs/{slug}:
+    get:
+      summary: Fetch one organization
+      operationId: adminGetOrg
+      security: [{ adminToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Organization' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/v1/orgs/{slug}/tokens:
+    get:
+      summary: List API tokens for an org
+      operationId: adminListTokens
+      security: [{ adminToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/APIToken' }
+    post:
+      summary: Mint a new API token
+      operationId: adminCreateToken
+      security: [{ adminToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:             { type: string }
+                created_by_email: { type: string, format: email }
+      responses:
+        '201':
+          description: Token minted (plaintext returned ONCE)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/APITokenCreated' }
+
+  /admin/v1/orgs/{slug}/tokens/{tokenID}:
+    delete:
+      summary: Revoke an API token
+      operationId: adminRevokeToken
+      security: [{ adminToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: tokenID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Revoked }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/v1/orgs/{slug}/members:
+    get:
+      summary: List members of an org with their roles
+      operationId: adminListMembers
+      security: [{ adminToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OrgMember' }
+    post:
+      summary: Attach a user to an org with one or more roles
+      operationId: adminAddMember
+      security: [{ adminToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roles]
+              properties:
+                user_id: { type: string, format: uuid }
+                email:   { type: string, format: email }
+                roles:
+                  type: array
+                  items: { type: string, enum: [owner, admin, member, viewer] }
+      responses:
+        '201':
+          description: Member added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:  { $ref: '#/components/schemas/User' }
+                  org:   { $ref: '#/components/schemas/Organization' }
+                  roles: { type: array, items: { type: string } }
+
+  /admin/v1/orgs/{slug}/members/{userID}:
+    delete:
+      summary: Remove a user from the org (drops every role grant)
+      operationId: adminRemoveMember
+      security: [{ adminToken: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: userID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Removed }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/v1/users:
+    get:
+      summary: List every user
+      operationId: adminListUsers
+      security: [{ adminToken: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/User' }
+    post:
+      summary: Create a user
+      operationId: adminCreateUser
+      security: [{ adminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [first_name, last_name, email]
+              properties:
+                first_name: { type: string }
+                last_name:  { type: string }
+                email:      { type: string, format: email }
+                password:
+                  type: string
+                  format: password
+                  description: |
+                    Optional. When empty the user cannot log in until a
+                    later password-set flow assigns one.
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+
+  /admin/v1/roles:
+    get:
+      summary: List canonical roles with their permission bundles
+      operationId: adminListRoles
+      security: [{ adminToken: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RoleWithPermissions' }
+
+  /admin/v1/permissions:
+    get:
+      summary: List every defined permission
+      operationId: adminListPermissions
+      security: [{ adminToken: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Permission' }
+
+# Default security: every operation falls back to bearerAuth unless its own
+# `security:` overrides. Public endpoints declare `security: []`.
