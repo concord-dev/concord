@@ -1,6 +1,6 @@
 module github.com/concord-dev/concord
 
-go 1.23
+go 1.25.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.32.0
@@ -13,7 +13,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/open-policy-agent/opa v0.70.0
 	github.com/spf13/cobra v1.8.1
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.1
 	sigs.k8s.io/yaml v1.4.0
 )
 
@@ -62,7 +62,11 @@ require (
 	go.opentelemetry.io/otel/metric v1.28.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.28.0 // indirect
 	go.opentelemetry.io/otel/trace v1.28.0 // indirect
-	golang.org/x/sys v0.26.0 // indirect
+	golang.org/x/net v0.43.0 // indirect
+	golang.org/x/sync v0.17.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/text v0.29.0 // indirect
+	golang.org/x/tools v0.36.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
