@@ -130,7 +130,7 @@ func (w *Worker) execute(job runJob) {
 		fmt.Fprintf(os.Stderr, "worker: marking run %s running: %v\n", job.RunID, err)
 		return
 	}
-	w.c.bus.Publish(Event{
+	w.c.broadcast(Event{
 		Kind: EventRunStarted, OrgID: job.OrgID, RunID: job.RunID,
 		At: time.Now().UTC(), Status: string(store.RunRunning),
 	})
@@ -139,7 +139,7 @@ func (w *Worker) execute(job runJob) {
 		if rec := recover(); rec != nil {
 			msg := fmt.Sprintf("panic: %v", rec)
 			_ = w.c.Store.FailRun(context.Background(), job.RunID, msg)
-			w.c.bus.Publish(Event{
+			w.c.broadcast(Event{
 				Kind: EventRunFailed, OrgID: job.OrgID, RunID: job.RunID,
 				At: time.Now().UTC(), Error: msg,
 			})
@@ -171,14 +171,14 @@ func (w *Worker) execute(job runJob) {
 	findingsJSON, _ := json.Marshal(findings)
 	if err := w.c.Store.CompleteRun(ctx, job.RunID, summaryJSON, findingsJSON); err != nil {
 		_ = w.c.Store.FailRun(context.Background(), job.RunID, err.Error())
-		w.c.bus.Publish(Event{
+		w.c.broadcast(Event{
 			Kind: EventRunFailed, OrgID: job.OrgID, RunID: job.RunID,
 			At: time.Now().UTC(), Error: err.Error(),
 		})
 		fmt.Fprintf(os.Stderr, "worker: persisting run %s: %v\n", job.RunID, err)
 		return
 	}
-	w.c.bus.Publish(Event{
+	w.c.broadcast(Event{
 		Kind: EventRunCompleted, OrgID: job.OrgID, RunID: job.RunID,
 		At: time.Now().UTC(), Status: string(store.RunSucceeded), Summary: summaryJSON,
 	})
