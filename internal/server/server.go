@@ -1,7 +1,12 @@
-// Package server hosts Concord's HTTP API. It is multi-tenant from the
-// ground up: every /v1/* request is scoped to an organization resolved from
-// an API token, every /admin/v1/* request requires the operator-level
-// admin token (the system bootstrap secret).
+// Package server hosts Concord's HTTP API. It speaks two auth mechanisms:
+//
+//   - API tokens (Authorization: Bearer concord_...) for CI/CLI
+//   - User sessions (Authorization: Bearer concord_sess_... OR Cookie) for
+//     the web dashboard
+//
+// Both paths converge on a principal carrying the resolved org and (for
+// session auth) the user. Per-endpoint permission checks consult the RBAC
+// tables via Store.HasPermission.
 package server
 
 import (
@@ -28,9 +33,7 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// Concord bundles the in-memory state every handler operates on plus the
-// persistent Store. Controls + Config + Registry are global (shared across
-// orgs in v1); orgs, users, memberships, tokens, and runs live in the Store.
+// Concord bundles in-memory state + Store.
 type Concord struct {
 	Controls   []controls.Loaded
 	Config     *config.Config
@@ -38,14 +41,14 @@ type Concord struct {
 	Store      *store.Store
 	AdminToken string
 	Version    string
+	SessionTTL time.Duration
 
 	worker *Worker
 	bus    *Bus
-
-	mu sync.Mutex // reserved for future per-instance coordination
+	mu     sync.Mutex
 }
 
-// Options is what the cmd-side wiring passes in to construct a server.
+// Options is the construction surface for cmd/server.
 type Options struct {
 	ControlsDir  string
 	ConfigPath   string
@@ -54,11 +57,11 @@ type Options struct {
 	Store        *store.Store
 	AdminToken   string
 	Version      string
+	SessionTTL   time.Duration // default: 24h
 	Worker       WorkerOpts
 }
 
-// NewConcord loads controls + config and wires the supplied Store. Returns an
-// error when the controls dir is empty or the Store is missing.
+// NewConcord loads controls + config and wires the Store.
 func NewConcord(opts Options) (*Concord, error) {
 	if opts.Store == nil {
 		return nil, errors.New("Store is required")
@@ -69,7 +72,9 @@ func NewConcord(opts Options) (*Concord, error) {
 	if opts.ConfigPath == "" {
 		opts.ConfigPath = "./concord.yaml"
 	}
-
+	if opts.SessionTTL <= 0 {
+		opts.SessionTTL = 24 * time.Hour
+	}
 	cfg, err := config.Load(opts.ConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("loading config: %w", err)
@@ -81,7 +86,6 @@ func NewConcord(opts Options) (*Concord, error) {
 	if len(loaded) == 0 {
 		return nil, fmt.Errorf("no controls found in %s", opts.ControlsDir)
 	}
-
 	reg := opts.Registry
 	if reg == nil {
 		reg = evidence.NewRegistry()
@@ -89,7 +93,6 @@ func NewConcord(opts Options) (*Concord, error) {
 			reg.SetFixturesOnly(true)
 		}
 	}
-
 	c := &Concord{
 		Controls:   loaded,
 		Config:     cfg,
@@ -97,6 +100,7 @@ func NewConcord(opts Options) (*Concord, error) {
 		Store:      opts.Store,
 		AdminToken: opts.AdminToken,
 		Version:    opts.Version,
+		SessionTTL: opts.SessionTTL,
 		bus:        NewBus(),
 	}
 	c.worker = NewWorker(c, opts.Worker)
@@ -107,11 +111,10 @@ func NewConcord(opts Options) (*Concord, error) {
 // Shutdown drains the background worker.
 func (c *Concord) Shutdown(ctx context.Context) error { return c.worker.Shutdown(ctx) }
 
-// Bus returns the event bus for callers that need to publish or subscribe.
+// Bus exposes the event bus to callers that subscribe (the SSE handler).
 func (c *Concord) Bus() *Bus { return c.bus }
 
-// Router wires every endpoint plus the auth middleware. Returned handler is
-// ready to mount under net/http.
+// Router returns the fully wired HTTP handler.
 func (c *Concord) Router() http.Handler {
 	mux := http.NewServeMux()
 
@@ -119,52 +122,82 @@ func (c *Concord) Router() http.Handler {
 	mux.HandleFunc("GET /healthz", c.handleHealth)
 	mux.HandleFunc("GET /version", c.handleVersion)
 
-	// Admin (CONCORD_ADMIN_TOKEN required).
+	// Auth (session lifecycle).
+	mux.HandleFunc("POST /v1/auth/login", c.handleLogin)
+	mux.Handle("POST /v1/auth/logout", c.requireSession(http.HandlerFunc(c.handleLogout)))
+
+	// Admin (CONCORD_ADMIN_TOKEN).
 	mux.Handle("POST /admin/v1/orgs", c.requireAdmin(http.HandlerFunc(c.handleAdminCreateOrg)))
 	mux.Handle("GET /admin/v1/orgs", c.requireAdmin(http.HandlerFunc(c.handleAdminListOrgs)))
 	mux.Handle("GET /admin/v1/orgs/{slug}", c.requireAdmin(http.HandlerFunc(c.handleAdminGetOrg)))
 	mux.Handle("POST /admin/v1/orgs/{slug}/tokens", c.requireAdmin(http.HandlerFunc(c.handleAdminCreateToken)))
 	mux.Handle("GET /admin/v1/orgs/{slug}/tokens", c.requireAdmin(http.HandlerFunc(c.handleAdminListTokens)))
-	mux.Handle("DELETE /admin/v1/orgs/{slug}/tokens/{tokenID}", c.requireAdmin(http.HandlerFunc(c.handleAdminDeleteToken)))
+	mux.Handle("DELETE /admin/v1/orgs/{slug}/tokens/{tokenID}", c.requireAdmin(http.HandlerFunc(c.handleAdminRevokeToken)))
 	mux.Handle("POST /admin/v1/orgs/{slug}/members", c.requireAdmin(http.HandlerFunc(c.handleAdminAddMember)))
 	mux.Handle("GET /admin/v1/orgs/{slug}/members", c.requireAdmin(http.HandlerFunc(c.handleAdminListMembers)))
 	mux.Handle("DELETE /admin/v1/orgs/{slug}/members/{userID}", c.requireAdmin(http.HandlerFunc(c.handleAdminRemoveMember)))
 	mux.Handle("POST /admin/v1/users", c.requireAdmin(http.HandlerFunc(c.handleAdminCreateUser)))
 	mux.Handle("GET /admin/v1/users", c.requireAdmin(http.HandlerFunc(c.handleAdminListUsers)))
+	mux.Handle("GET /admin/v1/roles", c.requireAdmin(http.HandlerFunc(c.handleAdminListRoles)))
+	mux.Handle("GET /admin/v1/permissions", c.requireAdmin(http.HandlerFunc(c.handleAdminListPermissions)))
 
-	// Org-scoped API (Authorization: Bearer <api-token>).
-	mux.Handle("GET /v1/me", c.requireOrg(http.HandlerFunc(c.handleMe)))
-	mux.Handle("GET /v1/frameworks", c.requireOrg(http.HandlerFunc(c.handleFrameworks)))
-	mux.Handle("GET /v1/controls", c.requireOrg(http.HandlerFunc(c.handleControls)))
-	mux.Handle("GET /v1/controls/{id}", c.requireOrg(http.HandlerFunc(c.handleControl)))
-	mux.Handle("POST /v1/check", c.requireOrg(http.HandlerFunc(c.handleCheck)))
-	mux.Handle("GET /v1/findings", c.requireOrg(http.HandlerFunc(c.handleFindings)))
-	mux.Handle("GET /v1/runs", c.requireOrg(http.HandlerFunc(c.handleListRuns)))
-	mux.Handle("GET /v1/runs/{id}", c.requireOrg(http.HandlerFunc(c.handleGetRun)))
-	mux.Handle("GET /v1/events", c.requireOrg(http.HandlerFunc(c.handleEvents)))
+	// User-session API: an authenticated human, scoped to one org via path.
+	mux.Handle("GET /v1/me", c.requireSession(http.HandlerFunc(c.handleSessionMe)))
+	mux.Handle("GET /v1/me/orgs", c.requireSession(http.HandlerFunc(c.handleSessionOrgs)))
+
+	// Org API. Each request resolves to an org via either an API token
+	// (Bearer concord_...) or a session token (Bearer concord_sess_...) plus
+	// the org slug in the URL.
+	mux.Handle("GET /v1/orgs/{slug}/me",
+		c.requireOrgPerm("org:read")(http.HandlerFunc(c.handleOrgMe)))
+	mux.Handle("GET /v1/orgs/{slug}/frameworks",
+		c.requireOrgPerm("controls:read")(http.HandlerFunc(c.handleFrameworks)))
+	mux.Handle("GET /v1/orgs/{slug}/controls",
+		c.requireOrgPerm("controls:read")(http.HandlerFunc(c.handleControls)))
+	mux.Handle("GET /v1/orgs/{slug}/controls/{id}",
+		c.requireOrgPerm("controls:read")(http.HandlerFunc(c.handleControl)))
+	mux.Handle("POST /v1/orgs/{slug}/check",
+		c.requireOrgPerm("runs:create")(http.HandlerFunc(c.handleCheck)))
+	mux.Handle("GET /v1/orgs/{slug}/findings",
+		c.requireOrgPerm("runs:read")(http.HandlerFunc(c.handleFindings)))
+	mux.Handle("GET /v1/orgs/{slug}/runs",
+		c.requireOrgPerm("runs:read")(http.HandlerFunc(c.handleListRuns)))
+	mux.Handle("GET /v1/orgs/{slug}/runs/{id}",
+		c.requireOrgPerm("runs:read")(http.HandlerFunc(c.handleGetRun)))
+	mux.Handle("GET /v1/orgs/{slug}/events",
+		c.requireOrgPerm("runs:read")(http.HandlerFunc(c.handleEvents)))
 
 	return logging(mux)
 }
 
-// --- Middleware ---
+// ─── Auth primitives ───────────────────────────────────────────────────
 
-// principal captures who (or what) is making an authenticated request. For
-// API tokens it carries the resolved org + token id; for future user
-// sessions, fields will be added without breaking existing handlers.
+// principal is everything we need to know about who's calling. Exactly one
+// of TokenID or UserID is non-nil; Org is non-zero for org-scoped requests.
 type principal struct {
 	Org     store.Organization
 	TokenID *uuid.UUID
+	UserID  *uuid.UUID
 }
 
 type principalCtxKey struct{}
 
-// PrincipalFromContext returns the auth context injected by requireOrg.
-// The second return is false when called outside an authenticated handler.
-func PrincipalFromContext(ctx context.Context) (principal, bool) {
+// principalFromContext returns the auth context, if any.
+func principalFromContext(ctx context.Context) (principal, bool) {
 	p, ok := ctx.Value(principalCtxKey{}).(principal)
 	return p, ok
 }
 
+type sessionCtxKey struct{}
+
+// sessionUserFromContext returns the user injected by requireSession.
+func sessionUserFromContext(ctx context.Context) (store.User, bool) {
+	u, ok := ctx.Value(sessionCtxKey{}).(store.User)
+	return u, ok
+}
+
+// requireAdmin gates /admin/v1/* on a constant-time match against the
+// CONCORD_ADMIN_TOKEN. When the env var is unset the route returns 503.
 func (c *Concord) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if c.AdminToken == "" {
@@ -185,35 +218,117 @@ func (c *Concord) requireAdmin(next http.Handler) http.Handler {
 	})
 }
 
-func (c *Concord) requireOrg(next http.Handler) http.Handler {
+// requireSession resolves a session token and injects the user into context.
+// Session tokens are distinguished from API tokens by their prefix.
+func (c *Concord) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		plaintext, ok := bearerToken(r)
+		tok, ok := bearerToken(r)
 		if !ok {
 			writeError(w, http.StatusUnauthorized, "missing Authorization header")
 			return
 		}
-		tok, err := c.Store.ResolveToken(r.Context(), plaintext)
+		if !strings.HasPrefix(tok, "concord_sess_") {
+			writeError(w, http.StatusUnauthorized, "expected a session token")
+			return
+		}
+		sess, err := c.Store.ResolveSession(r.Context(), tok)
 		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusUnauthorized, "invalid token")
+			writeError(w, http.StatusUnauthorized, "invalid or expired session")
 			return
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "auth check failed: "+err.Error())
+			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		org, err := c.Store.GetOrganizationByID(r.Context(), tok.OrgID)
+		u, err := c.Store.GetUserByID(r.Context(), sess.UserID)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "org lookup failed")
+			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		p := principal{Org: org, TokenID: &tok.ID}
-		ctx := context.WithValue(r.Context(), principalCtxKey{}, p)
+		ctx := context.WithValue(r.Context(), sessionCtxKey{}, u)
+		// Attach the session id too so logout can revoke it.
+		ctx = context.WithValue(ctx, sessionIDCtxKey{}, sess.ID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// bearerToken extracts the token from an `Authorization: Bearer <x>` header.
-// Comparison is case-insensitive to match RFC 6750.
+type sessionIDCtxKey struct{}
+
+// requireOrgPerm requires either an API token or a session token authenticating
+// for the org named by the {slug} path variable, AND that the caller hold the
+// named permission. API tokens implicitly carry every permission of their org;
+// users must have a role that grants `perm` via role_permission.
+func (c *Concord) requireOrgPerm(perm string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			slug := r.PathValue("slug")
+			org, err := c.Store.GetOrganizationBySlug(r.Context(), slug)
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "no organization with slug "+slug)
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+
+			tok, ok := bearerToken(r)
+			if !ok {
+				writeError(w, http.StatusUnauthorized, "missing Authorization header")
+				return
+			}
+
+			var p principal
+			p.Org = org
+
+			switch {
+			case strings.HasPrefix(tok, "concord_sess_"):
+				sess, err := c.Store.ResolveSession(r.Context(), tok)
+				if errors.Is(err, store.ErrNotFound) {
+					writeError(w, http.StatusUnauthorized, "invalid or expired session")
+					return
+				}
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				has, err := c.Store.HasPermission(r.Context(), sess.UserID, org.ID, perm)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				if !has {
+					writeError(w, http.StatusForbidden,
+						fmt.Sprintf("missing permission %q on org %q", perm, slug))
+					return
+				}
+				p.UserID = &sess.UserID
+
+			default:
+				// Treat as API token.
+				at, err := c.Store.ResolveAPIToken(r.Context(), tok)
+				if errors.Is(err, store.ErrNotFound) {
+					writeError(w, http.StatusUnauthorized, "invalid token")
+					return
+				}
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				if at.OrgID != org.ID {
+					writeError(w, http.StatusForbidden, "token is not scoped to this org")
+					return
+				}
+				p.TokenID = &at.ID
+			}
+
+			ctx := context.WithValue(r.Context(), principalCtxKey{}, p)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// bearerToken extracts the token from Authorization: Bearer <x>.
 func bearerToken(r *http.Request) (string, bool) {
 	h := r.Header.Get("Authorization")
 	if len(h) < 7 || !strings.EqualFold(h[:7], "Bearer ") {
@@ -223,7 +338,7 @@ func bearerToken(r *http.Request) (string, bool) {
 	return tok, tok != ""
 }
 
-// --- Public handlers ---
+// ─── Public ────────────────────────────────────────────────────────────
 
 func (c *Concord) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
@@ -236,7 +351,92 @@ func (c *Concord) handleVersion(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// --- Admin: orgs ---
+// ─── Login + session ──────────────────────────────────────────────────
+
+func (c *Concord) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if body.Email == "" || body.Password == "" {
+		writeError(w, http.StatusBadRequest, "email and password are required")
+		return
+	}
+	user, err := c.Store.VerifyUserPassword(r.Context(), body.Email, body.Password)
+	if errors.Is(err, store.ErrNotFound) {
+		// Same error for unknown user and bad password — prevents user enumeration.
+		writeError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	sess, plain, err := c.Store.CreateSession(r.Context(), user.ID, c.SessionTTL,
+		clientIP(r), r.UserAgent())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"session_id": sess.ID,
+		"token":      plain,
+		"expires_at": sess.ExpiresAt,
+		"user":       user,
+		"note":       "Pass this token in `Authorization: Bearer <token>` on subsequent requests.",
+	})
+}
+
+func (c *Concord) handleLogout(w http.ResponseWriter, r *http.Request) {
+	sid, ok := r.Context().Value(sessionIDCtxKey{}).(uuid.UUID)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "session id missing from context")
+		return
+	}
+	if err := c.Store.RevokeSession(r.Context(), sid); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// clientIP picks the leftmost X-Forwarded-For entry when behind a proxy,
+// falling back to RemoteAddr's host portion.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.Index(xff, ","); i > 0 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	if i := strings.LastIndex(r.RemoteAddr, ":"); i > 0 {
+		return r.RemoteAddr[:i]
+	}
+	return r.RemoteAddr
+}
+
+// ─── Session-scoped endpoints (no org context) ─────────────────────────
+
+func (c *Concord) handleSessionMe(w http.ResponseWriter, r *http.Request) {
+	u, _ := sessionUserFromContext(r.Context())
+	writeJSON(w, http.StatusOK, u)
+}
+
+func (c *Concord) handleSessionOrgs(w http.ResponseWriter, r *http.Request) {
+	u, _ := sessionUserFromContext(r.Context())
+	orgs, err := c.Store.ListUserOrgs(r.Context(), u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, orgs)
+}
+
+// ─── Admin: orgs ───────────────────────────────────────────────────────
 
 func (c *Concord) handleAdminCreateOrg(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -248,12 +448,12 @@ func (c *Concord) handleAdminCreateOrg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Name == "" || body.Slug == "" {
-		writeError(w, http.StatusBadRequest, "both `name` and `slug` are required")
+		writeError(w, http.StatusBadRequest, "name and slug are required")
 		return
 	}
 	org, err := c.Store.CreateOrganization(r.Context(), body.Name, body.Slug)
 	if err != nil {
-		writeError(w, http.StatusConflict, "creating organization: "+err.Error())
+		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, org)
@@ -276,24 +476,25 @@ func (c *Concord) handleAdminGetOrg(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, org)
 }
 
-// --- Admin: users ---
+// ─── Admin: users ──────────────────────────────────────────────────────
 
 func (c *Concord) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Email string `json:"email"`
-		Name  string `json:"name"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+		Email     string `json:"email"`
+		Password  string `json:"password,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if body.Email == "" || body.Name == "" {
-		writeError(w, http.StatusBadRequest, "both `email` and `name` are required")
-		return
-	}
-	u, err := c.Store.CreateUser(r.Context(), body.Email, body.Name)
+	u, err := c.Store.CreateUser(r.Context(), store.CreateUserParams{
+		FirstName: body.FirstName, LastName: body.LastName,
+		Email: body.Email, Password: body.Password,
+	})
 	if err != nil {
-		writeError(w, http.StatusConflict, "creating user: "+err.Error())
+		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, u)
@@ -308,7 +509,40 @@ func (c *Concord) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, users)
 }
 
-// --- Admin: memberships ---
+// ─── Admin: roles + permissions ────────────────────────────────────────
+
+func (c *Concord) handleAdminListRoles(w http.ResponseWriter, r *http.Request) {
+	roles, err := c.Store.ListRoles(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	type entry struct {
+		store.Role
+		Permissions []store.Permission `json:"permissions"`
+	}
+	out := make([]entry, 0, len(roles))
+	for _, r0 := range roles {
+		perms, err := c.Store.ListRolePermissions(r.Context(), r0.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		out = append(out, entry{Role: r0, Permissions: perms})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (c *Concord) handleAdminListPermissions(w http.ResponseWriter, r *http.Request) {
+	perms, err := c.Store.ListPermissions(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, perms)
+}
+
+// ─── Admin: memberships ───────────────────────────────────────────────
 
 func (c *Concord) handleAdminAddMember(w http.ResponseWriter, r *http.Request) {
 	org, ok := c.lookupOrgBySlug(w, r, r.PathValue("slug"))
@@ -316,32 +550,48 @@ func (c *Concord) handleAdminAddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		UserID string `json:"user_id"`
-		Email  string `json:"email"`
-		Role   string `json:"role"`
+		UserID string   `json:"user_id"`
+		Email  string   `json:"email"`
+		Roles  []string `json:"roles"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	role := store.Role(body.Role)
-	if !role.IsValid() {
-		writeError(w, http.StatusBadRequest,
-			"role must be one of owner|admin|member|viewer")
+	if len(body.Roles) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one role is required")
 		return
 	}
-	// Caller may pass user_id OR email; email path is the convenient one for
-	// CLI bootstrapping.
 	user, ok := c.lookupUser(w, r, body.UserID, body.Email)
 	if !ok {
 		return
 	}
-	m, err := c.Store.AddMember(r.Context(), user.ID, org.ID, role)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	// Resolve every role name up front so an invalid role rejects the whole
+	// request before any insert.
+	roleIDs := make([]uuid.UUID, 0, len(body.Roles))
+	for _, name := range body.Roles {
+		r0, err := c.Store.GetRoleByName(r.Context(), name)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusBadRequest, "unknown role "+name)
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		roleIDs = append(roleIDs, r0.ID)
 	}
-	writeJSON(w, http.StatusCreated, m)
+	for _, rid := range roleIDs {
+		if err := c.Store.AssignRole(r.Context(), user.ID, org.ID, rid); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"user":  user,
+		"org":   org,
+		"roles": body.Roles,
+	})
 }
 
 func (c *Concord) handleAdminListMembers(w http.ResponseWriter, r *http.Request) {
@@ -367,7 +617,7 @@ func (c *Concord) handleAdminRemoveMember(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "invalid user id")
 		return
 	}
-	if err := c.Store.RemoveMember(r.Context(), userID, org.ID); err != nil {
+	if err := c.Store.RemoveUserFromOrg(r.Context(), userID, org.ID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "membership not found")
 			return
@@ -378,7 +628,7 @@ func (c *Concord) handleAdminRemoveMember(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// --- Admin: tokens ---
+// ─── Admin: tokens ────────────────────────────────────────────────────
 
 func (c *Concord) handleAdminCreateToken(w http.ResponseWriter, r *http.Request) {
 	org, ok := c.lookupOrgBySlug(w, r, r.PathValue("slug"))
@@ -386,40 +636,39 @@ func (c *Concord) handleAdminCreateToken(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var body struct {
-		Name      string  `json:"name"`
-		CreatedBy *string `json:"created_by_email,omitempty"`
+		Name             string `json:"name"`
+		CreatedByEmail   string `json:"created_by_email,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if body.Name == "" {
-		writeError(w, http.StatusBadRequest, "`name` is required")
+		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	var createdBy *uuid.UUID
-	if body.CreatedBy != nil && *body.CreatedBy != "" {
-		u, err := c.Store.GetUserByEmail(r.Context(), *body.CreatedBy)
+	if body.CreatedByEmail != "" {
+		u, err := c.Store.GetUserByEmail(r.Context(), body.CreatedByEmail)
 		if err != nil {
-			writeError(w, http.StatusBadRequest,
-				"created_by_email not found among users")
+			writeError(w, http.StatusBadRequest, "created_by_email not found")
 			return
 		}
 		createdBy = &u.ID
 	}
-	tok, plain, err := c.Store.CreateToken(r.Context(), org.ID, body.Name, createdBy)
+	tok, plain, err := c.Store.CreateAPIToken(r.Context(), org.ID, body.Name, createdBy)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"id":         tok.ID,
-		"org_id":     tok.OrgID,
-		"name":       tok.Name,
-		"created_at": tok.CreatedAt,
-		"created_by": tok.CreatedBy,
-		"token":      plain,
-		"note":       "Save this token now — it cannot be retrieved later.",
+		"id":                  tok.ID,
+		"org_id":              tok.OrgID,
+		"name":                tok.Name,
+		"created_by_user_id":  tok.CreatedByUserID,
+		"created_at":          tok.CreatedAt,
+		"token":               plain,
+		"note":                "Save this token now — it cannot be retrieved later.",
 	})
 }
 
@@ -428,7 +677,7 @@ func (c *Concord) handleAdminListTokens(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	toks, err := c.Store.ListTokens(r.Context(), org.ID)
+	toks, err := c.Store.ListAPITokens(r.Context(), org.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -436,7 +685,7 @@ func (c *Concord) handleAdminListTokens(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, toks)
 }
 
-func (c *Concord) handleAdminDeleteToken(w http.ResponseWriter, r *http.Request) {
+func (c *Concord) handleAdminRevokeToken(w http.ResponseWriter, r *http.Request) {
 	org, ok := c.lookupOrgBySlug(w, r, r.PathValue("slug"))
 	if !ok {
 		return
@@ -446,7 +695,7 @@ func (c *Concord) handleAdminDeleteToken(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "invalid token id")
 		return
 	}
-	if err := c.Store.DeleteToken(r.Context(), org.ID, tokenID); err != nil {
+	if err := c.Store.RevokeAPIToken(r.Context(), org.ID, tokenID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "token not found")
 			return
@@ -457,14 +706,24 @@ func (c *Concord) handleAdminDeleteToken(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// --- Org API (controls library is global in v1) ---
+// ─── Org API ──────────────────────────────────────────────────────────
 
-func (c *Concord) handleMe(w http.ResponseWriter, r *http.Request) {
-	p, _ := PrincipalFromContext(r.Context())
-	writeJSON(w, http.StatusOK, map[string]any{
+func (c *Concord) handleOrgMe(w http.ResponseWriter, r *http.Request) {
+	p, _ := principalFromContext(r.Context())
+	resp := map[string]any{
 		"organization": p.Org,
 		"token_id":     p.TokenID,
-	})
+		"user_id":      p.UserID,
+	}
+	if p.UserID != nil {
+		perms, err := c.Store.UserPermissions(r.Context(), *p.UserID, p.Org.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		resp["permissions"] = perms
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (c *Concord) handleFrameworks(w http.ResponseWriter, _ *http.Request) {
@@ -514,15 +773,15 @@ func (c *Concord) handleControl(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotFound, fmt.Sprintf("no control with id %q", id))
 }
 
-// handleCheck creates a run, enqueues it on the background worker, and
-// responds 202 Accepted with the run id. Clients poll GET /v1/runs/{id}.
 func (c *Concord) handleCheck(w http.ResponseWriter, r *http.Request) {
-	p, ok := PrincipalFromContext(r.Context())
+	p, ok := principalFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "principal missing from context")
+		writeError(w, http.StatusInternalServerError, "principal missing")
 		return
 	}
-	run, err := c.Store.CreateRun(r.Context(), p.Org.ID, p.TokenID)
+	run, err := c.Store.CreateRun(r.Context(), store.CreateRunParams{
+		OrgID: p.Org.ID, TokenID: p.TokenID, UserID: p.UserID,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "creating run: "+err.Error())
 		return
@@ -532,17 +791,19 @@ func (c *Concord) handleCheck(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	w.Header().Set("Location", "/v1/runs/"+run.ID.String())
+	slug := r.PathValue("slug")
+	pollURL := fmt.Sprintf("/v1/orgs/%s/runs/%s", slug, run.ID)
+	w.Header().Set("Location", pollURL)
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"run_id":     run.ID,
 		"status":     string(store.RunPending),
-		"poll_url":   "/v1/runs/" + run.ID.String(),
+		"poll_url":   pollURL,
 		"started_at": run.StartedAt,
 	})
 }
 
 func (c *Concord) handleFindings(w http.ResponseWriter, r *http.Request) {
-	p, _ := PrincipalFromContext(r.Context())
+	p, _ := principalFromContext(r.Context())
 	runs, err := c.Store.ListRuns(r.Context(), p.Org.ID, 20)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -560,11 +821,11 @@ func (c *Concord) handleFindings(w http.ResponseWriter, r *http.Request) {
 		writeFindingsEnvelope(w, full)
 		return
 	}
-	writeError(w, http.StatusNotFound, "no succeeded run yet — POST /v1/check first")
+	writeError(w, http.StatusNotFound, "no succeeded run yet — POST /v1/orgs/{slug}/check first")
 }
 
 func (c *Concord) handleListRuns(w http.ResponseWriter, r *http.Request) {
-	p, _ := PrincipalFromContext(r.Context())
+	p, _ := principalFromContext(r.Context())
 	runs, err := c.Store.ListRuns(r.Context(), p.Org.ID, 50)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -588,7 +849,7 @@ func (c *Concord) handleListRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Concord) handleGetRun(w http.ResponseWriter, r *http.Request) {
-	p, _ := PrincipalFromContext(r.Context())
+	p, _ := principalFromContext(r.Context())
 	runID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid run id")
@@ -626,20 +887,17 @@ func writeFindingsEnvelope(w http.ResponseWriter, run store.Run) {
 	})
 }
 
-// handleEvents streams Server-Sent Events for the authenticated org.
-// One subscriber per HTTP connection.
 func (c *Concord) handleEvents(w http.ResponseWriter, r *http.Request) {
-	p, ok := PrincipalFromContext(r.Context())
+	p, ok := principalFromContext(r.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "principal missing from context")
+		writeError(w, http.StatusInternalServerError, "principal missing")
 		return
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming unsupported by the underlying ResponseWriter")
+		writeError(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
-
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -654,7 +912,6 @@ func (c *Concord) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
-
 	for {
 		select {
 		case <-r.Context().Done():
@@ -676,10 +933,8 @@ func (c *Concord) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// --- Lookup helpers ---
+// ─── Lookup helpers ────────────────────────────────────────────────────
 
-// lookupOrgBySlug fetches the org and writes the standard 404 / 500 if
-// missing. Returns ok=false when the handler should not continue.
 func (c *Concord) lookupOrgBySlug(w http.ResponseWriter, r *http.Request, slug string) (store.Organization, bool) {
 	org, err := c.Store.GetOrganizationBySlug(r.Context(), slug)
 	if errors.Is(err, store.ErrNotFound) {
@@ -693,8 +948,6 @@ func (c *Concord) lookupOrgBySlug(w http.ResponseWriter, r *http.Request, slug s
 	return org, true
 }
 
-// lookupUser accepts either a UUID or an email and returns the matching user.
-// Used by membership endpoints so operators can attach humans by email.
 func (c *Concord) lookupUser(w http.ResponseWriter, r *http.Request, idStr, email string) (store.User, bool) {
 	if idStr != "" {
 		id, err := uuid.Parse(idStr)
@@ -729,7 +982,7 @@ func (c *Concord) lookupUser(w http.ResponseWriter, r *http.Request, idStr, emai
 	return u, true
 }
 
-// --- Tiny HTTP helpers ---
+// ─── Tiny HTTP helpers ─────────────────────────────────────────────────
 
 func writeJSON(w http.ResponseWriter, code int, body any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -758,14 +1011,8 @@ type statusRecorder struct {
 	status int
 }
 
-func (s *statusRecorder) WriteHeader(code int) {
-	s.status = code
-	s.ResponseWriter.WriteHeader(code)
-}
+func (s *statusRecorder) WriteHeader(code int) { s.status = code; s.ResponseWriter.WriteHeader(code) }
 
-// Flush delegates to the wrapped ResponseWriter so the SSE handler's
-// w.(http.Flusher) type assertion still passes after logging() wraps the
-// response.
 func (s *statusRecorder) Flush() {
 	if f, ok := s.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
