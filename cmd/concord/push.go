@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/concord-dev/concord/internal/cli/credentials"
 	"github.com/concord-dev/concord/internal/report"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
@@ -76,6 +77,7 @@ func addPushFlags(cmd *cobra.Command, opts *pushOpts) {
 // server-side from findings; we send it for fidelity in case the policy
 // engine ever introduces non-summable fields.
 func pushFindings(ctx context.Context, opts pushOpts, findings []apiv1.Finding, startedAt, completedAt time.Time) error {
+	opts.resolveFromCredentials()
 	if err := opts.validate(); err != nil {
 		return err
 	}
@@ -129,15 +131,46 @@ func pushFindings(ctx context.Context, opts pushOpts, findings []apiv1.Finding, 
 	return nil
 }
 
-func (o pushOpts) validate() error {
+// resolveFromCredentials fills empty fields on pushOpts from the stored
+// credentials file. Flag/env wins; credentials are the last-resort fallback
+// so a `concord login` user can drop their --to/--org-slug/--token flags
+// entirely. Missing credentials file is NOT an error here — the caller's
+// validate() will give a flag-oriented message if a slot ends up empty.
+func (o *pushOpts) resolveFromCredentials() {
+	if o.serverURL != "" && o.orgSlug != "" && o.token != "" {
+		return // nothing to do — the flags/envs were fully populated
+	}
+	file, err := credentials.Load()
+	if err != nil {
+		return // ErrNoCredentials or unreadable → fall through to validate()
+	}
+	p, err := file.CurrentProfile()
+	if err != nil {
+		return
+	}
 	if o.serverURL == "" {
-		return errors.New("--to is required (or set CONCORD_SERVER_URL)")
+		o.serverURL = p.Server
 	}
 	if o.orgSlug == "" {
-		return errors.New("--org-slug is required (or set CONCORD_ORG_SLUG)")
+		o.orgSlug = p.DefaultOrg
 	}
 	if o.token == "" {
-		return errors.New("--token is required (or set CONCORD_API_TOKEN)")
+		// Session tokens are usable as Bearer credentials against the
+		// org-scoped API the same way API tokens are — the server-side
+		// middleware accepts both shapes on /v1/orgs/{slug}/runs.
+		o.token = p.Token
+	}
+}
+
+func (o pushOpts) validate() error {
+	if o.serverURL == "" {
+		return errors.New("--to is required (or set CONCORD_SERVER_URL, or run `concord login`)")
+	}
+	if o.orgSlug == "" {
+		return errors.New("--org-slug is required (or set CONCORD_ORG_SLUG, or run `concord orgs use <slug>`)")
+	}
+	if o.token == "" {
+		return errors.New("--token is required (or set CONCORD_API_TOKEN, or run `concord login`)")
 	}
 	return nil
 }

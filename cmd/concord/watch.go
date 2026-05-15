@@ -58,6 +58,12 @@ for an always-on agent.`,
 			if len(loaded) == 0 {
 				return fmt.Errorf("no controls found in %s", controlsDir)
 			}
+			// Resolve push opts from credentials before the banner so the
+			// "agent mode" line accurately reflects what we'll do each
+			// tick. Without this, a credentials-only user would see no
+			// agent-mode banner even though pushFindings would later kick
+			// in from inside the loop.
+			push.resolveFromCredentials()
 			fmt.Fprintf(os.Stderr, "watching %d control(s) every %s; output → %s\n",
 				len(loaded), interval, outputDir)
 			if push.serverURL != "" {
