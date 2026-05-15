@@ -346,6 +346,63 @@ paths:
         '204': { description: Webhook deleted }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /v1/orgs/{slug}/invitations:
+    get:
+      summary: List pending invitations for the org
+      operationId: listInvitations
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Invitation' }
+    post:
+      summary: Mint a pending invitation for (email, role)
+      description: |
+        Returns the persisted invitation AND the plaintext accept token. The
+        token is shown ONCE — if lost, revoke the invitation and re-invite.
+        Any prior pending invitation for the same email is silently revoked
+        and superseded.
+      operationId: createInvitation
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email }
+                role:  { type: string, description: "Role name, e.g. owner|admin|member|viewer" }
+                ttl:   { type: string, description: "Optional Go duration string (default 168h = 7d)" }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationCreated' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /v1/orgs/{slug}/invitations/{id}:
+    delete:
+      summary: Revoke (soft-delete) a pending invitation
+      operationId: revokeInvitation
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - { $ref: '#/components/parameters/UUIDPath' }
+      responses:
+        '204': { description: Revoked }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /v1/orgs/{slug}/trust-portal/settings:
     get:
       summary: Read trust-portal opt-in state + public URL

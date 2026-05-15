@@ -13,6 +13,7 @@ package store
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -81,3 +82,14 @@ func (s *Store) Close() { s.pool.Close() }
 // Pool exposes the raw pgxpool handle for exotic queries; prefer typed
 // methods for everything else.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
+
+// hexToBytes is the tiny shim used by token-bearing tables (invitation,
+// password_reset) that store sha256 hashes as BYTEA. auth.HashSecret returns
+// hex; we decode it once at the call site rather than storing hex.
+func hexToBytes(s string) ([]byte, error) {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return nil, fmt.Errorf("decoding token hash hex: %w", err)
+	}
+	return b, nil
+}

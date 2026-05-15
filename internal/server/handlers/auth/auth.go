@@ -5,6 +5,7 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -96,7 +97,9 @@ func (h *Handlers) MyOrgs(w http.ResponseWriter, r *http.Request) {
 }
 
 // clientIP picks the leftmost X-Forwarded-For entry, falling back to
-// RemoteAddr's host portion.
+// RemoteAddr's host portion. Uses net.SplitHostPort so IPv6 literals
+// (`[::1]:8080`) lose their brackets — Postgres `inet` rejects bracketed
+// addresses and we store this column unconditionally.
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		if i := strings.Index(xff, ","); i > 0 {
@@ -104,8 +107,8 @@ func clientIP(r *http.Request) string {
 		}
 		return strings.TrimSpace(xff)
 	}
-	if i := strings.LastIndex(r.RemoteAddr, ":"); i > 0 {
-		return r.RemoteAddr[:i]
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
 	}
 	return r.RemoteAddr
 }

@@ -53,6 +53,56 @@ paths:
         '404':
           description: Org not found, portal disabled, or no successful run yet
 
+  /v1/invitations/accept:
+    get:
+      summary: Preview an invitation (public — no auth needed)
+      description: |
+        Resolves an invitation token to the org name + role + email it was
+        issued for, plus a `needs_account` hint so the frontend can decide
+        whether to show a "create account" form or a "you already have an
+        account" message.
+      operationId: previewInvitation
+      security: []
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Preview
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationPreview' }
+        '404': { description: Token unknown, accepted, or revoked }
+        '410': { description: Token expired — request a fresh invitation }
+    post:
+      summary: Accept an invitation
+      description: |
+        Completes the invitation flow: optionally creates the user account
+        (when `needs_account` was true in the preview) and attaches them to
+        the inviting org with the invited role. Issues a session token so
+        the caller is logged in immediately.
+
+        For existing accounts the `first_name` / `last_name` / `password`
+        fields are ignored — the existing credentials stay in force.
+      operationId: acceptInvitation
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvitationAcceptRequest' }
+      responses:
+        '200':
+          description: Accepted; session attached
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationAcceptResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: Token unknown, accepted, or revoked }
+        '410': { description: Token expired }
+
   # ─── Auth ──────────────────────────────────────────────────────────────
 
   /v1/auth/login:
@@ -82,6 +132,67 @@ paths:
       responses:
         '204': { description: Session revoked }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/auth/password-reset:
+    post:
+      summary: Request a password reset link
+      description: |
+        Always returns `200` regardless of whether the email is on file —
+        prevents user-enumeration via response status. When the email
+        matches an account, a single-use token is minted and delivered
+        out-of-band (server logs today; email when that lands).
+      operationId: requestPasswordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200':
+          description: Always 200 (acknowledgement only — no enumeration leak)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+                  note:   { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /v1/auth/password-reset/confirm:
+    post:
+      summary: Confirm a password reset
+      description: |
+        Validates the reset token and atomically: updates the user's
+        password, marks the token used, revokes every active session for
+        the user, then mints a fresh session so the caller is logged in
+        immediately. API tokens are left alone.
+      operationId: confirmPasswordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, new_password]
+              properties:
+                token:        { type: string }
+                new_password: { type: string, format: password }
+      responses:
+        '200':
+          description: Reset accepted; new session attached
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: Token unknown or already consumed }
+        '410': { description: Token expired — request a fresh reset }
 
   # ─── Session-scoped (user lives across multiple orgs) ──────────────────
 

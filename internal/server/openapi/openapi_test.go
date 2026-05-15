@@ -69,8 +69,11 @@ func TestSpec_CoversEveryExpectedRoute(t *testing.T) {
 		"/healthz":      {"get"},
 		"/version":      {"get"},
 		// Auth.
-		"/v1/auth/login":  {"post"},
-		"/v1/auth/logout": {"post"},
+		"/v1/auth/login":                        {"post"},
+		"/v1/auth/logout":                       {"post"},
+		"/v1/auth/password-reset":               {"post"},
+		"/v1/auth/password-reset/confirm":       {"post"},
+		"/v1/invitations/accept":                {"get", "post"},
 		// Session-scoped.
 		"/v1/me":      {"get"},
 		"/v1/me/orgs": {"get"},
@@ -89,6 +92,8 @@ func TestSpec_CoversEveryExpectedRoute(t *testing.T) {
 		"/v1/orgs/{slug}/webhooks/{id}":           {"get", "put", "delete"},
 		"/v1/orgs/{slug}/trust-portal":            {"get"},
 		"/v1/orgs/{slug}/trust-portal/settings":   {"get", "put"},
+		"/v1/orgs/{slug}/invitations":             {"get", "post"},
+		"/v1/orgs/{slug}/invitations/{id}":        {"delete"},
 		// Operator (SaaS-operator back-door — gates CONCORD_OPERATOR_TOKEN).
 		"/operator/v1/orgs":                         {"get", "post"},
 		"/operator/v1/orgs/{slug}":                  {"get"},

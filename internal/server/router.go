@@ -45,11 +45,19 @@ func mountPublic(mux *http.ServeMux, h *public.Handlers) {
 	mux.HandleFunc("GET /docs", h.Docs)
 	// Public trust portal — opt-in per org; 404s when disabled.
 	mux.HandleFunc("GET /v1/orgs/{slug}/trust-portal", h.TrustPortal)
+	// Invitation accept flow — public because the invitee doesn't have a
+	// session yet. Token in the URL/body is the proof.
+	mux.HandleFunc("GET /v1/invitations/accept", h.PreviewInvitation)
+	mux.HandleFunc("POST /v1/invitations/accept", h.AcceptInvitation)
 }
 
 func mountAuth(mux *http.ServeMux, h *auth.Handlers, mw *middleware.Middleware) {
 	mux.HandleFunc("POST /v1/auth/login", h.Login)
 	mux.Handle("POST /v1/auth/logout", mw.RequireSession(http.HandlerFunc(h.Logout)))
+	// Password reset is unauthenticated by design — that's the whole point of
+	// "forgot password". Token in the body is the proof.
+	mux.HandleFunc("POST /v1/auth/password-reset", h.RequestPasswordReset)
+	mux.HandleFunc("POST /v1/auth/password-reset/confirm", h.ConfirmPasswordReset)
 }
 
 func mountOperator(mux *http.ServeMux, h *operator.Handlers, mw *middleware.Middleware) {
@@ -88,6 +96,7 @@ func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware)
 	whDelete := mw.RequireOrgPerm("webhooks:delete")
 	orgRead := mw.RequireOrgPerm("org:read")
 	tpManage := mw.RequireOrgPerm("trust_portal:manage")
+	memInvite := mw.RequireOrgPerm("members:invite")
 
 	mux.Handle("GET /v1/orgs/{slug}/me", orgRead(http.HandlerFunc(h.Me)))
 
@@ -109,6 +118,12 @@ func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware)
 	mux.Handle("GET /v1/orgs/{slug}/controls/{id}/overrides", read(http.HandlerFunc(h.GetOverride)))
 	mux.Handle("PUT /v1/orgs/{slug}/controls/{id}/overrides", override(http.HandlerFunc(h.PutOverride)))
 	mux.Handle("DELETE /v1/orgs/{slug}/controls/{id}/overrides", override(http.HandlerFunc(h.DeleteOverride)))
+
+	// Invitations: org admins invite teammates by email. The accept flow
+	// lives under /v1/invitations/accept (public) — see mountPublic.
+	mux.Handle("POST /v1/orgs/{slug}/invitations", memInvite(http.HandlerFunc(h.CreateInvitation)))
+	mux.Handle("GET /v1/orgs/{slug}/invitations", memInvite(http.HandlerFunc(h.ListInvitations)))
+	mux.Handle("DELETE /v1/orgs/{slug}/invitations/{id}", memInvite(http.HandlerFunc(h.RevokeInvitation)))
 
 	// Trust portal opt-in toggle. The public render lives in mountPublic.
 	mux.Handle("GET /v1/orgs/{slug}/trust-portal/settings", orgRead(http.HandlerFunc(h.GetTrustPortalSettings)))

@@ -24,6 +24,16 @@ type User struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
+// userColumns is the canonical SELECT projection for User. Single source of
+// truth so a new column lands everywhere at once.
+const userColumns = `id, first_name, last_name, email, email_verified_at, created_at, updated_at`
+
+// userScanArgs returns the pointer slice matching userColumns, in order.
+// Pass to pgx.Row.Scan / pgx.Rows.Scan with `Scan(userScanArgs(&u)...)`.
+func userScanArgs(u *User) []any {
+	return []any{&u.ID, &u.FirstName, &u.LastName, &u.Email, &u.EmailVerifiedAt, &u.CreatedAt, &u.UpdatedAt}
+}
+
 // CreateUserParams is the input for CreateUser. Password may be empty for
 // invite-pending users; the password_hash column stays NULL in that case.
 type CreateUserParams struct {
@@ -51,9 +61,9 @@ func (s *Store) CreateUser(ctx context.Context, p CreateUserParams) (User, error
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO "user"(first_name, last_name, email, password_hash)
 		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, first_name, last_name, email, email_verified_at, created_at, updated_at`,
+		 RETURNING `+userColumns,
 		p.FirstName, p.LastName, p.Email, pwHash,
-	).Scan(&u.ID, &u.FirstName, &u.LastName, &u.Email, &u.EmailVerifiedAt, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(userScanArgs(&u)...)
 	if err != nil {
 		return User{}, fmt.Errorf("inserting user: %w", err)
 	}
@@ -64,9 +74,8 @@ func (s *Store) CreateUser(ctx context.Context, p CreateUserParams) (User, error
 func (s *Store) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, first_name, last_name, email, email_verified_at, created_at, updated_at
-		 FROM "user" WHERE id = $1`, id,
-	).Scan(&u.ID, &u.FirstName, &u.LastName, &u.Email, &u.EmailVerifiedAt, &u.CreatedAt, &u.UpdatedAt)
+		`SELECT `+userColumns+` FROM "user" WHERE id = $1`, id,
+	).Scan(userScanArgs(&u)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -77,9 +86,8 @@ func (s *Store) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, first_name, last_name, email, email_verified_at, created_at, updated_at
-		 FROM "user" WHERE lower(email) = lower($1)`, email,
-	).Scan(&u.ID, &u.FirstName, &u.LastName, &u.Email, &u.EmailVerifiedAt, &u.CreatedAt, &u.UpdatedAt)
+		`SELECT `+userColumns+` FROM "user" WHERE lower(email) = lower($1)`, email,
+	).Scan(userScanArgs(&u)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -91,10 +99,11 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) 
 func (s *Store) VerifyUserPassword(ctx context.Context, email, plaintext string) (User, error) {
 	var u User
 	var hash *string
+	dest := append(userScanArgs(&u), &hash)
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, first_name, last_name, email, email_verified_at, created_at, updated_at, password_hash
+		`SELECT `+userColumns+`, password_hash
 		 FROM "user" WHERE lower(email) = lower($1)`, email,
-	).Scan(&u.ID, &u.FirstName, &u.LastName, &u.Email, &u.EmailVerifiedAt, &u.CreatedAt, &u.UpdatedAt, &hash)
+	).Scan(dest...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -114,11 +123,33 @@ func (s *Store) VerifyUserPassword(ctx context.Context, email, plaintext string)
 	return u, nil
 }
 
+// UpdateUserPassword replaces the user's password_hash. Used by the password
+// reset confirmation flow. The caller is responsible for revoking sessions —
+// this method only changes the credential.
+func (s *Store) UpdateUserPassword(ctx context.Context, userID uuid.UUID, plaintext string) error {
+	if plaintext == "" {
+		return errors.New("password is required")
+	}
+	hash, err := auth.HashPassword(plaintext)
+	if err != nil {
+		return err
+	}
+	ct, err := s.pool.Exec(ctx,
+		`UPDATE "user" SET password_hash = $1, updated_at = now() WHERE id = $2`,
+		hash, userID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ListUsers returns every user.
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, first_name, last_name, email, email_verified_at, created_at, updated_at
-		 FROM "user" ORDER BY created_at ASC`)
+		`SELECT `+userColumns+` FROM "user" ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -126,8 +157,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	var out []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.FirstName, &u.LastName, &u.Email,
-			&u.EmailVerifiedAt, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(userScanArgs(&u)...); err != nil {
 			return nil, err
 		}
 		out = append(out, u)

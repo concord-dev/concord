@@ -12,8 +12,10 @@ import (
 // leaked secret can be triaged at a glance (API tokens may be safe to rotate
 // quietly, session tokens always trigger an immediate revoke).
 const (
-	APITokenPrefix     = "concord_"
-	SessionTokenPrefix = "concord_sess_"
+	APITokenPrefix       = "concord_"
+	SessionTokenPrefix   = "concord_sess_"
+	InvitationPrefix     = "concord_inv_"
+	PasswordResetPrefix  = "concord_reset_"
 )
 
 // GenerateSecret returns a URL-safe random secret of the requested byte

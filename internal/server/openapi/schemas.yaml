@@ -265,6 +265,79 @@ components:
           description: "Always `agent` for runs created via this endpoint."
         url: { type: string, description: "Relative URL of the persisted run" }
 
+    Invitation:
+      type: object
+      required: [id, email, role, expires_at, created_at]
+      properties:
+        id:          { type: string, format: uuid }
+        email:       { type: string, format: email }
+        role:        { type: string }
+        invited_by:  { type: string, format: uuid, nullable: true }
+        expires_at:  { type: string, format: date-time }
+        accepted_at: { type: string, format: date-time, nullable: true }
+        revoked_at:  { type: string, format: date-time, nullable: true }
+        created_at:  { type: string, format: date-time }
+
+    InvitationCreated:
+      type: object
+      required: [invitation, token, accept_url]
+      properties:
+        invitation: { $ref: '#/components/schemas/Invitation' }
+        token:
+          type: string
+          description: |
+            Plaintext invitation token. Shown ONCE. Embed it in the accept
+            URL or send it out-of-band — the server only persists sha256(token).
+        accept_url: { type: string, format: uri }
+        note:       { type: string }
+
+    InvitationPreview:
+      type: object
+      required: [email, role, organization, expires_at, needs_account]
+      properties:
+        email:      { type: string, format: email }
+        role:       { type: string }
+        organization:
+          type: object
+          required: [slug, name]
+          properties:
+            slug: { type: string }
+            name: { type: string }
+        expires_at:    { type: string, format: date-time }
+        needs_account:
+          type: boolean
+          description: |
+            True when the invitee's email is new to Concord — the frontend
+            should collect first_name + last_name + password on accept.
+            False when an account already exists; accept just attaches the
+            role to the org.
+
+    InvitationAcceptRequest:
+      type: object
+      required: [token]
+      properties:
+        token:      { type: string }
+        first_name: { type: string, description: "Required only if needs_account was true" }
+        last_name:  { type: string, description: "Required only if needs_account was true" }
+        password:   { type: string, format: password, description: "Required only if needs_account was true" }
+
+    InvitationAcceptResult:
+      type: object
+      required: [session_id, token, expires_at, user, organization, role]
+      properties:
+        session_id:    { type: string, format: uuid }
+        token:         { type: string, description: "Session token (concord_sess_…) — store in Authorization: Bearer …" }
+        expires_at:    { type: string, format: date-time }
+        user:          { $ref: '#/components/schemas/User' }
+        organization:
+          type: object
+          properties:
+            slug: { type: string }
+            name: { type: string }
+        role:          { type: string }
+        created_user:  { type: boolean, description: "True when accept just inserted a new user row" }
+        assigned_role: { type: boolean, description: "False on idempotent re-accept of an existing membership" }
+
     TrustPortalSettings:
       type: object
       required: [enabled, url]
