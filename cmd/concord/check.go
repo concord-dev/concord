@@ -12,6 +12,13 @@ import (
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
 	"github.com/concord-dev/concord/internal/evidence"
+	awsev "github.com/concord-dev/concord/internal/evidence/aws"
+	ghev "github.com/concord-dev/concord/internal/evidence/github"
+	hfev "github.com/concord-dev/concord/internal/evidence/huggingface"
+	mlflowev "github.com/concord-dev/concord/internal/evidence/mlflow"
+	oktaev "github.com/concord-dev/concord/internal/evidence/okta"
+	snykev "github.com/concord-dev/concord/internal/evidence/snyk"
+	wandbev "github.com/concord-dev/concord/internal/evidence/wandb"
 	"github.com/concord-dev/concord/internal/policy"
 	"github.com/concord-dev/concord/internal/report"
 	"github.com/concord-dev/concord/internal/runner"
@@ -106,30 +113,30 @@ func buildRegistry(fixturesOnly bool) *evidence.Registry {
 		return reg
 	}
 	if token := githubToken(); token != "" {
-		reg.Register("github", evidence.NewGitHubCollector(token))
+		reg.Register("github", ghev.New(token))
 	}
 	if hasAWSCredentials() {
-		if c, err := evidence.NewAWSCollector(context.Background(), os.Getenv("AWS_REGION")); err == nil {
+		if c, err := awsev.New(context.Background(), os.Getenv("AWS_REGION")); err == nil {
 			reg.Register("aws", c)
 		} else {
 			fmt.Fprintln(os.Stderr, "warning: AWS credentials detected but config load failed:", err)
 		}
 	}
 	if uri := os.Getenv("MLFLOW_TRACKING_URI"); uri != "" {
-		reg.Register("mlflow", evidence.NewMLflowCollector(uri, os.Getenv("MLFLOW_TRACKING_TOKEN")))
+		reg.Register("mlflow", mlflowev.New(uri, os.Getenv("MLFLOW_TRACKING_TOKEN")))
 	}
 	if org, token := os.Getenv("OKTA_ORG_URL"), os.Getenv("OKTA_API_TOKEN"); org != "" && token != "" {
-		reg.Register("okta", evidence.NewOktaCollector(org, token))
+		reg.Register("okta", oktaev.New(org, token))
 	}
 	if tok := os.Getenv("SNYK_TOKEN"); tok != "" {
-		reg.Register("snyk", evidence.NewSnykCollector(tok))
+		reg.Register("snyk", snykev.New(tok))
 	}
 	if key := os.Getenv("WANDB_API_KEY"); key != "" {
-		reg.Register("wandb", evidence.NewWandbCollector(os.Getenv("WANDB_BASE_URL"), key))
+		reg.Register("wandb", wandbev.New(os.Getenv("WANDB_BASE_URL"), key))
 	}
 	// HuggingFace is always registered — anonymous reads of the public Hub
 	// work without a token. HUGGINGFACE_TOKEN unlocks private repos + higher rate limits.
-	reg.Register("huggingface", evidence.NewHuggingFaceCollector(os.Getenv("HUGGINGFACE_BASE_URL"), os.Getenv("HUGGINGFACE_TOKEN")))
+	reg.Register("huggingface", hfev.New(os.Getenv("HUGGINGFACE_BASE_URL"), os.Getenv("HUGGINGFACE_TOKEN")))
 	return reg
 }
 

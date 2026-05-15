@@ -13,6 +13,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/store"
 )
 
@@ -22,8 +23,8 @@ import (
 var webhookHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 // signPayload returns the value for the X-Concord-Signature header. The
-// "sha256=" prefix matches the GitHub / Stripe webhook convention so
-// receivers can pick the algorithm from the header.
+// "sha256=" prefix matches the GitHub / Stripe webhook convention so receivers
+// can pick the algorithm from the header.
 func signPayload(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)
@@ -39,14 +40,13 @@ func VerifyWebhookSignature(secret string, body []byte, headerValue string) bool
 
 // broadcast publishes an event to in-process subscribers AND fires per-org
 // webhooks. Webhook delivery runs in a detached goroutine so a slow receiver
-// cannot stall the worker that's calling this. Errors get logged + recorded
-// on the webhook row's last_status/last_error.
-func (c *Concord) broadcast(e Event) {
+// cannot stall the worker that's calling this.
+func (c *Concord) broadcast(e bus.Event) {
 	c.bus.Publish(e)
 	go c.fireWebhooks(e)
 }
 
-func (c *Concord) fireWebhooks(e Event) {
+func (c *Concord) fireWebhooks(e bus.Event) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -73,7 +73,7 @@ func (c *Concord) fireWebhooks(e Event) {
 
 // eventKindAllowed implements the EventKinds filter: empty list = all kinds,
 // non-empty = match exact kind names.
-func eventKindAllowed(allowed []string, kind EventKind) bool {
+func eventKindAllowed(allowed []string, kind bus.Kind) bool {
 	if len(allowed) == 0 {
 		return true
 	}
@@ -85,10 +85,9 @@ func eventKindAllowed(allowed []string, kind EventKind) bool {
 	return false
 }
 
-// deliverOne POSTs body to wh.URL with HMAC signing + standard headers.
-// Result is persisted to the webhook row so operators can see last delivery
-// status. Never blocks the caller; intended to run inside a goroutine.
-func (c *Concord) deliverOne(wh store.Webhook, kind EventKind, body []byte) {
+// deliverOne POSTs body to wh.URL with HMAC signing + standard headers. Result
+// is persisted to the webhook row so operators can see last delivery status.
+func (c *Concord) deliverOne(wh store.Webhook, kind bus.Kind, body []byte) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 

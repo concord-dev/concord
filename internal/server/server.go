@@ -4,29 +4,24 @@
 //   - User sessions (Authorization: Bearer concord_sess_...) for the web
 //     dashboard
 //
-// Both paths converge on a principal carrying the resolved org and (for
+// Both converge on an authctx.Principal carrying the resolved org and (for
 // session auth) the user. Per-endpoint permission checks consult the RBAC
 // tables via Store.HasPermission.
 //
 // File layout:
 //
-//	server.go                  Concord struct + NewConcord + lifecycle
-//	router.go                  Router() with the wired mux
-//	middleware.go              requireAdmin/requireSession/requireOrgPerm
-//	http_helpers.go            writeJSON, logging middleware
-//	lookups.go                 lookupOrgBySlug, lookupUser, controlExists
-//	handlers_public.go         /healthz, /version, /openapi.yaml, /docs
-//	handlers_auth.go           /v1/auth/* and session-scoped /v1/me*
-//	handlers_admin_orgs.go     /admin/v1/orgs, users, roles, permissions
-//	handlers_admin_members.go  /admin/v1/orgs/{slug}/members/*
-//	handlers_admin_tokens.go   /admin/v1/orgs/{slug}/tokens/*
-//	handlers_org_controls.go   /v1/orgs/{slug}/me, frameworks, controls
-//	handlers_org_runs.go       /v1/orgs/{slug}/check, findings, runs/*
-//	handlers_org_events.go     /v1/orgs/{slug}/events (SSE)
-//	handlers_org_overrides.go  /v1/orgs/{slug}/controls/{id}/overrides
-//	handlers_org_schedule.go   /v1/orgs/{slug}/schedule
-//	handlers_org_webhooks.go   /v1/orgs/{slug}/webhooks/*
-//	worker.go, bus.go, scheduler.go, webhook_delivery.go (cross-cutting)
+//	server.go              Concord struct + NewConcord + lifecycle
+//	router.go              Router() with the wired mux
+//	worker.go              In-process run worker pool
+//	scheduler.go           Cron-driven schedule poller
+//	webhook_delivery.go    Outbound webhook signing + delivery
+//	handlers/<group>/      Per-domain handler subpackages
+//	middleware/            RequireAdmin / RequireSession / RequireOrgPerm
+//	httpx/                 JSON + Error + Logging helpers
+//	authctx/               Principal + session context types
+//	bus/                   In-process event bus (SSE fan-out)
+//	cronx/                 Cron expression parsing
+//	openapi/               Embedded API spec
 package server
 
 import (
@@ -39,6 +34,7 @@ import (
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
 	"github.com/concord-dev/concord/internal/evidence"
+	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/store"
 )
 
@@ -53,7 +49,7 @@ type Concord struct {
 	SessionTTL time.Duration
 
 	worker    *Worker
-	bus       *Bus
+	bus       *bus.Bus
 	scheduler *Scheduler
 	mu        sync.Mutex
 }
@@ -67,14 +63,13 @@ type Options struct {
 	Store        *store.Store
 	AdminToken   string
 	Version      string
-	SessionTTL   time.Duration // default: 24h
+	SessionTTL   time.Duration
 	Worker       WorkerOpts
 	Scheduler    SchedulerOpts
 }
 
 // NewConcord loads controls + config and wires the Store, worker, scheduler,
-// and event bus. Returns an error when the controls directory is empty or
-// the Store is missing.
+// and event bus.
 func NewConcord(opts Options) (*Concord, error) {
 	if opts.Store == nil {
 		return nil, errors.New("Store is required")
@@ -101,7 +96,7 @@ func NewConcord(opts Options) (*Concord, error) {
 		AdminToken: opts.AdminToken,
 		Version:    opts.Version,
 		SessionTTL: opts.SessionTTL,
-		bus:        NewBus(),
+		bus:        bus.New(),
 	}
 	c.worker = NewWorker(c, opts.Worker)
 	c.worker.Start()
@@ -124,8 +119,8 @@ func applyDefaults(opts *Options) {
 	}
 }
 
-// resolveRegistry returns the registry the caller supplied or builds a
-// default one. Default + FixturesOnly is the local-dev mode.
+// resolveRegistry returns the registry the caller supplied or builds a default
+// one. Default + FixturesOnly is the local-dev mode.
 func resolveRegistry(opts Options) *evidence.Registry {
 	if opts.Registry != nil {
 		return opts.Registry
@@ -137,8 +132,8 @@ func resolveRegistry(opts Options) *evidence.Registry {
 	return reg
 }
 
-// Shutdown stops the scheduler then drains the worker, in that order — so
-// the scheduler can't enqueue new work after the worker queue is closing.
+// Shutdown stops the scheduler then drains the worker, in that order — so the
+// scheduler can't enqueue new work after the worker queue is closing.
 func (c *Concord) Shutdown(ctx context.Context) error {
 	_ = c.scheduler.Shutdown(ctx)
 	return c.worker.Shutdown(ctx)
@@ -147,5 +142,5 @@ func (c *Concord) Shutdown(ctx context.Context) error {
 // SchedulerForTest exposes the scheduler for tests that need to fire ticks manually.
 func (c *Concord) SchedulerForTest() *Scheduler { return c.scheduler }
 
-// Bus exposes the event bus to callers that subscribe (the SSE handler).
-func (c *Concord) Bus() *Bus { return c.bus }
+// Bus exposes the event bus to callers (the SSE handler).
+func (c *Concord) Bus() *bus.Bus { return c.bus }

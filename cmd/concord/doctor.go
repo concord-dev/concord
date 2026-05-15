@@ -11,7 +11,13 @@ import (
 
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
-	"github.com/concord-dev/concord/internal/evidence"
+	awsev "github.com/concord-dev/concord/internal/evidence/aws"
+	ghev "github.com/concord-dev/concord/internal/evidence/github"
+	hfev "github.com/concord-dev/concord/internal/evidence/huggingface"
+	mlflowev "github.com/concord-dev/concord/internal/evidence/mlflow"
+	oktaev "github.com/concord-dev/concord/internal/evidence/okta"
+	snykev "github.com/concord-dev/concord/internal/evidence/snyk"
+	wandbev "github.com/concord-dev/concord/internal/evidence/wandb"
 )
 
 // prober is the minimal probe contract every live collector implements.
@@ -144,7 +150,7 @@ func (d *doctor) runCollectors() {
 
 	// GitHub
 	if tok := githubToken(); tok != "" {
-		c := evidence.NewGitHubCollector(tok)
+		c := ghev.New(tok)
 		d.probe("github", c, "set CONCORD_GITHUB_TOKEN or GITHUB_TOKEN")
 	} else {
 		d.warn("github", "no token in CONCORD_GITHUB_TOKEN or GITHUB_TOKEN — controls using source=github will fall back to fixtures")
@@ -152,7 +158,7 @@ func (d *doctor) runCollectors() {
 
 	// AWS
 	if hasAWSCredentials() {
-		c, err := evidence.NewAWSCollector(d.ctx, os.Getenv("AWS_REGION"))
+		c, err := awsev.New(d.ctx, os.Getenv("AWS_REGION"))
 		if err != nil {
 			d.fail("aws", "loading SDK config: "+err.Error())
 		} else {
@@ -164,7 +170,7 @@ func (d *doctor) runCollectors() {
 
 	// MLflow
 	if uri := os.Getenv("MLFLOW_TRACKING_URI"); uri != "" {
-		c := evidence.NewMLflowCollector(uri, os.Getenv("MLFLOW_TRACKING_TOKEN"))
+		c := mlflowev.New(uri, os.Getenv("MLFLOW_TRACKING_TOKEN"))
 		d.probe("mlflow", c, "verify MLFLOW_TRACKING_URI and (optional) MLFLOW_TRACKING_TOKEN")
 	} else {
 		d.warn("mlflow", "MLFLOW_TRACKING_URI not set — controls using source=mlflow will fall back to fixtures")
@@ -174,7 +180,7 @@ func (d *doctor) runCollectors() {
 	org, otok := os.Getenv("OKTA_ORG_URL"), os.Getenv("OKTA_API_TOKEN")
 	switch {
 	case org != "" && otok != "":
-		c := evidence.NewOktaCollector(org, otok)
+		c := oktaev.New(org, otok)
 		d.probe("okta", c, "verify OKTA_ORG_URL and OKTA_API_TOKEN")
 	case org != "" || otok != "":
 		d.warn("okta", "only one of OKTA_ORG_URL / OKTA_API_TOKEN set — both are required")
@@ -184,7 +190,7 @@ func (d *doctor) runCollectors() {
 
 	// Snyk
 	if tok := os.Getenv("SNYK_TOKEN"); tok != "" {
-		c := evidence.NewSnykCollector(tok)
+		c := snykev.New(tok)
 		d.probe("snyk", c, "verify SNYK_TOKEN is valid for your org")
 	} else {
 		d.warn("snyk", "SNYK_TOKEN not set — controls using source=snyk will fall back to fixtures")
@@ -192,7 +198,7 @@ func (d *doctor) runCollectors() {
 
 	// Weights & Biases
 	if key := os.Getenv("WANDB_API_KEY"); key != "" {
-		c := evidence.NewWandbCollector(os.Getenv("WANDB_BASE_URL"), key)
+		c := wandbev.New(os.Getenv("WANDB_BASE_URL"), key)
 		d.probe("wandb", c, "verify WANDB_API_KEY at wandb.me/authorize")
 	} else {
 		d.warn("wandb", "WANDB_API_KEY not set — controls using source=wandb will fall back to fixtures")
@@ -201,7 +207,7 @@ func (d *doctor) runCollectors() {
 	// HuggingFace Hub — only probe when explicitly configured to avoid
 	// firing a public-network request on every doctor run.
 	if tok := os.Getenv("HUGGINGFACE_TOKEN"); tok != "" {
-		c := evidence.NewHuggingFaceCollector(os.Getenv("HUGGINGFACE_BASE_URL"), tok)
+		c := hfev.New(os.Getenv("HUGGINGFACE_BASE_URL"), tok)
 		d.probe("huggingface", c, "verify HUGGINGFACE_TOKEN at huggingface.co/settings/tokens")
 	} else {
 		d.warn("huggingface", "HUGGINGFACE_TOKEN not set — anonymous reads still work, but rate-limited")

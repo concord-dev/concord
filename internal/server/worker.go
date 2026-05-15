@@ -14,15 +14,14 @@ import (
 	"github.com/concord-dev/concord/internal/policy"
 	"github.com/concord-dev/concord/internal/report"
 	"github.com/concord-dev/concord/internal/runner"
+	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// runJob is one queued evaluation request. The job carries enough identifying
-// information to update the corresponding run row; the actual control library
-// + registry are looked up off the Worker's Concord pointer.
+// runJob is one queued evaluation request.
 type runJob struct {
 	OrgID uuid.UUID
-	RunID    uuid.UUID
+	RunID uuid.UUID
 }
 
 // Worker is an in-process job pool. v0 runs jobs entirely within this process,
@@ -42,13 +41,12 @@ type Worker struct {
 
 // WorkerOpts tunes worker behavior. Zero values are sensible defaults.
 type WorkerOpts struct {
-	PoolSize  int           // number of goroutines pulling from the queue
-	QueueSize int           // buffered channel capacity; full → Enqueue returns ErrQueueFull
-	Timeout   time.Duration // per-job context budget
+	PoolSize  int
+	QueueSize int
+	Timeout   time.Duration
 }
 
-// ErrQueueFull is returned by Enqueue when the buffer is at capacity. Callers
-// should surface this as 503 so the client backs off.
+// ErrQueueFull is returned by Enqueue when the buffer is at capacity.
 var ErrQueueFull = errors.New("run queue full")
 
 // NewWorker constructs a Worker bound to the given Concord. Must call Start
@@ -72,8 +70,7 @@ func NewWorker(c *Concord, opts WorkerOpts) *Worker {
 	}
 }
 
-// Start spins up PoolSize goroutines and returns immediately. Safe to call
-// multiple times; only the first call has effect.
+// Start spins up PoolSize goroutines and returns immediately.
 func (w *Worker) Start() {
 	w.startOnce.Do(func() {
 		for range w.pool {
@@ -84,9 +81,9 @@ func (w *Worker) Start() {
 }
 
 // Enqueue submits a job. Returns ErrQueueFull if the buffer is at capacity.
-func (w *Worker) Enqueue(job runJob) error {
+func (w *Worker) Enqueue(orgID, runID uuid.UUID) error {
 	select {
-	case w.queue <- job:
+	case w.queue <- runJob{OrgID: orgID, RunID: runID}:
 		return nil
 	default:
 		return ErrQueueFull
@@ -94,8 +91,7 @@ func (w *Worker) Enqueue(job runJob) error {
 }
 
 // Shutdown stops the worker after every in-flight job finishes (or
-// shutdownCtx fires). Subsequent Enqueue calls panic on a closed channel — by
-// design, the caller should stop accepting work first.
+// shutdownCtx fires).
 func (w *Worker) Shutdown(shutdownCtx context.Context) error {
 	w.stopOnce.Do(func() { close(w.queue) })
 
@@ -119,9 +115,9 @@ func (w *Worker) loop() {
 	}
 }
 
-// execute is the actual work of one job. Failures are recorded on the run
-// row; we never panic out of the worker loop. Lifecycle events are emitted
-// on the Concord bus so SSE subscribers see transitions in real time.
+// execute is the actual work of one job. Failures are recorded on the run row;
+// we never panic out of the worker loop. Lifecycle events are emitted on the
+// Concord bus so SSE subscribers see transitions in real time.
 func (w *Worker) execute(job runJob) {
 	ctx, cancel := context.WithTimeout(context.Background(), w.timeout)
 	defer cancel()
@@ -130,8 +126,8 @@ func (w *Worker) execute(job runJob) {
 		fmt.Fprintf(os.Stderr, "worker: marking run %s running: %v\n", job.RunID, err)
 		return
 	}
-	w.c.broadcast(Event{
-		Kind: EventRunStarted, OrgID: job.OrgID, RunID: job.RunID,
+	w.c.broadcast(bus.Event{
+		Kind: bus.RunStarted, OrgID: job.OrgID, RunID: job.RunID,
 		At: time.Now().UTC(), Status: string(store.RunRunning),
 	})
 
@@ -139,8 +135,8 @@ func (w *Worker) execute(job runJob) {
 		if rec := recover(); rec != nil {
 			msg := fmt.Sprintf("panic: %v", rec)
 			_ = w.c.Store.FailRun(context.Background(), job.RunID, msg)
-			w.c.broadcast(Event{
-				Kind: EventRunFailed, OrgID: job.OrgID, RunID: job.RunID,
+			w.c.broadcast(bus.Event{
+				Kind: bus.RunFailed, OrgID: job.OrgID, RunID: job.RunID,
 				At: time.Now().UTC(), Error: msg,
 			})
 			fmt.Fprintf(os.Stderr, "worker: %s\n", msg)
@@ -171,23 +167,21 @@ func (w *Worker) execute(job runJob) {
 	findingsJSON, _ := json.Marshal(findings)
 	if err := w.c.Store.CompleteRun(ctx, job.RunID, summaryJSON, findingsJSON); err != nil {
 		_ = w.c.Store.FailRun(context.Background(), job.RunID, err.Error())
-		w.c.broadcast(Event{
-			Kind: EventRunFailed, OrgID: job.OrgID, RunID: job.RunID,
+		w.c.broadcast(bus.Event{
+			Kind: bus.RunFailed, OrgID: job.OrgID, RunID: job.RunID,
 			At: time.Now().UTC(), Error: err.Error(),
 		})
 		fmt.Fprintf(os.Stderr, "worker: persisting run %s: %v\n", job.RunID, err)
 		return
 	}
-	w.c.broadcast(Event{
-		Kind: EventRunCompleted, OrgID: job.OrgID, RunID: job.RunID,
+	w.c.broadcast(bus.Event{
+		Kind: bus.RunCompleted, OrgID: job.OrgID, RunID: job.RunID,
 		At: time.Now().UTC(), Status: string(store.RunSucceeded), Summary: summaryJSON,
 	})
 }
 
-// --- Test helpers ---
-
 // waitForRun polls the store until run reaches a terminal state or ctx fires.
-// Test-only; production callers should poll the HTTP endpoint instead.
+// Test-only helper.
 func waitForRun(ctx context.Context, st *store.Store, orgID, runID uuid.UUID) (store.Run, error) {
 	for {
 		r, err := st.GetRun(ctx, orgID, runID)
