@@ -12,6 +12,7 @@ import (
 
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
+	"github.com/concord-dev/concord/internal/evidence/wiring"
 	"github.com/concord-dev/concord/internal/notify"
 	"github.com/concord-dev/concord/internal/policy"
 	"github.com/concord-dev/concord/internal/runner"
@@ -57,7 +58,7 @@ for an always-on agent.`,
 				len(loaded), interval, outputDir)
 
 			check := func(ctx context.Context) ([]apiv1.Finding, error) {
-				reg := buildRegistry(fixturesOnly)
+				reg := wiring.BuildRegistry(ctx, fixturesOnly, os.Stderr)
 				r := runner.New(policy.New(), reg).SetParams(cfg.Controls.Params)
 				return r.RunAll(ctx, loaded), nil
 			}

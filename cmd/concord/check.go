@@ -12,13 +12,7 @@ import (
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
 	"github.com/concord-dev/concord/internal/evidence"
-	awsev "github.com/concord-dev/concord/internal/evidence/aws"
-	ghev "github.com/concord-dev/concord/internal/evidence/github"
-	hfev "github.com/concord-dev/concord/internal/evidence/huggingface"
-	mlflowev "github.com/concord-dev/concord/internal/evidence/mlflow"
-	oktaev "github.com/concord-dev/concord/internal/evidence/okta"
-	snykev "github.com/concord-dev/concord/internal/evidence/snyk"
-	wandbev "github.com/concord-dev/concord/internal/evidence/wandb"
+	"github.com/concord-dev/concord/internal/evidence/wiring"
 	"github.com/concord-dev/concord/internal/policy"
 	"github.com/concord-dev/concord/internal/report"
 	"github.com/concord-dev/concord/internal/runner"
@@ -55,7 +49,7 @@ func newCheckCmd() *cobra.Command {
 				return fmt.Errorf("no controls found in %s", controlsDir)
 			}
 
-			reg := buildRegistry(fixturesOnly)
+			reg := wiring.BuildRegistry(context.Background(), fixturesOnly, os.Stderr)
 			if !quiet {
 				describeMode(os.Stderr, reg, fixturesOnly)
 				fmt.Fprintf(os.Stderr, "Checking %d control(s)...\n\n", len(loaded))
@@ -106,54 +100,6 @@ func openOutput(path string) (io.Writer, func(), error) {
 	return f, func() { _ = f.Close() }, nil
 }
 
-func buildRegistry(fixturesOnly bool) *evidence.Registry {
-	reg := evidence.NewRegistry()
-	if fixturesOnly {
-		reg.SetFixturesOnly(true)
-		return reg
-	}
-	if token := githubToken(); token != "" {
-		reg.Register("github", ghev.New(token))
-	}
-	if hasAWSCredentials() {
-		if c, err := awsev.New(context.Background(), os.Getenv("AWS_REGION")); err == nil {
-			reg.Register("aws", c)
-		} else {
-			fmt.Fprintln(os.Stderr, "warning: AWS credentials detected but config load failed:", err)
-		}
-	}
-	if uri := os.Getenv("MLFLOW_TRACKING_URI"); uri != "" {
-		reg.Register("mlflow", mlflowev.New(uri, os.Getenv("MLFLOW_TRACKING_TOKEN")))
-	}
-	if org, token := os.Getenv("OKTA_ORG_URL"), os.Getenv("OKTA_API_TOKEN"); org != "" && token != "" {
-		reg.Register("okta", oktaev.New(org, token))
-	}
-	if tok := os.Getenv("SNYK_TOKEN"); tok != "" {
-		reg.Register("snyk", snykev.New(tok))
-	}
-	if key := os.Getenv("WANDB_API_KEY"); key != "" {
-		reg.Register("wandb", wandbev.New(os.Getenv("WANDB_BASE_URL"), key))
-	}
-	// HuggingFace is always registered — anonymous reads of the public Hub
-	// work without a token. HUGGINGFACE_TOKEN unlocks private repos + higher rate limits.
-	reg.Register("huggingface", hfev.New(os.Getenv("HUGGINGFACE_BASE_URL"), os.Getenv("HUGGINGFACE_TOKEN")))
-	return reg
-}
-
-func hasAWSCredentials() bool {
-	for _, e := range []string{"AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN_FILE"} {
-		if os.Getenv(e) != "" {
-			return true
-		}
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		if _, err := os.Stat(filepath.Join(home, ".aws", "credentials")); err == nil {
-			return true
-		}
-	}
-	return false
-}
-
 func describeMode(w io.Writer, reg *evidence.Registry, fixturesOnly bool) {
 	if fixturesOnly {
 		fmt.Fprintln(w, "Mode: fixtures-only")
@@ -165,11 +111,4 @@ func describeMode(w io.Writer, reg *evidence.Registry, fixturesOnly bool) {
 		return
 	}
 	fmt.Fprintf(w, "Mode: live · collectors: %v\n", sources)
-}
-
-func githubToken() string {
-	if t := os.Getenv("CONCORD_GITHUB_TOKEN"); t != "" {
-		return t
-	}
-	return os.Getenv("GITHUB_TOKEN")
 }

@@ -18,6 +18,7 @@ import (
 	oktaev "github.com/concord-dev/concord/internal/evidence/okta"
 	snykev "github.com/concord-dev/concord/internal/evidence/snyk"
 	wandbev "github.com/concord-dev/concord/internal/evidence/wandb"
+	"github.com/concord-dev/concord/internal/evidence/wiring"
 )
 
 // prober is the minimal probe contract every live collector implements.
@@ -149,7 +150,7 @@ func (d *doctor) runCollectors() {
 	d.section("Collectors")
 
 	// GitHub
-	if tok := githubToken(); tok != "" {
+	if tok := wiring.GitHubToken(); tok != "" {
 		c := ghev.New(tok)
 		d.probe("github", c, "set CONCORD_GITHUB_TOKEN or GITHUB_TOKEN")
 	} else {
@@ -157,7 +158,7 @@ func (d *doctor) runCollectors() {
 	}
 
 	// AWS
-	if hasAWSCredentials() {
+	if wiring.HasAWSCredentials() {
 		c, err := awsev.New(d.ctx, os.Getenv("AWS_REGION"))
 		if err != nil {
 			d.fail("aws", "loading SDK config: "+err.Error())

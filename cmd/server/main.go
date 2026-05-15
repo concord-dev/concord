@@ -16,13 +16,17 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/concord-dev/concord/internal/evidence"
+	"github.com/concord-dev/concord/internal/evidence/wiring"
 	"github.com/concord-dev/concord/internal/server"
 	"github.com/concord-dev/concord/internal/store"
 )
@@ -86,7 +90,7 @@ func runServe(args []string) error {
 	fs.StringVar(&listenAddr, "listen", envOr("LISTEN_ADDR", ":8080"), "Listen address (host:port)")
 	fs.StringVar(&controlsDir, "controls", envOr("CONCORD_CONTROLS_DIR", "./controls"), "Path to controls directory")
 	fs.StringVar(&configPath, "config", envOr("CONCORD_CONFIG", "./concord.yaml"), "Path to concord.yaml")
-	fs.BoolVar(&fixturesOnly, "fixtures", true, "Force fixture-only mode (v0 default: true)")
+	fs.BoolVar(&fixturesOnly, "fixtures", false, "Force fixture-only mode (skip env-driven live collectors)")
 	fs.StringVar(&databaseURL, "database-url", os.Getenv("DATABASE_URL"), "Postgres DSN (or set DATABASE_URL)")
 	fs.StringVar(&operatorToken, "operator-token", os.Getenv("CONCORD_OPERATOR_TOKEN"), "Operator token for /operator/v1/* (or set CONCORD_OPERATOR_TOKEN)")
 	fs.BoolVar(&skipMigrate, "skip-migrate", false, "Don't run schema migrations on startup")
@@ -118,13 +122,15 @@ func runServe(args []string) error {
 		}
 	}
 
+	registry := wiring.BuildRegistry(ctx, fixturesOnly, os.Stderr)
 	c, err := server.NewConcord(server.Options{
-		ControlsDir:  controlsDir,
-		ConfigPath:   configPath,
-		FixturesOnly: fixturesOnly,
-		Store:        st,
+		ControlsDir:   controlsDir,
+		ConfigPath:    configPath,
+		FixturesOnly:  fixturesOnly,
+		Registry:      registry,
+		Store:         st,
 		OperatorToken: operatorToken,
-		Version:      version,
+		Version:       version,
 	})
 	if err != nil {
 		return err
@@ -142,6 +148,7 @@ func runServe(args []string) error {
 	if operatorToken == "" {
 		fmt.Fprintln(os.Stderr, "warning: CONCORD_OPERATOR_TOKEN not set; /operator/v1/* will refuse every request")
 	}
+	logCollectorMode(os.Stderr, registry, fixturesOnly)
 	fmt.Fprintf(os.Stderr, "concord-server %s listening on %s (%d controls loaded)\n",
 		version, listenAddr, len(c.Controls))
 
@@ -176,4 +183,20 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// logCollectorMode prints the active collector set so operators can confirm at
+// boot which providers are wired. Sorted output keeps log diffs stable.
+func logCollectorMode(w io.Writer, reg *evidence.Registry, fixturesOnly bool) {
+	if fixturesOnly {
+		fmt.Fprintln(w, "collectors: fixtures-only (runs only consume fixture files)")
+		return
+	}
+	sources := reg.Sources()
+	if len(sources) == 0 {
+		fmt.Fprintln(w, "collectors: none wired — set GITHUB_TOKEN, AWS_PROFILE, SNYK_TOKEN, MLFLOW_TRACKING_URI, OKTA_ORG_URL+OKTA_API_TOKEN, WANDB_API_KEY, or HUGGINGFACE_TOKEN")
+		return
+	}
+	sort.Strings(sources)
+	fmt.Fprintf(w, "collectors: %s\n", strings.Join(sources, ", "))
 }
