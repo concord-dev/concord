@@ -9,8 +9,9 @@ info:
       org-scoped; CI/CLI use this.
     * **Session token** (`Authorization: Bearer concord_sess_...`) — short-
       lived, issued by `POST /v1/auth/login`; the web dashboard uses this.
-    * **Admin token** (`Authorization: Bearer <CONCORD_ADMIN_TOKEN>`) —
-      operator-only bootstrap secret, gates `/admin/v1/*`.
+    * **Operator token** (`Authorization: Bearer <CONCORD_OPERATOR_TOKEN>`) —
+      SaaS-operator back-door secret, gates `/operator/v1/*`. Distinct from
+      the per-org `admin` RBAC role.
 
     Permissions on the org API are enforced by RBAC: every route declares
     the permission it requires; sessions are checked against the
@@ -26,10 +27,10 @@ servers:
 # ─── Components (security, schemas, parameters, responses) ────────────────
 components:
   securitySchemes:
-    adminToken:
+    operatorToken:
       type: http
       scheme: bearer
-      description: CONCORD_ADMIN_TOKEN env var on the server. Bootstrap-only.
+      description: CONCORD_OPERATOR_TOKEN env var on the server. SaaS-operator back-door.
     bearerAuth:
       type: http
       scheme: bearer

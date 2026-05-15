@@ -1,10 +1,11 @@
 // Package middleware holds the request-scoped auth gates used by the router.
 //
-// RequireAdmin gates /admin/v1/* on a constant-time match against the
-// admin token. RequireSession resolves session tokens and injects the user
-// into the request context. RequireOrgPerm resolves either a session or an
-// API token for the org named by the {slug} path variable and verifies the
-// caller holds the named permission.
+// RequireOperator gates /operator/v1/* on a constant-time match against the
+// SaaS-operator token (the back-door used to provision tenants — distinct
+// from the per-org `admin` RBAC role). RequireSession resolves session tokens
+// and injects the user into the request context. RequireOrgPerm resolves
+// either a session or an API token for the org named by the {slug} path
+// variable and verifies the caller holds the named permission.
 package middleware
 
 import (
@@ -19,24 +20,26 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// Middleware bundles the auth gates around a Store and the admin token.
+// Middleware bundles the auth gates around a Store and the operator token.
 type Middleware struct {
-	Store      *store.Store
-	AdminToken string
+	Store         *store.Store
+	OperatorToken string
 }
 
 // New constructs Middleware with the given dependencies.
-func New(s *store.Store, adminToken string) *Middleware {
-	return &Middleware{Store: s, AdminToken: adminToken}
+func New(s *store.Store, operatorToken string) *Middleware {
+	return &Middleware{Store: s, OperatorToken: operatorToken}
 }
 
-// RequireAdmin returns 503 when AdminToken is empty (admin disabled). Otherwise
-// it requires a Bearer token that constant-time matches AdminToken.
-func (m *Middleware) RequireAdmin(next http.Handler) http.Handler {
+// RequireOperator returns 503 when OperatorToken is empty (operator endpoints
+// disabled). Otherwise it requires a Bearer token that constant-time matches
+// OperatorToken. This is the SaaS-operator back-door, not the per-org `admin`
+// RBAC role.
+func (m *Middleware) RequireOperator(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if m.AdminToken == "" {
+		if m.OperatorToken == "" {
 			httpx.Error(w, http.StatusServiceUnavailable,
-				"admin endpoints disabled (set CONCORD_ADMIN_TOKEN)")
+				"operator endpoints disabled (set CONCORD_OPERATOR_TOKEN)")
 			return
 		}
 		tok, ok := BearerToken(r)
@@ -44,8 +47,8 @@ func (m *Middleware) RequireAdmin(next http.Handler) http.Handler {
 			httpx.Error(w, http.StatusUnauthorized, "missing Authorization header")
 			return
 		}
-		if subtle.ConstantTimeCompare([]byte(tok), []byte(m.AdminToken)) != 1 {
-			httpx.Error(w, http.StatusUnauthorized, "invalid admin token")
+		if subtle.ConstantTimeCompare([]byte(tok), []byte(m.OperatorToken)) != 1 {
+			httpx.Error(w, http.StatusUnauthorized, "invalid operator token")
 			return
 		}
 		next.ServeHTTP(w, r)

@@ -21,7 +21,7 @@ import (
 )
 
 const defaultTestDSN = "postgres://concord:concord-dev@localhost:5432/concord?sslmode=disable"
-const testAdminToken = "test-admin-token-fixed"
+const testOperatorToken = "test-operator-token-fixed"
 
 func repoControlsDir(t *testing.T) string {
 	t.Helper()
@@ -67,7 +67,7 @@ func newHarness(t *testing.T) *harness {
 		ConfigPath:   filepath.Join(t.TempDir(), "missing-concord.yaml"),
 		FixturesOnly: true,
 		Store:        st,
-		AdminToken:   testAdminToken,
+		OperatorToken:   testOperatorToken,
 		Version:      "test",
 	})
 	require.NoError(t, err)

@@ -3,6 +3,13 @@
 // + run persistence, and exposes a REST surface guarded by API tokens.
 // Designed to run behind a reverse proxy (Caddy, ALB, Cloudflare) that
 // terminates TLS.
+//
+// Subcommands:
+//
+//	concord-server                   start the HTTP server (default)
+//	concord-server seed-tenant [...] bootstrap first org + owner + API token
+//	concord-server version           print build version
+//	concord-server help              show usage
 package main
 
 import (
@@ -12,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,30 +31,68 @@ import (
 var version = "dev"
 
 func main() {
-	if err := run(); err != nil {
+	args := os.Args[1:]
+	cmd := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		cmd = args[0]
+		args = args[1:]
+	}
+	var err error
+	switch cmd {
+	case "", "serve":
+		err = runServe(args)
+	case "seed-tenant":
+		err = runSeedTenant(args)
+	case "version", "--version", "-v":
+		fmt.Println(version)
+		return
+	case "help", "--help", "-h":
+		printUsage()
+		return
+	default:
+		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n\n", cmd)
+		printUsage()
+		os.Exit(2)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+func printUsage() {
+	fmt.Fprintln(os.Stderr, "Usage: concord-server <subcommand> [flags]")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Subcommands:")
+	fmt.Fprintln(os.Stderr, "  (none) | serve   Start the HTTP server (default)")
+	fmt.Fprintln(os.Stderr, "  seed-tenant      Bootstrap a tenant: organization + owner user + API token")
+	fmt.Fprintln(os.Stderr, "  version          Print build version and exit")
+	fmt.Fprintln(os.Stderr, "  help             Show this help and exit")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Run `concord-server <subcommand> -h` for subcommand-specific flags.")
+}
+
+func runServe(args []string) error {
 	var (
 		listenAddr   string
 		controlsDir  string
 		configPath   string
 		fixturesOnly bool
 		databaseURL  string
-		adminToken   string
+		operatorToken string
 		skipMigrate  bool
 	)
-	flag.StringVar(&listenAddr, "listen", envOr("LISTEN_ADDR", ":8080"), "Listen address (host:port)")
-	flag.StringVar(&controlsDir, "controls", envOr("CONCORD_CONTROLS_DIR", "./controls"), "Path to controls directory")
-	flag.StringVar(&configPath, "config", envOr("CONCORD_CONFIG", "./concord.yaml"), "Path to concord.yaml")
-	flag.BoolVar(&fixturesOnly, "fixtures", true, "Force fixture-only mode (v0 default: true)")
-	flag.StringVar(&databaseURL, "database-url", os.Getenv("DATABASE_URL"), "Postgres DSN (or set DATABASE_URL)")
-	flag.StringVar(&adminToken, "admin-token", os.Getenv("CONCORD_ADMIN_TOKEN"), "Admin token for /admin/v1/* (or set CONCORD_ADMIN_TOKEN)")
-	flag.BoolVar(&skipMigrate, "skip-migrate", false, "Don't run schema migrations on startup")
-	flag.Parse()
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	fs.StringVar(&listenAddr, "listen", envOr("LISTEN_ADDR", ":8080"), "Listen address (host:port)")
+	fs.StringVar(&controlsDir, "controls", envOr("CONCORD_CONTROLS_DIR", "./controls"), "Path to controls directory")
+	fs.StringVar(&configPath, "config", envOr("CONCORD_CONFIG", "./concord.yaml"), "Path to concord.yaml")
+	fs.BoolVar(&fixturesOnly, "fixtures", true, "Force fixture-only mode (v0 default: true)")
+	fs.StringVar(&databaseURL, "database-url", os.Getenv("DATABASE_URL"), "Postgres DSN (or set DATABASE_URL)")
+	fs.StringVar(&operatorToken, "operator-token", os.Getenv("CONCORD_OPERATOR_TOKEN"), "Operator token for /operator/v1/* (or set CONCORD_OPERATOR_TOKEN)")
+	fs.BoolVar(&skipMigrate, "skip-migrate", false, "Don't run schema migrations on startup")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	if databaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required (e.g. postgres://concord:dev@localhost:5432/concord?sslmode=disable)")
@@ -77,7 +123,7 @@ func run() error {
 		ConfigPath:   configPath,
 		FixturesOnly: fixturesOnly,
 		Store:        st,
-		AdminToken:   adminToken,
+		OperatorToken: operatorToken,
 		Version:      version,
 	})
 	if err != nil {
@@ -93,8 +139,8 @@ func run() error {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	if adminToken == "" {
-		fmt.Fprintln(os.Stderr, "warning: CONCORD_ADMIN_TOKEN not set; /admin/v1/* will refuse every request")
+	if operatorToken == "" {
+		fmt.Fprintln(os.Stderr, "warning: CONCORD_OPERATOR_TOKEN not set; /operator/v1/* will refuse every request")
 	}
 	fmt.Fprintf(os.Stderr, "concord-server %s listening on %s (%d controls loaded)\n",
 		version, listenAddr, len(c.Controls))
@@ -125,7 +171,6 @@ func run() error {
 	}
 }
 
-// envOr returns the named environment variable or a fallback when unset.
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

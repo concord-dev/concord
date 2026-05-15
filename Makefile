@@ -3,7 +3,7 @@ BIN   := bin/concord
 
 # Local dev defaults — override on the command line:  make dev DATABASE_URL=...
 DATABASE_URL ?= postgres://concord:concord-dev@localhost:5432/concord?sslmode=disable
-CONCORD_ADMIN_TOKEN ?= dev-admin-token
+CONCORD_OPERATOR_TOKEN ?= dev-admin-token
 LISTEN_ADDR ?= :8080
 
 .PHONY: tidy build server test lint check clean run dev pg pg-down pg-logs psql air-install help
@@ -63,7 +63,7 @@ psql:
 # Press Ctrl-C to stop. Tail logs/<file>.log for the live-build errors.
 dev: air-install
 	@DATABASE_URL=$(DATABASE_URL) \
-	 CONCORD_ADMIN_TOKEN=$(CONCORD_ADMIN_TOKEN) \
+	 CONCORD_OPERATOR_TOKEN=$(CONCORD_OPERATOR_TOKEN) \
 	 LISTEN_ADDR=$(LISTEN_ADDR) \
 	 air -c .air.toml
 

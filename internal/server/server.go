@@ -16,7 +16,7 @@
 //	scheduler.go           Cron-driven schedule poller
 //	webhook_delivery.go    Outbound webhook signing + delivery
 //	handlers/<group>/      Per-domain handler subpackages
-//	middleware/            RequireAdmin / RequireSession / RequireOrgPerm
+//	middleware/            RequireOperator / RequireSession / RequireOrgPerm
 //	httpx/                 JSON + Error + Logging helpers
 //	authctx/               Principal + session context types
 //	bus/                   In-process event bus (SSE fan-out)
@@ -40,13 +40,13 @@ import (
 
 // Concord bundles in-memory state + Store.
 type Concord struct {
-	Controls   []controls.Loaded
-	Config     *config.Config
-	Registry   *evidence.Registry
-	Store      *store.Store
-	AdminToken string
-	Version    string
-	SessionTTL time.Duration
+	Controls      []controls.Loaded
+	Config        *config.Config
+	Registry      *evidence.Registry
+	Store         *store.Store
+	OperatorToken string // SaaS-operator back-door token; gates /operator/v1/*
+	Version       string
+	SessionTTL    time.Duration
 
 	worker    *Worker
 	bus       *bus.Bus
@@ -56,16 +56,16 @@ type Concord struct {
 
 // Options is the construction surface for cmd/server.
 type Options struct {
-	ControlsDir  string
-	ConfigPath   string
-	FixturesOnly bool
-	Registry     *evidence.Registry
-	Store        *store.Store
-	AdminToken   string
-	Version      string
-	SessionTTL   time.Duration
-	Worker       WorkerOpts
-	Scheduler    SchedulerOpts
+	ControlsDir   string
+	ConfigPath    string
+	FixturesOnly  bool
+	Registry      *evidence.Registry
+	Store         *store.Store
+	OperatorToken string
+	Version       string
+	SessionTTL    time.Duration
+	Worker        WorkerOpts
+	Scheduler     SchedulerOpts
 }
 
 // NewConcord loads controls + config and wires the Store, worker, scheduler,
@@ -89,14 +89,14 @@ func NewConcord(opts Options) (*Concord, error) {
 	}
 
 	c := &Concord{
-		Controls:   loaded,
-		Config:     cfg,
-		Registry:   resolveRegistry(opts),
-		Store:      opts.Store,
-		AdminToken: opts.AdminToken,
-		Version:    opts.Version,
-		SessionTTL: opts.SessionTTL,
-		bus:        bus.New(),
+		Controls:      loaded,
+		Config:        cfg,
+		Registry:      resolveRegistry(opts),
+		Store:         opts.Store,
+		OperatorToken: opts.OperatorToken,
+		Version:       opts.Version,
+		SessionTTL:    opts.SessionTTL,
+		bus:           bus.New(),
 	}
 	c.worker = NewWorker(c, opts.Worker)
 	c.worker.Start()

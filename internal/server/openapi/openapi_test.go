@@ -52,7 +52,7 @@ func TestSpec_TopLevelStructure(t *testing.T) {
 
 func TestSpec_SecuritySchemesPresent(t *testing.T) {
 	s := loadSpec(t)
-	for _, name := range []string{"adminToken", "bearerAuth"} {
+	for _, name := range []string{"operatorToken", "bearerAuth"} {
 		_, ok := s.Components.SecuritySchemes[name]
 		assert.True(t, ok, "spec must declare securityScheme %q", name)
 	}
@@ -89,16 +89,16 @@ func TestSpec_CoversEveryExpectedRoute(t *testing.T) {
 		"/v1/orgs/{slug}/schedule":                    {"get", "put", "delete"},
 		"/v1/orgs/{slug}/webhooks":                    {"get", "post"},
 		"/v1/orgs/{slug}/webhooks/{id}":               {"get", "put", "delete"},
-		// Admin.
-		"/admin/v1/orgs":                            {"get", "post"},
-		"/admin/v1/orgs/{slug}":                     {"get"},
-		"/admin/v1/orgs/{slug}/tokens":              {"get", "post"},
-		"/admin/v1/orgs/{slug}/tokens/{tokenID}":    {"delete"},
-		"/admin/v1/orgs/{slug}/members":             {"get", "post"},
-		"/admin/v1/orgs/{slug}/members/{userID}":    {"delete"},
-		"/admin/v1/users":                           {"get", "post"},
-		"/admin/v1/roles":                           {"get"},
-		"/admin/v1/permissions":                     {"get"},
+		// Operator (SaaS-operator back-door — gates CONCORD_OPERATOR_TOKEN).
+		"/operator/v1/orgs":                         {"get", "post"},
+		"/operator/v1/orgs/{slug}":                  {"get"},
+		"/operator/v1/orgs/{slug}/tokens":           {"get", "post"},
+		"/operator/v1/orgs/{slug}/tokens/{tokenID}": {"delete"},
+		"/operator/v1/orgs/{slug}/members":          {"get", "post"},
+		"/operator/v1/orgs/{slug}/members/{userID}": {"delete"},
+		"/operator/v1/users":                        {"get", "post"},
+		"/operator/v1/roles":                        {"get"},
+		"/operator/v1/permissions":                  {"get"},
 	}
 
 	for path, methods := range wantRoutes {

@@ -1,7 +1,8 @@
-// Package admin hosts every /admin/v1/* endpoint. All routes are gated by the
-// middleware.RequireAdmin gate at mount time; nothing in this package re-checks
-// the admin token.
-package admin
+// Package operator hosts every /operator/v1/* endpoint, the Concord SaaS
+// operator's back-door for provisioning tenants. All routes are gated by
+// middleware.RequireOperator at mount time; nothing in this package re-checks
+// the operator token.
+package operator
 
 import (
 	"errors"
@@ -13,7 +14,7 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// Handlers bundles dependencies for the admin route group.
+// Handlers bundles dependencies for the operator route group.
 type Handlers struct {
 	store *store.Store
 }

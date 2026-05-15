@@ -3,8 +3,8 @@ package server
 import (
 	"net/http"
 
-	"github.com/concord-dev/concord/internal/server/handlers/admin"
 	"github.com/concord-dev/concord/internal/server/handlers/auth"
+	"github.com/concord-dev/concord/internal/server/handlers/operator"
 	"github.com/concord-dev/concord/internal/server/handlers/org"
 	"github.com/concord-dev/concord/internal/server/handlers/public"
 	"github.com/concord-dev/concord/internal/server/httpx"
@@ -15,23 +15,25 @@ import (
 //
 //  1. Public routes (no auth).
 //  2. Auth lifecycle (POST /v1/auth/{login,logout}).
-//  3. Admin (CONCORD_ADMIN_TOKEN required).
+//  3. Operator (CONCORD_OPERATOR_TOKEN required) — the SaaS-operator
+//     back-door for provisioning tenants. Distinct from the per-org `admin`
+//     RBAC role granted to humans inside an org.
 //  4. Session-only endpoints (current user, list orgs).
 //  5. Org-scoped API (Bearer API token OR Bearer session token), each route
 //     gated by a specific RBAC permission via RequireOrgPerm.
 //
 // The whole tree is wrapped in the logging middleware before being returned.
 func (c *Concord) Router() http.Handler {
-	mw := middleware.New(c.Store, c.AdminToken)
+	mw := middleware.New(c.Store, c.OperatorToken)
 	pub := public.New(c.Version, c.Controls)
 	au := auth.New(c.Store, c.SessionTTL)
-	ad := admin.New(c.Store)
+	op := operator.New(c.Store)
 	og := org.New(c.Store, c.Controls, c.worker, c.bus)
 
 	mux := http.NewServeMux()
 	mountPublic(mux, pub)
 	mountAuth(mux, au, mw)
-	mountAdmin(mux, ad, mw)
+	mountOperator(mux, op, mw)
 	mountSession(mux, au, mw)
 	mountOrgAPI(mux, og, mw)
 	return httpx.Logging(mux)
@@ -49,25 +51,25 @@ func mountAuth(mux *http.ServeMux, h *auth.Handlers, mw *middleware.Middleware) 
 	mux.Handle("POST /v1/auth/logout", mw.RequireSession(http.HandlerFunc(h.Logout)))
 }
 
-func mountAdmin(mux *http.ServeMux, h *admin.Handlers, mw *middleware.Middleware) {
-	gate := mw.RequireAdmin
+func mountOperator(mux *http.ServeMux, h *operator.Handlers, mw *middleware.Middleware) {
+	gate := mw.RequireOperator
 
-	mux.Handle("POST /admin/v1/orgs", gate(http.HandlerFunc(h.CreateOrg)))
-	mux.Handle("GET /admin/v1/orgs", gate(http.HandlerFunc(h.ListOrgs)))
-	mux.Handle("GET /admin/v1/orgs/{slug}", gate(http.HandlerFunc(h.GetOrg)))
+	mux.Handle("POST /operator/v1/orgs", gate(http.HandlerFunc(h.CreateOrg)))
+	mux.Handle("GET /operator/v1/orgs", gate(http.HandlerFunc(h.ListOrgs)))
+	mux.Handle("GET /operator/v1/orgs/{slug}", gate(http.HandlerFunc(h.GetOrg)))
 
-	mux.Handle("POST /admin/v1/orgs/{slug}/tokens", gate(http.HandlerFunc(h.CreateToken)))
-	mux.Handle("GET /admin/v1/orgs/{slug}/tokens", gate(http.HandlerFunc(h.ListTokens)))
-	mux.Handle("DELETE /admin/v1/orgs/{slug}/tokens/{tokenID}", gate(http.HandlerFunc(h.RevokeToken)))
+	mux.Handle("POST /operator/v1/orgs/{slug}/tokens", gate(http.HandlerFunc(h.CreateToken)))
+	mux.Handle("GET /operator/v1/orgs/{slug}/tokens", gate(http.HandlerFunc(h.ListTokens)))
+	mux.Handle("DELETE /operator/v1/orgs/{slug}/tokens/{tokenID}", gate(http.HandlerFunc(h.RevokeToken)))
 
-	mux.Handle("POST /admin/v1/orgs/{slug}/members", gate(http.HandlerFunc(h.AddMember)))
-	mux.Handle("GET /admin/v1/orgs/{slug}/members", gate(http.HandlerFunc(h.ListMembers)))
-	mux.Handle("DELETE /admin/v1/orgs/{slug}/members/{userID}", gate(http.HandlerFunc(h.RemoveMember)))
+	mux.Handle("POST /operator/v1/orgs/{slug}/members", gate(http.HandlerFunc(h.AddMember)))
+	mux.Handle("GET /operator/v1/orgs/{slug}/members", gate(http.HandlerFunc(h.ListMembers)))
+	mux.Handle("DELETE /operator/v1/orgs/{slug}/members/{userID}", gate(http.HandlerFunc(h.RemoveMember)))
 
-	mux.Handle("POST /admin/v1/users", gate(http.HandlerFunc(h.CreateUser)))
-	mux.Handle("GET /admin/v1/users", gate(http.HandlerFunc(h.ListUsers)))
-	mux.Handle("GET /admin/v1/roles", gate(http.HandlerFunc(h.ListRoles)))
-	mux.Handle("GET /admin/v1/permissions", gate(http.HandlerFunc(h.ListPermissions)))
+	mux.Handle("POST /operator/v1/users", gate(http.HandlerFunc(h.CreateUser)))
+	mux.Handle("GET /operator/v1/users", gate(http.HandlerFunc(h.ListUsers)))
+	mux.Handle("GET /operator/v1/roles", gate(http.HandlerFunc(h.ListRoles)))
+	mux.Handle("GET /operator/v1/permissions", gate(http.HandlerFunc(h.ListPermissions)))
 }
 
 func mountSession(mux *http.ServeMux, h *auth.Handlers, mw *middleware.Middleware) {

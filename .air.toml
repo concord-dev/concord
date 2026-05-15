@@ -4,7 +4,7 @@
 # Requirements:
 #   - Postgres reachable per docker-compose.yml (`make pg`)
 #   - DATABASE_URL exported (Makefile sets a dev default)
-#   - CONCORD_ADMIN_TOKEN exported for /admin/v1/* (optional)
+#   - CONCORD_OPERATOR_TOKEN exported for /operator/v1/* (optional)
 
 root = "."
 testdata_dir = "testdata"

@@ -20,7 +20,7 @@ func TestCheck_QueueFullReturns503(t *testing.T) {
 	st := openStore(t)
 	c, err := server.NewConcord(server.Options{
 		ControlsDir: repoControlsDir(t), ConfigPath: filepath.Join(t.TempDir(), "x.yaml"),
-		FixturesOnly: true, Store: st, AdminToken: testAdminToken, Version: "test",
+		FixturesOnly: true, Store: st, OperatorToken: testOperatorToken, Version: "test",
 		Worker: server.WorkerOpts{PoolSize: 1, QueueSize: 1},
 	})
 	require.NoError(t, err)

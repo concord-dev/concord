@@ -391,5 +391,5 @@ paths:
         '204': { description: Webhook deleted }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  # ─── Admin (CONCORD_ADMIN_TOKEN) ───────────────────────────────────────
+  # ─── Operator (CONCORD_OPERATOR_TOKEN) ─────────────────────────────────
 

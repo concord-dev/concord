@@ -12,31 +12,31 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── Admin (CONCORD_ADMIN_TOKEN) ──────────────────────────────────────
+// ─── Operator (CONCORD_OPERATOR_TOKEN) ──────────────────────────────────────
 
-func TestAdmin_RequiresAdminToken(t *testing.T) {
+func TestOperator_RequiresOperatorToken(t *testing.T) {
 	h := newHarness(t)
-	resp, body := h.do(t, "GET", "/admin/v1/orgs", "", h.apiToken)
+	resp, body := h.do(t, "GET", "/operator/v1/orgs", "", h.apiToken)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
-	assert.Contains(t, string(body), "invalid admin token")
+	assert.Contains(t, string(body), "invalid operator token")
 }
 
-func TestAdmin_CreateUserAndAssignRoles(t *testing.T) {
+func TestOperator_CreateUserAndAssignRoles(t *testing.T) {
 	h := newHarness(t)
 	email := uniqueEmail("invitee")
 	body := fmt.Sprintf(`{"first_name":"Invite","last_name":"Pending","email":%q,"password":"pass-1234"}`, email)
-	resp, raw := h.do(t, "POST", "/admin/v1/users", body, testAdminToken)
+	resp, raw := h.do(t, "POST", "/operator/v1/users", body, testOperatorToken)
 	require.Equal(t, http.StatusCreated, resp.StatusCode, string(raw))
 
 	// Assign two roles in one call.
 	addBody := fmt.Sprintf(`{"email":%q,"roles":["admin","viewer"]}`, email)
-	resp2, raw2 := h.do(t, "POST", "/admin/v1/orgs/"+h.org.Slug+"/members",
-		addBody, testAdminToken)
+	resp2, raw2 := h.do(t, "POST", "/operator/v1/orgs/"+h.org.Slug+"/members",
+		addBody, testOperatorToken)
 	require.Equal(t, http.StatusCreated, resp2.StatusCode, string(raw2))
 
 	// Verify via list members.
-	respL, rawL := h.do(t, "GET", "/admin/v1/orgs/"+h.org.Slug+"/members",
-		"", testAdminToken)
+	respL, rawL := h.do(t, "GET", "/operator/v1/orgs/"+h.org.Slug+"/members",
+		"", testOperatorToken)
 	require.Equal(t, http.StatusOK, respL.StatusCode)
 	var members []store.OrgMember
 	require.NoError(t, json.Unmarshal(rawL, &members))
@@ -51,24 +51,24 @@ func TestAdmin_CreateUserAndAssignRoles(t *testing.T) {
 	assert.Len(t, found.Roles, 2)
 }
 
-func TestAdmin_AddMember_UnknownRoleRejected(t *testing.T) {
+func TestOperator_AddMember_UnknownRoleRejected(t *testing.T) {
 	h := newHarness(t)
 	email := uniqueEmail("badrole")
 	body := fmt.Sprintf(`{"first_name":"X","last_name":"Y","email":%q}`, email)
-	resp, _ := h.do(t, "POST", "/admin/v1/users", body, testAdminToken)
+	resp, _ := h.do(t, "POST", "/operator/v1/users", body, testOperatorToken)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 	addBody := fmt.Sprintf(`{"email":%q,"roles":["superuser"]}`, email)
-	resp2, raw := h.do(t, "POST", "/admin/v1/orgs/"+h.org.Slug+"/members",
-		addBody, testAdminToken)
+	resp2, raw := h.do(t, "POST", "/operator/v1/orgs/"+h.org.Slug+"/members",
+		addBody, testOperatorToken)
 	assert.Equal(t, http.StatusBadRequest, resp2.StatusCode)
 	assert.Contains(t, string(raw), "unknown role superuser")
 }
 
-func TestAdmin_RevokeToken_BlocksFutureUse(t *testing.T) {
+func TestOperator_RevokeToken_BlocksFutureUse(t *testing.T) {
 	h := newHarness(t)
 	// Mint a fresh token via the admin API.
-	respC, rawC := h.do(t, "POST", "/admin/v1/orgs/"+h.org.Slug+"/tokens",
-		`{"name":"ephemeral"}`, testAdminToken)
+	respC, rawC := h.do(t, "POST", "/operator/v1/orgs/"+h.org.Slug+"/tokens",
+		`{"name":"ephemeral"}`, testOperatorToken)
 	require.Equal(t, http.StatusCreated, respC.StatusCode)
 	var tok struct {
 		ID    string `json:"id"`
@@ -76,17 +76,17 @@ func TestAdmin_RevokeToken_BlocksFutureUse(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(rawC, &tok))
 
-	respD, _ := h.do(t, "DELETE", "/admin/v1/orgs/"+h.org.Slug+"/tokens/"+tok.ID,
-		"", testAdminToken)
+	respD, _ := h.do(t, "DELETE", "/operator/v1/orgs/"+h.org.Slug+"/tokens/"+tok.ID,
+		"", testOperatorToken)
 	assert.Equal(t, http.StatusNoContent, respD.StatusCode)
 
 	resp, _ := h.do(t, "GET", "/v1/orgs/"+h.org.Slug+"/frameworks", "", tok.Token)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
-func TestAdmin_ListRoles_ShowsPermissionBundles(t *testing.T) {
+func TestOperator_ListRoles_ShowsPermissionBundles(t *testing.T) {
 	h := newHarness(t)
-	resp, raw := h.do(t, "GET", "/admin/v1/roles", "", testAdminToken)
+	resp, raw := h.do(t, "GET", "/operator/v1/roles", "", testOperatorToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var roles []struct {
 		Name        string             `json:"name"`
