@@ -65,6 +65,9 @@ func mountPublic(mux *http.ServeMux, h *public.Handlers) {
 
 func mountAuth(mux *http.ServeMux, h *auth.Handlers, mw *middleware.Middleware) {
 	mux.HandleFunc("POST /v1/auth/login", h.Login)
+	// Second leg of login when the user has MFA enrolled. Unauthenticated:
+	// the MFA-challenge token in the body is the proof.
+	mux.HandleFunc("POST /v1/auth/login/mfa", h.LoginMFA)
 	mux.Handle("POST /v1/auth/logout", mw.RequireSession(http.HandlerFunc(h.Logout)))
 	// Password reset is unauthenticated by design — that's the whole point of
 	// "forgot password". Token in the body is the proof.
@@ -96,6 +99,15 @@ func mountOperator(mux *http.ServeMux, h *operator.Handlers, mw *middleware.Midd
 func mountSession(mux *http.ServeMux, h *auth.Handlers, mw *middleware.Middleware) {
 	mux.Handle("GET /v1/me", mw.RequireSession(http.HandlerFunc(h.Me)))
 	mux.Handle("GET /v1/me/orgs", mw.RequireSession(http.HandlerFunc(h.MyOrgs)))
+	// MFA enrollment / management — session-only. The disable + regenerate
+	// endpoints re-check the user's password inside the handler so a
+	// stolen session can't strip the second factor on its own.
+	mux.Handle("GET /v1/me/mfa", mw.RequireSession(http.HandlerFunc(h.GetMFAStatus)))
+	mux.Handle("POST /v1/me/mfa/totp/enroll", mw.RequireSession(http.HandlerFunc(h.EnrollTOTP)))
+	mux.Handle("POST /v1/me/mfa/totp/verify", mw.RequireSession(http.HandlerFunc(h.VerifyTOTP)))
+	mux.Handle("POST /v1/me/mfa/disable", mw.RequireSession(http.HandlerFunc(h.DisableMFA)))
+	mux.Handle("POST /v1/me/mfa/recovery-codes/regenerate",
+		mw.RequireSession(http.HandlerFunc(h.RegenerateRecoveryCodes)))
 }
 
 func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware) {

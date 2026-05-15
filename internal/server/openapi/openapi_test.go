@@ -72,6 +72,7 @@ func TestSpec_CoversEveryExpectedRoute(t *testing.T) {
 		"/version":      {"get"},
 		// Auth.
 		"/v1/auth/login":                        {"post"},
+		"/v1/auth/login/mfa":                    {"post"},
 		"/v1/auth/logout":                       {"post"},
 		"/v1/auth/password-reset":               {"post"},
 		"/v1/auth/password-reset/confirm":       {"post"},
@@ -79,6 +80,12 @@ func TestSpec_CoversEveryExpectedRoute(t *testing.T) {
 		// Session-scoped.
 		"/v1/me":      {"get"},
 		"/v1/me/orgs": {"get"},
+		// MFA enrollment + management (session-scoped).
+		"/v1/me/mfa":                                {"get"},
+		"/v1/me/mfa/totp/enroll":                    {"post"},
+		"/v1/me/mfa/totp/verify":                    {"post"},
+		"/v1/me/mfa/disable":                        {"post"},
+		"/v1/me/mfa/recovery-codes/regenerate":      {"post"},
 		// Org API.
 		"/v1/orgs/{slug}/me":                          {"get"},
 		"/v1/orgs/{slug}/frameworks":                  {"get"},

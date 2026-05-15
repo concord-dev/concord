@@ -125,12 +125,14 @@ func NewConcord(opts Options) (*Concord, error) {
 //	LoginEmail    10 req/min, burst 20  — per (lowercased) email
 //	PWResetIP     10 req/min, burst 5   — request endpoint
 //	PWConfirmIP   30 req/min, burst 10  — confirm endpoint (token guess attempts)
+//	MFASubmitIP   30 req/min, burst 10  — second-leg login (TOTP / recovery code)
 func defaultAuthLimits() auth.Limits {
 	return auth.Limits{
 		LoginIP:     limiter.NewBucket(limiter.Config{Rate: rate.Every(2 * time.Second), Burst: 10}),
 		LoginEmail:  limiter.NewBucket(limiter.Config{Rate: rate.Every(6 * time.Second), Burst: 20}),
 		PWResetIP:   limiter.NewBucket(limiter.Config{Rate: rate.Every(6 * time.Second), Burst: 5}),
 		PWConfirmIP: limiter.NewBucket(limiter.Config{Rate: rate.Every(2 * time.Second), Burst: 10}),
+		MFASubmitIP: limiter.NewBucket(limiter.Config{Rate: rate.Every(2 * time.Second), Burst: 10}),
 	}
 }
 

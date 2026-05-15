@@ -231,6 +231,54 @@ CREATE UNIQUE INDEX idx_password_reset_token_live
 CREATE INDEX idx_password_reset_user_recent
     ON password_reset(user_id, created_at DESC);
 
+-- ── 4a-bis. Multi-factor auth ────────────────────────────────────────────
+
+-- Per-user TOTP enrollment. At most one secret per user — re-enrolling
+-- requires explicit disable first (so an attacker who briefly has session
+-- access can't silently swap the second factor out from under the owner).
+-- enrolled_at NULL means the user has scanned the QR but not yet typed a
+-- valid code; the secret is unused until that step succeeds.
+CREATE TABLE user_totp (
+    user_id       UUID        PRIMARY KEY REFERENCES "user"(id) ON DELETE CASCADE,
+    secret        TEXT        NOT NULL,      -- base32, hot — DO NOT LOG
+    enrolled_at   TIMESTAMPTZ,
+    last_used_at  TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One-time recovery codes for users who lose their authenticator. Hashed
+-- with argon2id (same PHC encoding as password_hash) so a read replica
+-- compromise can't enumerate codes. used_at marks consumed entries; we
+-- keep the row so dashboards can show "N of M codes remaining".
+CREATE TABLE user_recovery_code (
+    id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    UUID        NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+    code_hash  TEXT        NOT NULL,
+    used_at    TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_user_recovery_code_user ON user_recovery_code(user_id)
+    WHERE used_at IS NULL;
+
+-- Short-lived challenge token issued by /v1/auth/login when the caller has
+-- MFA enrolled. The plaintext is returned ONCE; the DB holds raw sha256
+-- (same pattern as invitation / password_reset). Bound to IP + UA so the
+-- second step has to come from the same client.
+CREATE TABLE mfa_challenge (
+    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID        NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+    token_hash  BYTEA       NOT NULL,
+    ip          INET,
+    user_agent  TEXT,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX idx_mfa_challenge_token_live
+    ON mfa_challenge(token_hash)
+    WHERE consumed_at IS NULL;
+CREATE INDEX idx_mfa_challenge_user ON mfa_challenge(user_id);
+
 -- ── 4b. Audit log ────────────────────────────────────────────────────────
 
 -- Security-sensitive actions land here so compliance teams can answer "who

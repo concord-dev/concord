@@ -16,6 +16,10 @@ const (
 	SessionTokenPrefix   = "concord_sess_"
 	InvitationPrefix     = "concord_inv_"
 	PasswordResetPrefix  = "concord_reset_"
+	// MFAChallengePrefix tags the short-lived token returned by /v1/auth/login
+	// when the user has MFA enrolled. The caller submits it on the second leg
+	// (/v1/auth/login/mfa) alongside their TOTP or recovery code.
+	MFAChallengePrefix   = "concord_mfa_"
 )
 
 // GenerateSecret returns a URL-safe random secret of the requested byte

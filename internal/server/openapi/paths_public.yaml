@@ -183,6 +183,39 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /v1/auth/login/mfa:
+    post:
+      summary: Second-leg login completion (TOTP or recovery code)
+      description: |
+        When the user has MFA enrolled, `/v1/auth/login` returns an
+        `mfa_token` instead of a session. POST that token + one of
+        `code` (6-digit TOTP) or `recovery_code` (XXXX-XXXX one-time
+        code) here to complete sign-in. On success the response is a
+        fully-formed Session, identical to the single-factor login path.
+      operationId: loginMFA
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mfa_token]
+              properties:
+                mfa_token:     { type: string }
+                code:          { type: string, description: "6-digit TOTP code" }
+                recovery_code: { type: string, description: "One-time recovery code (XXXX-XXXX)" }
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '410': { description: MFA token expired }
+        '429': { description: Rate limited }
+
   /v1/auth/logout:
     post:
       summary: Revoke the current session
@@ -281,6 +314,135 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/UserOrg' }
+
+  /v1/me/mfa:
+    get:
+      summary: MFA enrollment status for the current user
+      operationId: getMFAStatus
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enrolled:                  { type: boolean }
+                  recovery_codes_remaining:  { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/me/mfa/totp/enroll:
+    post:
+      summary: Start TOTP enrollment
+      description: |
+        Generates a fresh TOTP secret and returns a provisioning URI
+        ready to be rendered as a QR code. The next step is
+        `/v1/me/mfa/totp/verify` with a 6-digit code from the user's
+        authenticator app. Subsequent calls before verification
+        overwrite the pending secret; calls after verification return
+        409 — disable MFA first if you want to re-enroll.
+      operationId: enrollTOTP
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Pending enrollment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret:           { type: string }
+                  provisioning_uri: { type: string }
+                  issuer:           { type: string }
+                  account_name:     { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: Already enrolled }
+
+  /v1/me/mfa/totp/verify:
+    post:
+      summary: Verify TOTP and complete enrollment
+      description: |
+        Validates the first 6-digit code typed from the authenticator app
+        and, on success, finalizes enrollment + generates 10 one-time
+        recovery codes (returned ONCE in the response body).
+      operationId: verifyTOTP
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, description: "6-digit TOTP code" }
+      responses:
+        '200':
+          description: Enrolled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enrolled:        { type: boolean }
+                  recovery_codes:
+                    type: array
+                    items: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: Already enrolled }
+
+  /v1/me/mfa/disable:
+    post:
+      summary: Disable MFA — REQUIRES current password
+      description: |
+        Wipes the user's TOTP secret and every recovery code. Gated on
+        the user's current password so a stolen session can't strip the
+        second factor on its own.
+      operationId: disableMFA
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string, format: password }
+      responses:
+        '204': { description: MFA disabled }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/me/mfa/recovery-codes/regenerate:
+    post:
+      summary: Rotate recovery codes — REQUIRES current password
+      operationId: regenerateRecoveryCodes
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string, format: password }
+      responses:
+        '200':
+          description: Fresh batch
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recovery_codes:
+                    type: array
+                    items: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   # ─── Org API ───────────────────────────────────────────────────────────
 

@@ -22,11 +22,17 @@ import (
 // Each may be nil — in which case that gate is disabled. The server wires
 // real buckets; tests can pass an empty struct to disable limiting.
 type Limits struct {
-	LoginIP       *limiter.Bucket // per source IP for POST /v1/auth/login
-	LoginEmail    *limiter.Bucket // per email for POST /v1/auth/login (anti-stuffing)
-	PWResetIP     *limiter.Bucket // per source IP for POST /v1/auth/password-reset
-	PWConfirmIP   *limiter.Bucket // per source IP for POST /v1/auth/password-reset/confirm
+	LoginIP     *limiter.Bucket // per source IP for POST /v1/auth/login
+	LoginEmail  *limiter.Bucket // per email for POST /v1/auth/login (anti-stuffing)
+	PWResetIP   *limiter.Bucket // per source IP for POST /v1/auth/password-reset
+	PWConfirmIP *limiter.Bucket // per source IP for POST /v1/auth/password-reset/confirm
+	MFASubmitIP *limiter.Bucket // per source IP for POST /v1/auth/login/mfa
 }
+
+// mfaChallengeTTL is the lifetime of a challenge token returned by Login.
+// Long enough that a slow user can find their phone, short enough that a
+// leaked token in an access log isn't usefully exploitable.
+const mfaChallengeTTL = 5 * time.Minute
 
 // Handlers bundles dependencies for the auth route group.
 type Handlers struct {
@@ -85,6 +91,39 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// MFA branch: if the user has a verified TOTP secret, do NOT mint a
+	// session yet — return a short-lived challenge token instead. The
+	// caller hits /v1/auth/login/mfa with the challenge + a TOTP code (or
+	// a recovery code) to complete the login.
+	enrolled, err := h.store.IsUserMFAEnrolled(r.Context(), user.ID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if enrolled {
+		_, challengeToken, err := h.store.CreateMFAChallenge(
+			r.Context(), user.ID, clientIP(r), r.UserAgent(), mfaChallengeTTL)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.audit(r, store.RecordAuditParams{
+			ActorKind:   store.AuditActorUser,
+			ActorUserID: &user.ID,
+			Action:      "auth.mfa.challenge",
+			TargetType:  "user",
+			TargetID:    &user.ID,
+		})
+		httpx.JSON(w, http.StatusOK, map[string]any{
+			"mfa_required":   true,
+			"mfa_token":      challengeToken,
+			"expires_in_sec": int(mfaChallengeTTL.Seconds()),
+			"note":           "POST this token + a TOTP code (or recovery code) to /v1/auth/login/mfa to finish signing in.",
+		})
+		return
+	}
+
 	sess, plain, err := h.store.CreateSession(r.Context(), user.ID, h.sessionTTL,
 		clientIP(r), r.UserAgent())
 	if err != nil {
