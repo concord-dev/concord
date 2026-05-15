@@ -54,6 +54,25 @@ paths:
                     type: object
                     additionalProperties: { type: string }
 
+  /metrics:
+    get:
+      summary: Prometheus exposition (text format)
+      description: |
+        Prometheus-format metrics for scraping. Exposes:
+        `concord_http_requests_total`, `concord_http_request_duration_seconds`,
+        `concord_http_inflight_requests`, `concord_webhook_deliveries_total`,
+        `concord_bus_events_dropped_total`, `concord_db_pool_*`, plus the
+        standard Go runtime and process collectors. Unauthenticated by
+        design — operators are expected to restrict access at ingress.
+      operationId: getMetrics
+      security: []
+      responses:
+        '200':
+          description: Metrics text body
+          content:
+            text/plain:
+              schema: { type: string }
+
   /version:
     get:
       summary: Build metadata + control library size

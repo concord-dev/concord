@@ -37,6 +37,11 @@ type Event struct {
 type Bus struct {
 	mu   sync.RWMutex
 	subs map[uuid.UUID]map[*subscription]struct{}
+	// OnDrop, when non-nil, is invoked each time Publish drops an event because
+	// the subscriber's buffer was full. The server wires its metrics recorder
+	// here so dropped-event volume is exported alongside the slog warning.
+	// Keep OnDrop fast and non-blocking — it runs inline on the publish path.
+	OnDrop func(orgID uuid.UUID, kind Kind)
 }
 
 type subscription struct {
@@ -99,6 +104,9 @@ func (b *Bus) Publish(e Event) {
 			slog.Warn("bus subscriber backlog full; event dropped",
 				slog.String("org_id", e.OrgID.String()),
 				slog.String("kind", string(e.Kind)))
+			if b.OnDrop != nil {
+				b.OnDrop(e.OrgID, e.Kind)
+			}
 		}
 	}
 }

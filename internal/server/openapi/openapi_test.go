@@ -68,6 +68,7 @@ func TestSpec_CoversEveryExpectedRoute(t *testing.T) {
 		// Public.
 		"/healthz":      {"get"},
 		"/readyz":       {"get"},
+		"/metrics":      {"get"},
 		"/version":      {"get"},
 		// Auth.
 		"/v1/auth/login":                        {"post"},

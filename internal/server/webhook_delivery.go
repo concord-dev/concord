@@ -113,6 +113,7 @@ func (c *Concord) deliverOne(wh store.Webhook, kind bus.Kind, body []byte) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, wh.URL, bytes.NewReader(body))
 	if err != nil {
 		_ = c.Store.RecordWebhookResult(context.Background(), wh.ID, 0, err.Error())
+		c.metrics.RecordWebhookDelivery("network_error")
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -128,6 +129,7 @@ func (c *Concord) deliverOne(wh store.Webhook, kind bus.Kind, body []byte) {
 			slog.String("webhook_id", wh.ID.String()),
 			slog.String("url", wh.URL),
 			slog.String("err", err.Error()))
+		c.metrics.RecordWebhookDelivery("network_error")
 		return
 	}
 	defer resp.Body.Close()
@@ -136,7 +138,9 @@ func (c *Concord) deliverOne(wh store.Webhook, kind bus.Kind, body []byte) {
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		_ = c.Store.RecordWebhookResult(context.Background(), wh.ID,
 			resp.StatusCode, fmt.Sprintf("non-2xx response: %d", resp.StatusCode))
+		c.metrics.RecordWebhookDelivery("non_2xx")
 		return
 	}
 	_ = c.Store.RecordWebhookResult(context.Background(), wh.ID, resp.StatusCode, "")
+	c.metrics.RecordWebhookDelivery("success")
 }

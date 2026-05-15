@@ -34,9 +34,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
 	"github.com/concord-dev/concord/internal/server/bus"
+	"github.com/concord-dev/concord/internal/server/metrics"
 	"github.com/concord-dev/concord/internal/store"
 )
 
@@ -50,8 +53,9 @@ type Concord struct {
 	SessionTTL         time.Duration
 	CORSAllowedOrigins []string // exact-match list; empty disables CORS
 
-	bus *bus.Bus
-	mu  sync.Mutex
+	bus     *bus.Bus
+	metrics *metrics.Metrics
+	mu      sync.Mutex
 }
 
 // Options is the construction surface for cmd/server.
@@ -85,6 +89,11 @@ func NewConcord(opts Options) (*Concord, error) {
 		return nil, fmt.Errorf("no controls found in %s", opts.ControlsDir)
 	}
 
+	m := metrics.New()
+	m.RegisterDBPool(opts.Store.Pool())
+	b := bus.New()
+	b.OnDrop = func(_ uuid.UUID, k bus.Kind) { m.RecordBusDrop(string(k)) }
+
 	return &Concord{
 		Controls:           loaded,
 		Config:             cfg,
@@ -93,7 +102,8 @@ func NewConcord(opts Options) (*Concord, error) {
 		Version:            opts.Version,
 		SessionTTL:         opts.SessionTTL,
 		CORSAllowedOrigins: opts.CORSAllowedOrigins,
-		bus:                bus.New(),
+		bus:                b,
+		metrics:            m,
 	}, nil
 }
 
@@ -121,3 +131,8 @@ func (c *Concord) Shutdown(ctx context.Context) error {
 
 // Bus exposes the event bus to callers (the SSE handler).
 func (c *Concord) Bus() *bus.Bus { return c.bus }
+
+// Metrics exposes the Prometheus instrumentation. The router pulls .Handler()
+// off this for /metrics; domain code uses it via the recorder methods on
+// metrics.Metrics.
+func (c *Concord) Metrics() *metrics.Metrics { return c.metrics }
