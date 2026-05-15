@@ -9,25 +9,25 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// RunStatus enumerates the lifecycle states a run moves through.
+// RunStatus enumerates the terminal states an agent-submitted run can carry.
+// `succeeded` is what every successful POST /v1/orgs/{slug}/runs writes;
+// `failed` is reserved for agents that want to report a hard error from
+// their own collectors. The legacy `pending` / `running` states from the
+// server-side worker era are gone — runs land terminal.
 type RunStatus string
 
 const (
-	RunPending   RunStatus = "pending"
-	RunRunning   RunStatus = "running"
 	RunSucceeded RunStatus = "succeeded"
 	RunFailed    RunStatus = "failed"
 )
 
-// RunSource describes how a run row got into the table.
-//
-//	server — the in-process worker ran it (legacy; deprecated, removed in 0008)
-//	agent  — an agent pushed a completed run (the supported path)
+// RunSource describes how a run row got into the table. Single value today
+// (`agent`) — the field is kept to make future provenance (e.g. operator
+// uploads, federated runs) a zero-migration addition.
 type RunSource string
 
 const (
-	RunSourceServer RunSource = "server"
-	RunSourceAgent  RunSource = "agent"
+	RunSourceAgent RunSource = "agent"
 )
 
 // Run is the row shape for one evaluation cycle.
@@ -44,30 +44,6 @@ type Run struct {
 	TriggeredByToken *uuid.UUID `json:"triggered_by_token,omitempty"`
 	TriggeredByUser  *uuid.UUID `json:"triggered_by_user,omitempty"`
 	AgentVersion     string     `json:"agent_version,omitempty"`
-}
-
-// CreateRunParams identifies who triggered the run. Exactly one of TokenID
-// or UserID may be non-nil; passing both is allowed but only the token
-// attribution is shown in audit views by convention.
-type CreateRunParams struct {
-	OrgID   uuid.UUID
-	TokenID *uuid.UUID
-	UserID  *uuid.UUID
-}
-
-// CreateRun inserts a new run in pending state (server-side worker path —
-// kept while Phase B is in progress; will be removed once the worker is
-// gone).
-func (s *Store) CreateRun(ctx context.Context, p CreateRunParams) (Run, error) {
-	r := Run{OrgID: p.OrgID, Status: RunPending, Source: RunSourceServer,
-		TriggeredByToken: p.TokenID, TriggeredByUser: p.UserID}
-	err := s.pool.QueryRow(ctx,
-		`INSERT INTO run(org_id, status, source, triggered_by_token, triggered_by_user)
-		 VALUES ($1, $2, $3, $4, $5)
-		 RETURNING id, started_at`,
-		p.OrgID, string(r.Status), string(r.Source), p.TokenID, p.UserID,
-	).Scan(&r.ID, &r.StartedAt)
-	return r, err
 }
 
 // SubmitRunParams carries an agent-completed run for direct insertion.
@@ -114,29 +90,6 @@ func (s *Store) SubmitRun(ctx context.Context, p SubmitRunParams) (Run, error) {
 		nullIfEmpty(p.AgentVersion),
 	).Scan(&r.ID)
 	return r, err
-}
-
-// MarkRunRunning transitions pending → running.
-func (s *Store) MarkRunRunning(ctx context.Context, runID uuid.UUID) error {
-	_, err := s.pool.Exec(ctx, `UPDATE run SET status = 'running' WHERE id = $1`, runID)
-	return err
-}
-
-// CompleteRun marks the run as succeeded and stores summary + findings JSON.
-func (s *Store) CompleteRun(ctx context.Context, runID uuid.UUID, summary, findings []byte) error {
-	_, err := s.pool.Exec(ctx,
-		`UPDATE run SET status = 'succeeded', completed_at = now(),
-		 summary = $2, findings = $3 WHERE id = $1`,
-		runID, summary, findings)
-	return err
-}
-
-// FailRun marks the run as failed with an error message.
-func (s *Store) FailRun(ctx context.Context, runID uuid.UUID, errMsg string) error {
-	_, err := s.pool.Exec(ctx,
-		`UPDATE run SET status = 'failed', completed_at = now(), error_message = $2
-		 WHERE id = $1`, runID, errMsg)
-	return err
 }
 
 // GetRun fetches a run by ID, scoped to orgID.

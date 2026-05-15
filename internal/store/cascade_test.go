@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,7 +19,12 @@ func TestDeleteOrg_CascadesEverywhere(t *testing.T) {
 	admin, _ := s.GetRoleByName(ctx, "admin")
 	_ = s.AssignRole(ctx, u.ID, org.ID, admin.ID)
 	tok, _, _ := s.CreateAPIToken(ctx, org.ID, "x", nil)
-	run, _ := s.CreateRun(ctx, store.CreateRunParams{OrgID: org.ID})
+	now := time.Now().UTC()
+	run, _ := s.SubmitRun(ctx, store.SubmitRunParams{
+		OrgID: org.ID, Source: store.RunSourceAgent,
+		StartedAt: now, CompletedAt: now,
+		Summary: []byte(`{}`), Findings: []byte(`[]`),
+	})
 
 	_, err := s.Pool().Exec(ctx, `DELETE FROM organization WHERE id = $1`, org.ID)
 	require.NoError(t, err)
