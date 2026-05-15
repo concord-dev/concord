@@ -38,12 +38,12 @@ func TestOrgAPI_UnknownOrgReturns404(t *testing.T) {
 
 // ─── Org-scoped: session path with RBAC ───────────────────────────────
 
-func TestOrgAPI_OwnerSessionCanCreateRun(t *testing.T) {
+func TestOrgAPI_OwnerSessionCanSubmitRun(t *testing.T) {
 	h := newHarness(t)
 	sessTok := h.login(t)
-	resp, _ := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/check", "", sessTok)
-	assert.Equal(t, http.StatusAccepted, resp.StatusCode,
-		"owner has runs:create — session-driven /check must succeed")
+	// Owner has runs:create — submitting an agent run via session auth works.
+	runID := h.submitTestRun(t, sessTok, "[]")
+	assert.NotEmpty(t, runID)
 }
 
 func TestOrgAPI_ViewerSessionForbiddenFromCreateRun(t *testing.T) {
@@ -71,8 +71,10 @@ func TestOrgAPI_ViewerSessionForbiddenFromCreateRun(t *testing.T) {
 	respR, _ := h.do(t, "GET", "/v1/orgs/"+h.org.Slug+"/frameworks", "", got.Token)
 	assert.Equal(t, http.StatusOK, respR.StatusCode, "viewer holds controls:read")
 
-	// Viewer cannot CREATE runs.
-	respC, bodyC := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/check", "", got.Token)
+	// Viewer cannot SUBMIT runs.
+	respC, bodyC := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/runs",
+		`{"agent":{"version":"t"},"started_at":"2026-01-01T00:00:00Z","completed_at":"2026-01-01T00:00:00Z","summary":{},"findings":[]}`,
+		got.Token)
 	assert.Equal(t, http.StatusForbidden, respC.StatusCode)
 	assert.Contains(t, string(bodyC), "runs:create")
 }

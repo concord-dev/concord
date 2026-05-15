@@ -63,12 +63,11 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	st := openStore(t)
 	c, err := server.NewConcord(server.Options{
-		ControlsDir:  repoControlsDir(t),
-		ConfigPath:   filepath.Join(t.TempDir(), "missing-concord.yaml"),
-		FixturesOnly: true,
-		Store:        st,
-		OperatorToken:   testOperatorToken,
-		Version:      "test",
+		ControlsDir:   repoControlsDir(t),
+		ConfigPath:    filepath.Join(t.TempDir(), "missing-concord.yaml"),
+		Store:         st,
+		OperatorToken: testOperatorToken,
+		Version:       "test",
 	})
 	require.NoError(t, err)
 	ts := httptest.NewServer(c.Router())
@@ -133,6 +132,31 @@ func (h *harness) login(t *testing.T) string {
 
 func uniqueSlug(p string) string  { return fmt.Sprintf("%s-%s", p, uuid.NewString()[:8]) }
 func uniqueEmail(p string) string { return fmt.Sprintf("%s+%s@example.com", p, uuid.NewString()[:8]) }
+
+// submitTestRun POSTs a synthetic agent submission to /v1/orgs/{slug}/runs.
+// In agent-push mode there is no server-side worker to trigger; tests that
+// want a run to exist just push one. Returns the run id on success.
+func (h *harness) submitTestRun(t *testing.T, auth string, findings string) string {
+	t.Helper()
+	if findings == "" {
+		findings = "[]"
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	body := fmt.Sprintf(`{
+		"agent": {"version": "test"},
+		"started_at": %q,
+		"completed_at": %q,
+		"summary": {"pass": 0, "fail": 0, "error": 0},
+		"findings": %s
+	}`, now, now, findings)
+	resp, raw := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/runs", body, auth)
+	require.Equal(t, http.StatusCreated, resp.StatusCode, string(raw))
+	var ack struct {
+		RunID string `json:"run_id"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &ack))
+	return ack.RunID
+}
 
 type sseFrame struct {
 	Event string

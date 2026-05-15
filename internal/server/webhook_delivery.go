@@ -19,12 +19,12 @@ import (
 
 // webhookHTTPClient is the single client every outbound delivery uses. A
 // short total timeout protects the server: one slow receiver must never
-// stall the worker pipeline.
+// stall the request that triggered the broadcast.
 var webhookHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 // signPayload returns the value for the X-Concord-Signature header. The
-// "sha256=" prefix matches the GitHub / Stripe webhook convention so receivers
-// can pick the algorithm from the header.
+// "sha256=" prefix matches the GitHub / Stripe convention so receivers can
+// pick the algorithm from the header.
 func signPayload(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)
@@ -38,12 +38,26 @@ func VerifyWebhookSignature(secret string, body []byte, headerValue string) bool
 	return hmac.Equal([]byte(want), []byte(headerValue))
 }
 
-// broadcast publishes an event to in-process subscribers AND fires per-org
-// webhooks. Webhook delivery runs in a detached goroutine so a slow receiver
-// cannot stall the worker that's calling this.
-func (c *Concord) broadcast(e bus.Event) {
-	c.bus.Publish(e)
-	go c.fireWebhooks(e)
+// Broadcast is the post-SubmitRun side-effect: publish run.completed on the
+// in-process bus (SSE subscribers see it instantly) and fire per-org
+// webhooks. Webhook delivery is detached so a slow receiver cannot stall
+// the request that triggered this. Exported as a method so the org handler
+// subpackage can take it as a `Broadcaster` func value.
+func (c *Concord) Broadcast(run store.Run, summary []byte) {
+	at := time.Now().UTC()
+	if run.CompletedAt != nil {
+		at = *run.CompletedAt
+	}
+	evt := bus.Event{
+		Kind:    bus.RunCompleted,
+		OrgID:   run.OrgID,
+		RunID:   run.ID,
+		At:      at,
+		Status:  string(run.Status),
+		Summary: summary,
+	}
+	c.bus.Publish(evt)
+	go c.fireWebhooks(evt)
 }
 
 func (c *Concord) fireWebhooks(e bus.Event) {
@@ -85,8 +99,9 @@ func eventKindAllowed(allowed []string, kind bus.Kind) bool {
 	return false
 }
 
-// deliverOne POSTs body to wh.URL with HMAC signing + standard headers. Result
-// is persisted to the webhook row so operators can see last delivery status.
+// deliverOne POSTs body to wh.URL with HMAC signing + standard headers.
+// Result is persisted to the webhook row so operators can see last delivery
+// status.
 func (c *Concord) deliverOne(wh store.Webhook, kind bus.Kind, body []byte) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

@@ -6,30 +6,33 @@ package org
 import (
 	"strings"
 
-	"github.com/google/uuid"
-
 	"github.com/concord-dev/concord/internal/controls"
 	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// Enqueuer is the worker contract org handlers depend on. Defined here (not in
-// the worker package) so the handler subpackage takes the smaller surface.
-type Enqueuer interface {
-	Enqueue(orgID, runID uuid.UUID) error
-}
+// Broadcaster is the side-effect surface SubmitRun needs after a run lands:
+// publish a run.completed event on the in-process bus AND fire outbound
+// webhooks. Injected as a func rather than concrete type so the org handler
+// stays decoupled from webhook delivery internals.
+type Broadcaster func(run store.Run, summary []byte)
 
 // Handlers bundles dependencies for the org route group.
 type Handlers struct {
-	store    *store.Store
-	controls []controls.Loaded
-	worker   Enqueuer
-	bus      *bus.Bus
+	store     *store.Store
+	controls  []controls.Loaded
+	bus       *bus.Bus
+	broadcast Broadcaster
 }
 
 // New constructs Handlers wired to the supplied infrastructure.
-func New(s *store.Store, ctrls []controls.Loaded, w Enqueuer, b *bus.Bus) *Handlers {
-	return &Handlers{store: s, controls: ctrls, worker: w, bus: b}
+func New(s *store.Store, ctrls []controls.Loaded, b *bus.Bus, broadcast Broadcaster) *Handlers {
+	if broadcast == nil {
+		// No-op default so SubmitRun never nil-deref's in tests that don't
+		// care about side-effects.
+		broadcast = func(store.Run, []byte) {}
+	}
+	return &Handlers{store: s, controls: ctrls, bus: b, broadcast: broadcast}
 }
 
 // controlExists is a cheap membership check against the loaded controls library.

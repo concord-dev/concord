@@ -108,9 +108,8 @@ func TestWebhooks_FireOnRunDeliversSignedPayload(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(rawC, &created))
 
-	// Fire a run.
-	respR, _ := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/check", "", h.apiToken)
-	require.Equal(t, http.StatusAccepted, respR.StatusCode)
+	// Push a run — the server broadcasts run.completed which fires the webhook.
+	h.submitTestRun(t, h.apiToken, "[]")
 
 	// Wait for the delivery — only run.completed should arrive (run.started
 	// is filtered out by event_kinds).
@@ -153,13 +152,11 @@ func TestWebhooks_EventKindFilterSkipsUnsubscribedKinds(t *testing.T) {
 	}))
 	t.Cleanup(mockSink.Close)
 
-	// Subscribe ONLY to run.failed — run.started + run.completed must NOT
-	// reach the receiver.
+	// Subscribe ONLY to run.failed — run.completed must NOT reach the receiver.
 	_, _ = h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/webhooks",
 		fmt.Sprintf(`{"url":%q,"event_kinds":["run.failed"]}`, mockSink.URL),
 		h.apiToken)
-	resp, _ := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/check", "", h.apiToken)
-	require.Equal(t, http.StatusAccepted, resp.StatusCode)
+	h.submitTestRun(t, h.apiToken, "[]")
 
 	select {
 	case kind := <-got:

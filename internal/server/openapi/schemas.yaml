@@ -182,15 +182,6 @@ components:
         completed_at:  { type: string, format: date-time, nullable: true }
         error_message: { type: string }
 
-    RunAccepted:
-      type: object
-      required: [run_id, status, poll_url]
-      properties:
-        run_id:     { type: string, format: uuid }
-        status:     { type: string, enum: [pending] }
-        poll_url:   { type: string }
-        started_at: { type: string, format: date-time }
-
     ControlOverride:
       type: object
       required: [control_id, params]
@@ -203,23 +194,6 @@ components:
           description: "Free-form param map consumed by Rego at `input._concord.params`."
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-
-    Schedule:
-      type: object
-      required: [id, org_id, cron_expr, enabled, next_fire_at]
-      properties:
-        id:            { type: string, format: uuid }
-        org_id:        { type: string, format: uuid }
-        cron_expr:
-          type: string
-          description: |
-            5-field cron expression or robfig descriptor (`@hourly`,
-            `@every 30m`). Validated server-side on PUT.
-        enabled:       { type: boolean }
-        last_fired_at: { type: string, format: date-time, nullable: true }
-        next_fire_at:  { type: string, format: date-time }
-        created_at:    { type: string, format: date-time }
-        updated_at:    { type: string, format: date-time }
 
     Webhook:
       type: object
@@ -253,17 +227,6 @@ components:
             creation; subsequent GETs never expose it.
         note: { type: string }
 
-    AgentKey:
-      type: object
-      required: [id, name, public_key, created_at]
-      properties:
-        id:                  { type: string, format: uuid }
-        name:                { type: string }
-        public_key:          { type: string, description: "Ed25519 public key (base64, 32 raw bytes)" }
-        created_by_user_id:  { type: string, format: uuid, nullable: true }
-        created_at:          { type: string, format: date-time }
-        last_used_at:        { type: string, format: date-time, nullable: true }
-
     AgentSubmission:
       type: object
       required: [agent, started_at, completed_at, summary, findings]
@@ -293,18 +256,14 @@ components:
 
     AgentSubmissionResult:
       type: object
-      required: [run_id, source, signature_verified, url]
+      required: [run_id, source, url]
       properties:
         run_id: { type: string, format: uuid }
         source:
           type: string
-          enum: [agent, unsigned]
-          description: |
-            `agent` = Ed25519 signature was verified.
-            `unsigned` = no signature headers; API token auth only.
-        signature_verified: { type: boolean }
-        agent_id:           { type: string, format: uuid, nullable: true }
-        url:                { type: string, description: "Relative URL of the persisted run" }
+          enum: [agent]
+          description: "Always `agent` for runs created via this endpoint."
+        url: { type: string, description: "Relative URL of the persisted run" }
 
     TrustPortalSettings:
       type: object

@@ -70,31 +70,6 @@ paths:
               schema: { $ref: '#/components/schemas/Control' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /v1/orgs/{slug}/check:
-    post:
-      summary: Enqueue a compliance run for the org
-      description: |
-        Returns `202 Accepted` immediately with a `run_id` and a `poll_url`.
-        The worker pool runs the checks asynchronously; subscribe to
-        `/v1/orgs/{slug}/events` or poll `/v1/orgs/{slug}/runs/{id}` for the
-        terminal outcome.
-      operationId: createRun
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - { $ref: '#/components/parameters/OrgSlug' }
-      responses:
-        '202':
-          description: Run enqueued
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/RunAccepted' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '503':
-          description: Worker queue full
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-
   /v1/orgs/{slug}/findings:
     get:
       summary: Most recent succeeded run's findings (convenience shortcut)
@@ -128,22 +103,13 @@ paths:
     post:
       summary: Submit a completed run from an agent
       description: |
-        The agent-push entry point. Customers run the OSS collector on their
-        own infrastructure and POST the completed findings here. Credentials
-        for the underlying providers (AWS, GitHub, etc.) never reach Concord.
+        The agent-push entry point. Customers run the OSS `concord` CLI on
+        their own infrastructure with their own credentials and POST the
+        completed findings here. Credentials for the underlying providers
+        (AWS, GitHub, etc.) never reach Concord.
 
-        Authenticate with the standard API token. Optionally sign the raw
-        request body with an Ed25519 key registered via
-        `POST /v1/orgs/{slug}/agent-keys` and pass:
-
-          X-Concord-Agent-Key-Id: <uuid>
-          X-Concord-Agent-Signature: <base64 standard, 64 bytes raw>
-
-        Either both signature headers are present or both absent — sending
-        only one is rejected so an attacker can't quietly downgrade a signed
-        push to an unsigned one. Unsigned pushes are accepted (API token
-        auth alone is sufficient) but the resulting run is marked
-        `source: unsigned` for operator visibility.
+        Authentication is the standard API token — there is no separate
+        signing key.
       operationId: submitRun
       security: [{ bearerAuth: [] }]
       parameters:
@@ -160,8 +126,6 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AgentSubmissionResult' }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '401':
-          description: Signature verification failed, or only one signature header was set
         '413': { description: Submission body exceeds the 25 MB limit }
 
   /v1/orgs/{slug}/runs/{id}:
@@ -284,53 +248,6 @@ paths:
         '204': { description: Override deleted }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /v1/orgs/{slug}/schedule:
-    get:
-      summary: Read the org's cron-driven schedule
-      operationId: getSchedule
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - { $ref: '#/components/parameters/OrgSlug' }
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Schedule' }
-        '404': { $ref: '#/components/responses/NotFound' }
-    put:
-      summary: Install or replace the org's schedule
-      operationId: putSchedule
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - { $ref: '#/components/parameters/OrgSlug' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [cron_expr]
-              properties:
-                cron_expr: { type: string }
-                enabled:   { type: boolean, default: true }
-      responses:
-        '200':
-          description: Schedule upserted
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Schedule' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-    delete:
-      summary: Remove the org's schedule
-      operationId: deleteSchedule
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - { $ref: '#/components/parameters/OrgSlug' }
-      responses:
-        '204': { description: Schedule deleted }
-        '404': { $ref: '#/components/responses/NotFound' }
-
   /v1/orgs/{slug}/webhooks:
     get:
       summary: List the org's webhooks
@@ -427,63 +344,6 @@ paths:
         - { $ref: '#/components/parameters/UUIDPath' }
       responses:
         '204': { description: Webhook deleted }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /v1/orgs/{slug}/agent-keys:
-    get:
-      summary: List active (non-revoked) agent signing keys for the org
-      operationId: listAgentKeys
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - { $ref: '#/components/parameters/OrgSlug' }
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/AgentKey' }
-    post:
-      summary: Register an Ed25519 public key for agent signing
-      description: |
-        Each key gets a friendly `name` unique within the org (revoked keys
-        keep their name so audit history stays readable). The 32-byte Ed25519
-        public key is supplied as standard base64. Requires
-        `agent_keys:manage` (owner + admin by default).
-      operationId: createAgentKey
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - { $ref: '#/components/parameters/OrgSlug' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [name, public_key]
-              properties:
-                name:        { type: string }
-                public_key:  { type: string, description: "Ed25519 public key, base64 (32 raw bytes)" }
-      responses:
-        '201':
-          description: Created
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AgentKey' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '409': { description: A key with this name already exists in this org }
-
-  /v1/orgs/{slug}/agent-keys/{id}:
-    delete:
-      summary: Revoke (soft-delete) an agent signing key
-      operationId: revokeAgentKey
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - { $ref: '#/components/parameters/OrgSlug' }
-        - { $ref: '#/components/parameters/UUIDPath' }
-      responses:
-        '204': { description: Revoked }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /v1/orgs/{slug}/trust-portal/settings:

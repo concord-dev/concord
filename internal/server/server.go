@@ -1,6 +1,6 @@
 // Package server hosts Concord's HTTP API. It speaks two auth mechanisms:
 //
-//   - API tokens (Authorization: Bearer concord_...) for CI/CLI
+//   - API tokens (Authorization: Bearer concord_...) for CI/CLI agents
 //   - User sessions (Authorization: Bearer concord_sess_...) for the web
 //     dashboard
 //
@@ -8,19 +8,22 @@
 // session auth) the user. Per-endpoint permission checks consult the RBAC
 // tables via Store.HasPermission.
 //
+// The server is a thin findings receiver: agents (the `concord` CLI) run
+// scans on the customer's own infrastructure with the customer's own
+// credentials, and POST completed runs to /v1/orgs/{slug}/runs. Concord
+// stores findings, fans out events (SSE + webhooks), and renders read
+// surfaces. It never holds customer cloud credentials.
+//
 // File layout:
 //
 //	server.go              Concord struct + NewConcord + lifecycle
 //	router.go              Router() with the wired mux
-//	worker.go              In-process run worker pool
-//	scheduler.go           Cron-driven schedule poller
-//	webhook_delivery.go    Outbound webhook signing + delivery
+//	webhook_delivery.go    Outbound webhook signing + delivery + broadcast
 //	handlers/<group>/      Per-domain handler subpackages
 //	middleware/            RequireOperator / RequireSession / RequireOrgPerm
 //	httpx/                 JSON + Error + Logging helpers
 //	authctx/               Principal + session context types
 //	bus/                   In-process event bus (SSE fan-out)
-//	cronx/                 Cron expression parsing
 //	openapi/               Embedded API spec
 package server
 
@@ -33,7 +36,6 @@ import (
 
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
-	"github.com/concord-dev/concord/internal/evidence"
 	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/store"
 )
@@ -42,34 +44,27 @@ import (
 type Concord struct {
 	Controls      []controls.Loaded
 	Config        *config.Config
-	Registry      *evidence.Registry
 	Store         *store.Store
 	OperatorToken string // SaaS-operator back-door token; gates /operator/v1/*
 	Version       string
 	SessionTTL    time.Duration
 
-	worker    *Worker
-	bus       *bus.Bus
-	scheduler *Scheduler
-	mu        sync.Mutex
+	bus *bus.Bus
+	mu  sync.Mutex
 }
 
 // Options is the construction surface for cmd/server.
 type Options struct {
 	ControlsDir   string
 	ConfigPath    string
-	FixturesOnly  bool
-	Registry      *evidence.Registry
 	Store         *store.Store
 	OperatorToken string
 	Version       string
 	SessionTTL    time.Duration
-	Worker        WorkerOpts
-	Scheduler     SchedulerOpts
 }
 
-// NewConcord loads controls + config and wires the Store, worker, scheduler,
-// and event bus.
+// NewConcord loads controls + config and wires the Store and event bus.
+// No background goroutines — runs arrive from agents over HTTP.
 func NewConcord(opts Options) (*Concord, error) {
 	if opts.Store == nil {
 		return nil, errors.New("Store is required")
@@ -88,21 +83,15 @@ func NewConcord(opts Options) (*Concord, error) {
 		return nil, fmt.Errorf("no controls found in %s", opts.ControlsDir)
 	}
 
-	c := &Concord{
+	return &Concord{
 		Controls:      loaded,
 		Config:        cfg,
-		Registry:      resolveRegistry(opts),
 		Store:         opts.Store,
 		OperatorToken: opts.OperatorToken,
 		Version:       opts.Version,
 		SessionTTL:    opts.SessionTTL,
 		bus:           bus.New(),
-	}
-	c.worker = NewWorker(c, opts.Worker)
-	c.worker.Start()
-	c.scheduler = NewScheduler(c, opts.Scheduler)
-	c.scheduler.Start()
-	return c, nil
+	}, nil
 }
 
 // applyDefaults fills in sensible Options defaults so callers can pass a
@@ -119,28 +108,13 @@ func applyDefaults(opts *Options) {
 	}
 }
 
-// resolveRegistry returns the registry the caller supplied or builds a default
-// one. Default + FixturesOnly is the local-dev mode.
-func resolveRegistry(opts Options) *evidence.Registry {
-	if opts.Registry != nil {
-		return opts.Registry
-	}
-	reg := evidence.NewRegistry()
-	if opts.FixturesOnly {
-		reg.SetFixturesOnly(true)
-	}
-	return reg
-}
-
-// Shutdown stops the scheduler then drains the worker, in that order — so the
-// scheduler can't enqueue new work after the worker queue is closing.
+// Shutdown is a no-op today (no background workers to drain) but kept so
+// cmd/server can call it during signal handling without conditionals. In
+// the future it'll cancel any long-running webhook deliveries in flight.
 func (c *Concord) Shutdown(ctx context.Context) error {
-	_ = c.scheduler.Shutdown(ctx)
-	return c.worker.Shutdown(ctx)
+	_ = ctx
+	return nil
 }
-
-// SchedulerForTest exposes the scheduler for tests that need to fire ticks manually.
-func (c *Concord) SchedulerForTest() *Scheduler { return c.scheduler }
 
 // Bus exposes the event bus to callers (the SSE handler).
 func (c *Concord) Bus() *bus.Bus { return c.bus }

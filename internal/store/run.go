@@ -21,33 +21,29 @@ const (
 
 // RunSource describes how a run row got into the table.
 //
-//	server   — the in-process worker ran it (legacy path; operator-only now)
-//	agent    — an agent pushed a completed run with a verified Ed25519 signature
-//	unsigned — an agent pushed but didn't sign (API token auth alone)
+//	server — the in-process worker ran it (legacy; deprecated, removed in 0008)
+//	agent  — an agent pushed a completed run (the supported path)
 type RunSource string
 
 const (
-	RunSourceServer   RunSource = "server"
-	RunSourceAgent    RunSource = "agent"
-	RunSourceUnsigned RunSource = "unsigned"
+	RunSourceServer RunSource = "server"
+	RunSourceAgent  RunSource = "agent"
 )
 
 // Run is the row shape for one evaluation cycle.
 type Run struct {
-	ID                 uuid.UUID  `json:"id"`
-	OrgID              uuid.UUID  `json:"org_id"`
-	Status             RunStatus  `json:"status"`
-	Source             RunSource  `json:"source"`
-	StartedAt          time.Time  `json:"started_at"`
-	CompletedAt        *time.Time `json:"completed_at,omitempty"`
-	ErrorMessage       string     `json:"error_message,omitempty"`
-	Summary            []byte     `json:"summary,omitempty"`  // raw JSON
-	Findings           []byte     `json:"findings,omitempty"` // raw JSON
-	TriggeredByToken   *uuid.UUID `json:"triggered_by_token,omitempty"`
-	TriggeredByUser    *uuid.UUID `json:"triggered_by_user,omitempty"`
-	AgentID            *uuid.UUID `json:"agent_id,omitempty"`
-	AgentVersion       string     `json:"agent_version,omitempty"`
-	SignatureVerified  bool       `json:"signature_verified"`
+	ID               uuid.UUID  `json:"id"`
+	OrgID            uuid.UUID  `json:"org_id"`
+	Status           RunStatus  `json:"status"`
+	Source           RunSource  `json:"source"`
+	StartedAt        time.Time  `json:"started_at"`
+	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+	ErrorMessage     string     `json:"error_message,omitempty"`
+	Summary          []byte     `json:"summary,omitempty"`  // raw JSON
+	Findings         []byte     `json:"findings,omitempty"` // raw JSON
+	TriggeredByToken *uuid.UUID `json:"triggered_by_token,omitempty"`
+	TriggeredByUser  *uuid.UUID `json:"triggered_by_user,omitempty"`
+	AgentVersion     string     `json:"agent_version,omitempty"`
 }
 
 // CreateRunParams identifies who triggered the run. Exactly one of TokenID
@@ -59,7 +55,9 @@ type CreateRunParams struct {
 	UserID  *uuid.UUID
 }
 
-// CreateRun inserts a new run in pending state (server-side worker path).
+// CreateRun inserts a new run in pending state (server-side worker path —
+// kept while Phase B is in progress; will be removed once the worker is
+// gone).
 func (s *Store) CreateRun(ctx context.Context, p CreateRunParams) (Run, error) {
 	r := Run{OrgID: p.OrgID, Status: RunPending, Source: RunSourceServer,
 		TriggeredByToken: p.TokenID, TriggeredByUser: p.UserID}
@@ -72,53 +70,48 @@ func (s *Store) CreateRun(ctx context.Context, p CreateRunParams) (Run, error) {
 	return r, err
 }
 
-// SubmitRunParams carries an agent-completed run for direct insertion. The
-// run lands as 'succeeded' immediately — the agent has already done the work.
+// SubmitRunParams carries an agent-completed run for direct insertion.
 type SubmitRunParams struct {
-	OrgID             uuid.UUID
-	TokenID           *uuid.UUID
-	UserID            *uuid.UUID
-	AgentID           *uuid.UUID // set when the push was Ed25519-signed
-	AgentVersion      string
-	Source            RunSource // RunSourceAgent or RunSourceUnsigned
-	SignatureVerified bool
-	StartedAt         time.Time // agent-reported timestamps
-	CompletedAt       time.Time
-	Summary           []byte
-	Findings          []byte
+	OrgID        uuid.UUID
+	TokenID      *uuid.UUID
+	UserID       *uuid.UUID
+	AgentVersion string
+	Source       RunSource // must be RunSourceAgent
+	StartedAt    time.Time
+	CompletedAt  time.Time
+	Summary      []byte
+	Findings     []byte
 }
 
 // SubmitRun inserts a completed run from an agent push. Unlike CreateRun,
 // this is a single-shot insert: no pending → running transition.
 func (s *Store) SubmitRun(ctx context.Context, p SubmitRunParams) (Run, error) {
-	if p.Source != RunSourceAgent && p.Source != RunSourceUnsigned {
-		return Run{}, errors.New("SubmitRun requires Source = RunSourceAgent or RunSourceUnsigned")
+	if p.Source != RunSourceAgent {
+		return Run{}, errors.New("SubmitRun requires Source = RunSourceAgent")
 	}
 	r := Run{
-		OrgID:             p.OrgID,
-		Status:            RunSucceeded,
-		Source:            p.Source,
-		StartedAt:         p.StartedAt,
-		CompletedAt:       &p.CompletedAt,
-		Summary:           p.Summary,
-		Findings:          p.Findings,
-		TriggeredByToken:  p.TokenID,
-		TriggeredByUser:   p.UserID,
-		AgentID:           p.AgentID,
-		AgentVersion:      p.AgentVersion,
-		SignatureVerified: p.SignatureVerified,
+		OrgID:            p.OrgID,
+		Status:           RunSucceeded,
+		Source:           p.Source,
+		StartedAt:        p.StartedAt,
+		CompletedAt:      &p.CompletedAt,
+		Summary:          p.Summary,
+		Findings:         p.Findings,
+		TriggeredByToken: p.TokenID,
+		TriggeredByUser:  p.UserID,
+		AgentVersion:     p.AgentVersion,
 	}
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO run(org_id, status, source, started_at, completed_at,
 		                 summary, findings,
 		                 triggered_by_token, triggered_by_user,
-		                 agent_id, agent_version, signature_verified)
-		 VALUES ($1, 'succeeded', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		                 agent_version)
+		 VALUES ($1, 'succeeded', $2, $3, $4, $5, $6, $7, $8, $9)
 		 RETURNING id`,
 		p.OrgID, string(p.Source), p.StartedAt, p.CompletedAt,
 		p.Summary, p.Findings,
 		p.TokenID, p.UserID,
-		p.AgentID, nullIfEmpty(p.AgentVersion), p.SignatureVerified,
+		nullIfEmpty(p.AgentVersion),
 	).Scan(&r.ID)
 	return r, err
 }
@@ -153,13 +146,13 @@ func (s *Store) GetRun(ctx context.Context, orgID, runID uuid.UUID) (Run, error)
 		`SELECT id, org_id, status, source, started_at, completed_at,
 		        COALESCE(error_message,''), summary, findings,
 		        triggered_by_token, triggered_by_user,
-		        agent_id, COALESCE(agent_version,''), signature_verified
+		        COALESCE(agent_version,'')
 		 FROM run WHERE id = $1 AND org_id = $2`,
 		runID, orgID,
 	).Scan(&r.ID, &r.OrgID, &r.Status, &r.Source, &r.StartedAt, &r.CompletedAt,
 		&r.ErrorMessage, &r.Summary, &r.Findings,
 		&r.TriggeredByToken, &r.TriggeredByUser,
-		&r.AgentID, &r.AgentVersion, &r.SignatureVerified)
+		&r.AgentVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Run{}, ErrNotFound
 	}
@@ -174,7 +167,7 @@ func (s *Store) ListRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]Run
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, org_id, status, source, started_at, completed_at, COALESCE(error_message,''),
 		        triggered_by_token, triggered_by_user,
-		        agent_id, COALESCE(agent_version,''), signature_verified
+		        COALESCE(agent_version,'')
 		 FROM run WHERE org_id = $1 ORDER BY started_at DESC LIMIT $2`,
 		orgID, limit)
 	if err != nil {
@@ -187,7 +180,7 @@ func (s *Store) ListRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]Run
 		if err := rows.Scan(&r.ID, &r.OrgID, &r.Status, &r.Source, &r.StartedAt,
 			&r.CompletedAt, &r.ErrorMessage,
 			&r.TriggeredByToken, &r.TriggeredByUser,
-			&r.AgentID, &r.AgentVersion, &r.SignatureVerified); err != nil {
+			&r.AgentVersion); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

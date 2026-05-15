@@ -3,57 +3,62 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// ─── Async runs ───────────────────────────────────────────────────────
+// ─── Agent submissions ────────────────────────────────────────────────
 
-func TestCheck_ReturnsAcceptedAndPollSucceeds(t *testing.T) {
+func TestSubmitRun_StoresAndShowsUpInFindings(t *testing.T) {
 	h := newHarness(t)
-	resp, body := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/check", "", h.apiToken)
-	require.Equal(t, http.StatusAccepted, resp.StatusCode, string(body))
-	var enq struct {
-		RunID   string `json:"run_id"`
-		PollURL string `json:"poll_url"`
-	}
-	require.NoError(t, json.Unmarshal(body, &enq))
-	assert.Contains(t, enq.PollURL, "/v1/orgs/"+h.org.Slug+"/runs/")
+	runID := h.submitTestRun(t, h.apiToken,
+		`[{"control_id":"CC1.1","status":"pass","framework":"soc2"}]`)
+	require.NotEmpty(t, runID)
 
-	var detail map[string]any
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		resp2, body2 := h.do(t, "GET", enq.PollURL, "", h.apiToken)
-		require.Equal(t, http.StatusOK, resp2.StatusCode)
-		require.NoError(t, json.Unmarshal(body2, &detail))
-		if detail["status"] != "pending" && detail["status"] != "running" {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	require.Equal(t, "succeeded", detail["status"])
+	resp, body := h.do(t, "GET", "/v1/orgs/"+h.org.Slug+"/runs/"+runID, "", h.apiToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var run map[string]any
+	require.NoError(t, json.Unmarshal(body, &run))
+	assert.Equal(t, "succeeded", run["status"])
+	assert.Equal(t, "agent", run["source"])
 
-	// /findings lists the same run.
 	respF, bodyF := h.do(t, "GET", "/v1/orgs/"+h.org.Slug+"/findings", "", h.apiToken)
 	require.Equal(t, http.StatusOK, respF.StatusCode)
 	var findings struct {
-		Findings []apiv1.Finding `json:"findings"`
-		RunID    string          `json:"run_id"`
+		RunID    string           `json:"run_id"`
+		Findings []map[string]any `json:"findings"`
 	}
 	require.NoError(t, json.Unmarshal(bodyF, &findings))
-	assert.Equal(t, enq.RunID, findings.RunID)
-	assert.Equal(t, len(h.c.Controls), len(findings.Findings))
+	assert.Equal(t, runID, findings.RunID)
+	require.Len(t, findings.Findings, 1)
+	assert.Equal(t, "CC1.1", findings.Findings[0]["control_id"])
+}
+
+func TestSubmitRun_RejectsNilFindings(t *testing.T) {
+	h := newHarness(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	body := fmt.Sprintf(`{"agent":{"version":"t"},"started_at":%q,"completed_at":%q,"summary":{}}`, now, now)
+	resp, raw := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/runs", body, h.apiToken)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(raw), "findings")
+}
+
+func TestSubmitRun_RejectsMissingTimestamps(t *testing.T) {
+	h := newHarness(t)
+	body := `{"agent":{"version":"t"},"summary":{},"findings":[]}`
+	resp, raw := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/runs", body, h.apiToken)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(raw), "started_at")
 }
 
 // ─── SSE ──────────────────────────────────────────────────────────────
 
-func TestEvents_StreamsLifecycle(t *testing.T) {
+func TestEvents_StreamsRunCompletedOnSubmit(t *testing.T) {
 	h := newHarness(t)
 	req, _ := http.NewRequest("GET", h.srv.URL+"/v1/orgs/"+h.org.Slug+"/events", nil)
 	req.Header.Set("Authorization", "Bearer "+h.apiToken)
@@ -67,30 +72,24 @@ func TestEvents_StreamsLifecycle(t *testing.T) {
 		return h.c.Bus().SubscriberCount(h.org.ID) > 0
 	}, 2*time.Second, 10*time.Millisecond)
 
-	respCheck, _ := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/check", "", h.apiToken)
-	require.Equal(t, http.StatusAccepted, respCheck.StatusCode)
-
 	frames := make(chan sseFrame, 32)
 	go func() { defer close(frames); readSSEFrames(resp.Body, frames) }()
 
-	var sawStarted, sawCompleted bool
-	deadline := time.After(15 * time.Second)
-loop:
-	for !sawCompleted {
+	// Submit an agent run — server should broadcast run.completed.
+	h.submitTestRun(t, h.apiToken, "[]")
+
+	deadline := time.After(5 * time.Second)
+	for {
 		select {
 		case f, ok := <-frames:
 			if !ok {
-				break loop
+				t.Fatal("SSE stream closed before run.completed arrived")
 			}
-			switch f.Event {
-			case "run.started":
-				sawStarted = true
-			case "run.completed":
-				sawCompleted = true
+			if f.Event == "run.completed" {
+				return
 			}
 		case <-deadline:
-			t.Fatalf("timed out; started=%v completed=%v", sawStarted, sawCompleted)
+			t.Fatal("timed out waiting for run.completed SSE event")
 		}
 	}
-	assert.True(t, sawStarted)
 }

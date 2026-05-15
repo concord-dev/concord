@@ -1,10 +1,8 @@
 package org
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -16,37 +14,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
-
-// Check creates a run, enqueues it on the background worker, and responds 202
-// Accepted with the run id. Clients poll GET /runs/{id}.
-func (h *Handlers) Check(w http.ResponseWriter, r *http.Request) {
-	p, ok := authctx.PrincipalFrom(r.Context())
-	if !ok {
-		httpx.Error(w, http.StatusInternalServerError, "principal missing")
-		return
-	}
-	run, err := h.store.CreateRun(r.Context(), store.CreateRunParams{
-		OrgID: p.Org.ID, TokenID: p.TokenID, UserID: p.UserID,
-	})
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "creating run: "+err.Error())
-		return
-	}
-	if err := h.worker.Enqueue(p.Org.ID, run.ID); err != nil {
-		_ = h.store.FailRun(context.Background(), run.ID, err.Error())
-		httpx.Error(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-	slug := r.PathValue("slug")
-	pollURL := fmt.Sprintf("/v1/orgs/%s/runs/%s", slug, run.ID)
-	w.Header().Set("Location", pollURL)
-	httpx.JSON(w, http.StatusAccepted, map[string]any{
-		"run_id":     run.ID,
-		"status":     string(store.RunPending),
-		"poll_url":   pollURL,
-		"started_at": run.StartedAt,
-	})
-}
 
 // Findings returns the most recent succeeded run's findings.
 func (h *Handlers) Findings(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +35,8 @@ func (h *Handlers) Findings(w http.ResponseWriter, r *http.Request) {
 		writeFindingsEnvelope(w, full)
 		return
 	}
-	httpx.Error(w, http.StatusNotFound, "no succeeded run yet — POST /v1/orgs/{slug}/check first")
+	httpx.Error(w, http.StatusNotFound,
+		"no succeeded run yet — push one via POST /v1/orgs/{slug}/runs (use the `concord` CLI)")
 }
 
 // ListRuns returns the last 50 runs without summary/findings blobs.
@@ -80,15 +48,13 @@ func (h *Handlers) ListRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type listEntry struct {
-		ID                uuid.UUID  `json:"id"`
-		Status            string     `json:"status"`
-		Source            string     `json:"source"`
-		StartedAt         time.Time  `json:"started_at"`
-		CompletedAt       *time.Time `json:"completed_at,omitempty"`
-		ErrorMessage      string     `json:"error_message,omitempty"`
-		AgentID           *uuid.UUID `json:"agent_id,omitempty"`
-		AgentVersion      string     `json:"agent_version,omitempty"`
-		SignatureVerified bool       `json:"signature_verified"`
+		ID           uuid.UUID  `json:"id"`
+		Status       string     `json:"status"`
+		Source       string     `json:"source"`
+		StartedAt    time.Time  `json:"started_at"`
+		CompletedAt  *time.Time `json:"completed_at,omitempty"`
+		ErrorMessage string     `json:"error_message,omitempty"`
+		AgentVersion string     `json:"agent_version,omitempty"`
 	}
 	out := make([]listEntry, 0, len(runs))
 	for _, r0 := range runs {
@@ -96,8 +62,7 @@ func (h *Handlers) ListRuns(w http.ResponseWriter, r *http.Request) {
 			ID: r0.ID, Status: string(r0.Status), Source: string(r0.Source),
 			StartedAt: r0.StartedAt,
 			CompletedAt: r0.CompletedAt, ErrorMessage: r0.ErrorMessage,
-			AgentID: r0.AgentID, AgentVersion: r0.AgentVersion,
-			SignatureVerified: r0.SignatureVerified,
+			AgentVersion: r0.AgentVersion,
 		})
 	}
 	httpx.JSON(w, http.StatusOK, out)
@@ -135,16 +100,14 @@ func writeFindingsEnvelope(w http.ResponseWriter, run store.Run) {
 		_ = json.Unmarshal(run.Findings, &findings)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
-		"run_id":             run.ID,
-		"status":             run.Status,
-		"source":             run.Source,
-		"started_at":         run.StartedAt,
-		"completed_at":       run.CompletedAt,
-		"error_message":      run.ErrorMessage,
-		"agent_id":           run.AgentID,
-		"agent_version":      run.AgentVersion,
-		"signature_verified": run.SignatureVerified,
-		"summary":            summary,
-		"findings":           findings,
+		"run_id":        run.ID,
+		"status":        run.Status,
+		"source":        run.Source,
+		"started_at":    run.StartedAt,
+		"completed_at":  run.CompletedAt,
+		"error_message": run.ErrorMessage,
+		"agent_version": run.AgentVersion,
+		"summary":       summary,
+		"findings":      findings,
 	})
 }

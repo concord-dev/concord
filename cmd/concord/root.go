@@ -21,7 +21,6 @@ Audits become continuous instead of episodic.`,
 	cmd.AddCommand(newDiffCmd())
 	cmd.AddCommand(newUpgradeCmd())
 	cmd.AddCommand(newVersionCmd())
-	cmd.AddCommand(newKeygenCmd())
 	cmd.AddCommand(newPushCmd())
 	return cmd
 }

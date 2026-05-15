@@ -1,8 +1,7 @@
-// concord-server is the multi-tenant HTTP API for Concord. It loads a
-// controls library + concord.yaml at startup, connects to Postgres for tenant
-// + run persistence, and exposes a REST surface guarded by API tokens.
-// Designed to run behind a reverse proxy (Caddy, ALB, Cloudflare) that
-// terminates TLS.
+// concord-server is the multi-tenant HTTP API for Concord. Customers'
+// agents (the `concord` CLI) run scans on their own infrastructure with
+// their own credentials and POST completed findings to this server.
+// concord-server never holds customer cloud credentials.
 //
 // Subcommands:
 //
@@ -16,17 +15,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/signal"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/concord-dev/concord/internal/evidence"
-	"github.com/concord-dev/concord/internal/evidence/wiring"
 	"github.com/concord-dev/concord/internal/server"
 	"github.com/concord-dev/concord/internal/store"
 )
@@ -78,19 +73,17 @@ func printUsage() {
 
 func runServe(args []string) error {
 	var (
-		listenAddr   string
-		controlsDir  string
-		configPath   string
-		fixturesOnly bool
-		databaseURL  string
+		listenAddr    string
+		controlsDir   string
+		configPath    string
+		databaseURL   string
 		operatorToken string
-		skipMigrate  bool
+		skipMigrate   bool
 	)
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.StringVar(&listenAddr, "listen", envOr("LISTEN_ADDR", ":8080"), "Listen address (host:port)")
 	fs.StringVar(&controlsDir, "controls", envOr("CONCORD_CONTROLS_DIR", "./controls"), "Path to controls directory")
 	fs.StringVar(&configPath, "config", envOr("CONCORD_CONFIG", "./concord.yaml"), "Path to concord.yaml")
-	fs.BoolVar(&fixturesOnly, "fixtures", false, "Force fixture-only mode (skip env-driven live collectors)")
 	fs.StringVar(&databaseURL, "database-url", os.Getenv("DATABASE_URL"), "Postgres DSN (or set DATABASE_URL)")
 	fs.StringVar(&operatorToken, "operator-token", os.Getenv("CONCORD_OPERATOR_TOKEN"), "Operator token for /operator/v1/* (or set CONCORD_OPERATOR_TOKEN)")
 	fs.BoolVar(&skipMigrate, "skip-migrate", false, "Don't run schema migrations on startup")
@@ -122,12 +115,9 @@ func runServe(args []string) error {
 		}
 	}
 
-	registry := wiring.BuildRegistry(ctx, fixturesOnly, os.Stderr)
 	c, err := server.NewConcord(server.Options{
 		ControlsDir:   controlsDir,
 		ConfigPath:    configPath,
-		FixturesOnly:  fixturesOnly,
-		Registry:      registry,
 		Store:         st,
 		OperatorToken: operatorToken,
 		Version:       version,
@@ -148,8 +138,7 @@ func runServe(args []string) error {
 	if operatorToken == "" {
 		fmt.Fprintln(os.Stderr, "warning: CONCORD_OPERATOR_TOKEN not set; /operator/v1/* will refuse every request")
 	}
-	logCollectorMode(os.Stderr, registry, fixturesOnly)
-	fmt.Fprintf(os.Stderr, "concord-server %s listening on %s (%d controls loaded)\n",
+	fmt.Fprintf(os.Stderr, "concord-server %s listening on %s (%d controls loaded; agent-push mode)\n",
 		version, listenAddr, len(c.Controls))
 
 	errCh := make(chan error, 1)
@@ -167,14 +156,10 @@ func runServe(args []string) error {
 		fmt.Fprintln(os.Stderr, "shutting down…")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		// Stop accepting new HTTP requests first, then drain in-flight jobs.
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			fmt.Fprintln(os.Stderr, "http shutdown:", err)
 		}
-		if err := c.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("worker drain: %w", err)
-		}
-		return nil
+		return c.Shutdown(shutdownCtx)
 	}
 }
 
@@ -183,20 +168,4 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-// logCollectorMode prints the active collector set so operators can confirm at
-// boot which providers are wired. Sorted output keeps log diffs stable.
-func logCollectorMode(w io.Writer, reg *evidence.Registry, fixturesOnly bool) {
-	if fixturesOnly {
-		fmt.Fprintln(w, "collectors: fixtures-only (runs only consume fixture files)")
-		return
-	}
-	sources := reg.Sources()
-	if len(sources) == 0 {
-		fmt.Fprintln(w, "collectors: none wired — set GITHUB_TOKEN, AWS_PROFILE, SNYK_TOKEN, MLFLOW_TRACKING_URI, OKTA_ORG_URL+OKTA_API_TOKEN, WANDB_API_KEY, or HUGGINGFACE_TOKEN")
-		return
-	}
-	sort.Strings(sources)
-	fmt.Fprintf(w, "collectors: %s\n", strings.Join(sources, ", "))
 }

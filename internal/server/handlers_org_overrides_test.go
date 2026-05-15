@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/concord-dev/concord/internal/store"
-	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
 // ─── Per-org control overrides ────────────────────────────────────────
@@ -110,68 +108,9 @@ func TestOverrides_RequireOverridePermission(t *testing.T) {
 	assert.Contains(t, string(bodyW), "controls:override")
 }
 
-// TestOverrides_TightenedThresholdFlipsRunToFail is the integration test that
-// proves the override actually reaches the runner. The harness fixture for
-// SOC2-CC8.1 has required_approving_review_count == 2; an override of
-// min_reviewers=3 should turn the pass into a fail.
-func TestOverrides_TightenedThresholdFlipsRunToFail(t *testing.T) {
-	h := newHarness(t)
-
-	// Baseline: a run with no overrides → CC8.1 passes.
-	resp1, body1 := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/check", "", h.apiToken)
-	require.Equal(t, http.StatusAccepted, resp1.StatusCode)
-	var enq1 struct {
-		PollURL string `json:"poll_url"`
-	}
-	require.NoError(t, json.Unmarshal(body1, &enq1))
-	baseline := pollRunFindings(t, h, enq1.PollURL)
-	assert.Equal(t, "pass", findingStatus(baseline, "SOC2-CC8.1"))
-
-	// Install a stricter override.
-	respPut, _ := h.do(t, "PUT",
-		"/v1/orgs/"+h.org.Slug+"/controls/SOC2-CC8.1/overrides",
-		`{"params":{"min_reviewers":3}}`, h.apiToken)
-	require.Equal(t, http.StatusOK, respPut.StatusCode)
-
-	// New run → CC8.1 now fails because the fixture only carries 2 reviewers.
-	resp2, body2 := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/check", "", h.apiToken)
-	require.Equal(t, http.StatusAccepted, resp2.StatusCode)
-	var enq2 struct {
-		PollURL string `json:"poll_url"`
-	}
-	require.NoError(t, json.Unmarshal(body2, &enq2))
-	tightened := pollRunFindings(t, h, enq2.PollURL)
-	assert.Equal(t, "fail", findingStatus(tightened, "SOC2-CC8.1"),
-		"override of min_reviewers=3 should turn the run from pass to fail")
-}
-
-// pollRunFindings spins on GET /runs/{id} until the run reaches a terminal
-// state, then returns the findings array.
-func pollRunFindings(t *testing.T, h *harness, pollURL string) []apiv1.Finding {
-	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, body := h.do(t, "GET", pollURL, "", h.apiToken)
-		require.Equal(t, http.StatusOK, resp.StatusCode)
-		var detail struct {
-			Status   string          `json:"status"`
-			Findings []apiv1.Finding `json:"findings"`
-		}
-		require.NoError(t, json.Unmarshal(body, &detail))
-		if detail.Status == "succeeded" || detail.Status == "failed" {
-			return detail.Findings
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("run %q never completed within 15s", pollURL)
-	return nil
-}
-
-func findingStatus(findings []apiv1.Finding, controlID string) string {
-	for _, f := range findings {
-		if f.ControlID == controlID {
-			return string(f.Status)
-		}
-	}
-	return ""
-}
+// Note: an older integration test asserted that overrides flipped a
+// server-side run from pass→fail at runtime. In agent-push mode the agent
+// fetches overrides from /v1/orgs/{slug}/overrides and applies them locally
+// before running, so that runtime-coupling test no longer belongs here.
+// Coverage of override *application* lives in the runner package's tests;
+// this file owns the API surface only.
