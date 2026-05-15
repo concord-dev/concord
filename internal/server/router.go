@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 
+	"github.com/concord-dev/concord/internal/server/cors"
 	"github.com/concord-dev/concord/internal/server/handlers/auth"
 	"github.com/concord-dev/concord/internal/server/handlers/operator"
 	"github.com/concord-dev/concord/internal/server/handlers/org"
@@ -35,7 +36,12 @@ func (c *Concord) Router() http.Handler {
 	mountOperator(mux, op, mw)
 	mountSession(mux, au, mw)
 	mountOrgAPI(mux, og, mw)
-	return httpx.Logging(mux)
+
+	// Stack order: Logging(CORS(mux)). CORS short-circuits preflights, and
+	// we still want those 204s in the access log. When AllowedOrigins is
+	// empty, cors.New returns a no-op so non-browser callers keep working.
+	corsMW := cors.New(cors.Config{AllowedOrigins: c.CORSAllowedOrigins})
+	return httpx.Logging(corsMW(mux))
 }
 
 func mountPublic(mux *http.ServeMux, h *public.Handlers) {

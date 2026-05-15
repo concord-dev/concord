@@ -42,12 +42,13 @@ import (
 
 // Concord bundles in-memory state + Store.
 type Concord struct {
-	Controls      []controls.Loaded
-	Config        *config.Config
-	Store         *store.Store
-	OperatorToken string // SaaS-operator back-door token; gates /operator/v1/*
-	Version       string
-	SessionTTL    time.Duration
+	Controls           []controls.Loaded
+	Config             *config.Config
+	Store              *store.Store
+	OperatorToken      string // SaaS-operator back-door token; gates /operator/v1/*
+	Version            string
+	SessionTTL         time.Duration
+	CORSAllowedOrigins []string // exact-match list; empty disables CORS
 
 	bus *bus.Bus
 	mu  sync.Mutex
@@ -55,12 +56,13 @@ type Concord struct {
 
 // Options is the construction surface for cmd/server.
 type Options struct {
-	ControlsDir   string
-	ConfigPath    string
-	Store         *store.Store
-	OperatorToken string
-	Version       string
-	SessionTTL    time.Duration
+	ControlsDir        string
+	ConfigPath         string
+	Store              *store.Store
+	OperatorToken      string
+	Version            string
+	SessionTTL         time.Duration
+	CORSAllowedOrigins []string
 }
 
 // NewConcord loads controls + config and wires the Store and event bus.
@@ -84,13 +86,14 @@ func NewConcord(opts Options) (*Concord, error) {
 	}
 
 	return &Concord{
-		Controls:      loaded,
-		Config:        cfg,
-		Store:         opts.Store,
-		OperatorToken: opts.OperatorToken,
-		Version:       opts.Version,
-		SessionTTL:    opts.SessionTTL,
-		bus:           bus.New(),
+		Controls:           loaded,
+		Config:             cfg,
+		Store:              opts.Store,
+		OperatorToken:      opts.OperatorToken,
+		Version:            opts.Version,
+		SessionTTL:         opts.SessionTTL,
+		CORSAllowedOrigins: opts.CORSAllowedOrigins,
+		bus:                bus.New(),
 	}, nil
 }
 

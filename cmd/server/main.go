@@ -78,6 +78,7 @@ func runServe(args []string) error {
 		configPath    string
 		databaseURL   string
 		operatorToken string
+		corsOrigins   string
 		skipMigrate   bool
 	)
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
@@ -86,6 +87,8 @@ func runServe(args []string) error {
 	fs.StringVar(&configPath, "config", envOr("CONCORD_CONFIG", "./concord.yaml"), "Path to concord.yaml")
 	fs.StringVar(&databaseURL, "database-url", os.Getenv("DATABASE_URL"), "Postgres DSN (or set DATABASE_URL)")
 	fs.StringVar(&operatorToken, "operator-token", os.Getenv("CONCORD_OPERATOR_TOKEN"), "Operator token for /operator/v1/* (or set CONCORD_OPERATOR_TOKEN)")
+	fs.StringVar(&corsOrigins, "cors-allow-origins", os.Getenv("CONCORD_CORS_ALLOWED_ORIGINS"),
+		"Comma-separated exact origins permitted to call the API from a browser (e.g. https://app.example.com). Empty disables CORS.")
 	fs.BoolVar(&skipMigrate, "skip-migrate", false, "Don't run schema migrations on startup")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -116,11 +119,12 @@ func runServe(args []string) error {
 	}
 
 	c, err := server.NewConcord(server.Options{
-		ControlsDir:   controlsDir,
-		ConfigPath:    configPath,
-		Store:         st,
-		OperatorToken: operatorToken,
-		Version:       version,
+		ControlsDir:        controlsDir,
+		ConfigPath:         configPath,
+		Store:              st,
+		OperatorToken:      operatorToken,
+		Version:            version,
+		CORSAllowedOrigins: splitCSV(corsOrigins),
 	})
 	if err != nil {
 		return err
@@ -168,4 +172,25 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// splitCSV trims and de-empties a comma-separated origin list. We don't use
+// strings.Split alone because " ,, foo , " is a likely operator typo and a
+// silently-included empty origin would match the special "no Origin header"
+// case in some servers, which we want to avoid here.
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := parts[:0]
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
