@@ -44,6 +44,8 @@ func main() {
 		err = runServe(args)
 	case "seed-tenant":
 		err = runSeedTenant(args)
+	case "migrate-down":
+		err = runMigrateDown(args)
 	case "version", "--version", "-v":
 		fmt.Println(version)
 		return
@@ -67,6 +69,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "Subcommands:")
 	fmt.Fprintln(os.Stderr, "  (none) | serve   Start the HTTP server (default)")
 	fmt.Fprintln(os.Stderr, "  seed-tenant      Bootstrap a tenant: organization + owner user + API token")
+	fmt.Fprintln(os.Stderr, "  migrate-down     DEV ONLY: roll back the most-recently-applied migrations")
 	fmt.Fprintln(os.Stderr, "  version          Print build version and exit")
 	fmt.Fprintln(os.Stderr, "  help             Show this help and exit")
 	fmt.Fprintln(os.Stderr, "")
