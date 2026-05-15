@@ -19,6 +19,9 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
+// clientIP is declared in invitations.go; the audit helper above relies on it
+// (Go's package-level functions can be cross-referenced freely between files).
+
 // readyDepTimeout caps each dep-check probe. Long enough to tolerate a slow
 // initial connection across a region, short enough that piling-up readiness
 // probes can't accumulate goroutines if a dep is genuinely down.
@@ -44,6 +47,23 @@ type Handlers struct {
 // metadata + the latest succeeded run.
 func New(version string, ctrls []controls.Loaded, s *store.Store, limits Limits) *Handlers {
 	return &Handlers{version: version, controls: ctrls, store: s, limits: limits}
+}
+
+// audit fills in request-scoped forensic fields and delegates to
+// store.RecordAudit. The caller must populate ActorKind / actor IDs since
+// the public handlers serve unauthenticated callers in some flows (and a
+// post-accept invitation in others where the user is freshly attached).
+func (h *Handlers) audit(r *http.Request, p store.RecordAuditParams) {
+	if p.IP == "" {
+		p.IP = clientIP(r)
+	}
+	if p.UserAgent == "" {
+		p.UserAgent = r.UserAgent()
+	}
+	if p.RequestID == "" {
+		p.RequestID = logx.RequestID(r.Context())
+	}
+	h.store.RecordAudit(r.Context(), p)
 }
 
 // allow is the per-handler 429 gate. Nil bucket = disabled.

@@ -133,6 +133,18 @@ func (h *Handlers) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Audit as the now-attached user — by the time we get here the invitation
+	// is consumed and the user is a real member of the org.
+	h.audit(r, store.RecordAuditParams{
+		ActorKind:   store.AuditActorUser,
+		ActorUserID: &res.User.ID,
+		OrgID:       &org.ID,
+		Action:      "invitation.accept",
+		TargetType:  "invitation",
+		TargetID:    &res.Invitation.ID,
+		Details:     map[string]any{"role": res.Invitation.RoleName, "created_user": res.CreatedUser},
+	})
+
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"session_id":     sess.ID,
 		"token":          plain,

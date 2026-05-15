@@ -75,6 +75,13 @@ func (h *Handlers) RequestPasswordReset(w http.ResponseWriter, r *http.Request) 
 		slog.String("email", user.Email),
 		slog.String("confirm_url",
 			resetBaseURL(r)+"/v1/auth/password-reset/confirm?token="+token))
+	h.audit(r, store.RecordAuditParams{
+		ActorKind:   store.AuditActorUnauthenticated,
+		Action:      "auth.password_reset.request",
+		TargetType:  "user",
+		TargetID:    &user.ID,
+		Details:     map[string]any{"email": user.Email},
+	})
 }
 
 // ConfirmPasswordReset handles `POST /v1/auth/password-reset/confirm`.
@@ -124,6 +131,13 @@ func (h *Handlers) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.audit(r, store.RecordAuditParams{
+		ActorKind:   store.AuditActorUser,
+		ActorUserID: &user.ID,
+		Action:      "auth.password_reset.confirm",
+		TargetType:  "user",
+		TargetID:    &user.ID,
+	})
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"session_id": sess.ID,
 		"token":      plain,

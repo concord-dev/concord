@@ -90,6 +90,12 @@ func (h *Handlers) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.audit(r, store.RecordAuditParams{
+		Action:     "webhook.create",
+		TargetType: "webhook",
+		TargetID:   &wh.ID,
+		Details:    map[string]any{"url": wh.URL, "event_kinds": wh.EventKinds, "enabled": wh.Enabled},
+	})
 	httpx.JSON(w, http.StatusCreated, map[string]any{
 		"webhook": viewFromWebhook(wh),
 		"secret":  secret,
@@ -147,6 +153,12 @@ func (h *Handlers) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.audit(r, store.RecordAuditParams{
+		Action:     "webhook.update",
+		TargetType: "webhook",
+		TargetID:   &wh.ID,
+		Details:    map[string]any{"url": wh.URL, "event_kinds": wh.EventKinds, "enabled": wh.Enabled},
+	})
 	httpx.JSON(w, http.StatusOK, viewFromWebhook(wh))
 }
 
@@ -165,5 +177,10 @@ func (h *Handlers) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.audit(r, store.RecordAuditParams{
+		Action:     "webhook.delete",
+		TargetType: "webhook",
+		TargetID:   &id,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }

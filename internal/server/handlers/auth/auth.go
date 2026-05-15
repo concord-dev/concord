@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/server/authctx"
 	"github.com/concord-dev/concord/internal/server/httpx"
 	"github.com/concord-dev/concord/internal/server/limiter"
@@ -69,6 +70,14 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := h.store.VerifyUserPassword(r.Context(), body.Email, body.Password)
 	if errors.Is(err, store.ErrNotFound) {
+		// Record the failed attempt against the email the caller offered.
+		// Unauthenticated: the actor was never proven, so actor_user_id stays
+		// nil. The email lands in details so forensic queries can pivot on it.
+		h.audit(r, store.RecordAuditParams{
+			ActorKind: store.AuditActorUnauthenticated,
+			Action:    "auth.login.failure",
+			Details:   map[string]any{"email": body.Email, "reason": "invalid_credentials"},
+		})
 		httpx.Error(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
@@ -82,6 +91,13 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.audit(r, store.RecordAuditParams{
+		ActorKind:   store.AuditActorUser,
+		ActorUserID: &user.ID,
+		Action:      "auth.login.success",
+		TargetType:  "session",
+		TargetID:    &sess.ID,
+	})
 	httpx.JSON(w, http.StatusCreated, map[string]any{
 		"session_id": sess.ID,
 		"token":      plain,
@@ -102,6 +118,14 @@ func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	u, _ := authctx.SessionUserFrom(r.Context())
+	h.audit(r, store.RecordAuditParams{
+		ActorKind:   store.AuditActorUser,
+		ActorUserID: &u.ID,
+		Action:      "auth.logout",
+		TargetType:  "session",
+		TargetID:    &sid,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -138,6 +162,22 @@ func allow(w http.ResponseWriter, b *limiter.Bucket, key string) bool {
 	w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
 	httpx.Error(w, http.StatusTooManyRequests, "rate limit exceeded; retry shortly")
 	return false
+}
+
+// audit fills in the request-scoped forensic fields (IP, UA, request ID)
+// before delegating to store.RecordAudit. Best-effort — the store layer
+// logs failures and never returns them.
+func (h *Handlers) audit(r *http.Request, p store.RecordAuditParams) {
+	if p.IP == "" {
+		p.IP = clientIP(r)
+	}
+	if p.UserAgent == "" {
+		p.UserAgent = r.UserAgent()
+	}
+	if p.RequestID == "" {
+		p.RequestID = logx.RequestID(r.Context())
+	}
+	h.store.RecordAudit(r.Context(), p)
 }
 
 // clientIP picks the leftmost X-Forwarded-For entry, falling back to

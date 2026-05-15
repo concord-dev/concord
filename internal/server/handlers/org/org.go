@@ -4,9 +4,13 @@
 package org
 
 import (
+	"net"
+	"net/http"
 	"strings"
 
+	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/controls"
+	"github.com/concord-dev/concord/internal/server/authctx"
 	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/store"
 )
@@ -33,6 +37,59 @@ func New(s *store.Store, ctrls []controls.Loaded, b *bus.Bus, broadcast Broadcas
 		broadcast = func(store.Run, []byte) {}
 	}
 	return &Handlers{store: s, controls: ctrls, bus: b, broadcast: broadcast}
+}
+
+// audit fills in the actor (from the authctx Principal) and request-scoped
+// forensic fields, then delegates to store.RecordAudit. ActorKind is
+// inferred: a session-authenticated request carries actor_user_id; an
+// API-token request carries actor_token_id. Best-effort — failures are
+// logged but never returned to the caller.
+func (h *Handlers) audit(r *http.Request, p store.RecordAuditParams) {
+	if p.ActorKind == "" {
+		if prin, ok := authctx.PrincipalFrom(r.Context()); ok {
+			switch {
+			case prin.UserID != nil:
+				p.ActorKind = store.AuditActorUser
+				p.ActorUserID = prin.UserID
+			case prin.TokenID != nil:
+				p.ActorKind = store.AuditActorToken
+				p.ActorTokenID = prin.TokenID
+			default:
+				p.ActorKind = store.AuditActorSystem
+			}
+			if p.OrgID == nil {
+				oid := prin.Org.ID
+				p.OrgID = &oid
+			}
+		} else {
+			p.ActorKind = store.AuditActorSystem
+		}
+	}
+	if p.IP == "" {
+		p.IP = clientIP(r)
+	}
+	if p.UserAgent == "" {
+		p.UserAgent = r.UserAgent()
+	}
+	if p.RequestID == "" {
+		p.RequestID = logx.RequestID(r.Context())
+	}
+	h.store.RecordAudit(r.Context(), p)
+}
+
+// clientIP mirrors the auth/operator helpers (same shape; kept local to
+// avoid a shared util package that handler subpackages would all import).
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.Index(xff, ","); i > 0 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 // controlExists is a cheap membership check against the loaded controls library.

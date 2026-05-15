@@ -45,6 +45,13 @@ func (h *Handlers) AddMember(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	h.audit(r, store.RecordAuditParams{
+		Action:     "member.add",
+		OrgID:      &org.ID,
+		TargetType: "user",
+		TargetID:   &user.ID,
+		Details:    map[string]any{"roles": body.Roles, "email": user.Email},
+	})
 	httpx.JSON(w, http.StatusCreated, map[string]any{
 		"user":  user,
 		"org":   org,
@@ -100,5 +107,11 @@ func (h *Handlers) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.audit(r, store.RecordAuditParams{
+		Action:     "member.remove",
+		OrgID:      &org.ID,
+		TargetType: "user",
+		TargetID:   &userID,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -39,6 +39,13 @@ func (h *Handlers) CreateToken(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.audit(r, store.RecordAuditParams{
+		Action:     "token.create",
+		OrgID:      &org.ID,
+		TargetType: "api_token",
+		TargetID:   &tok.ID,
+		Details:    map[string]any{"name": tok.Name},
+	})
 	httpx.JSON(w, http.StatusCreated, map[string]any{
 		"id":                 tok.ID,
 		"org_id":             tok.OrgID,
@@ -93,5 +100,11 @@ func (h *Handlers) RevokeToken(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.audit(r, store.RecordAuditParams{
+		Action:     "token.revoke",
+		OrgID:      &org.ID,
+		TargetType: "api_token",
+		TargetID:   &tokenID,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -109,6 +109,7 @@ func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware)
 	orgRead := mw.RequireOrgPerm("org:read")
 	tpManage := mw.RequireOrgPerm("trust_portal:manage")
 	memInvite := mw.RequireOrgPerm("members:invite")
+	auditRead := mw.RequireOrgPerm("audit:read")
 
 	mux.Handle("GET /v1/orgs/{slug}/me", orgRead(http.HandlerFunc(h.Me)))
 
@@ -136,6 +137,9 @@ func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware)
 	mux.Handle("POST /v1/orgs/{slug}/invitations", memInvite(http.HandlerFunc(h.CreateInvitation)))
 	mux.Handle("GET /v1/orgs/{slug}/invitations", memInvite(http.HandlerFunc(h.ListInvitations)))
 	mux.Handle("DELETE /v1/orgs/{slug}/invitations/{id}", memInvite(http.HandlerFunc(h.RevokeInvitation)))
+
+	// Audit log read (owner + admin via the audit:read permission).
+	mux.Handle("GET /v1/orgs/{slug}/audit", auditRead(http.HandlerFunc(h.ListAuditEvents)))
 
 	// Trust portal opt-in toggle. The public render lives in mountPublic.
 	mux.Handle("GET /v1/orgs/{slug}/trust-portal/settings", orgRead(http.HandlerFunc(h.GetTrustPortalSettings)))

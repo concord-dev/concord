@@ -446,5 +446,61 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /v1/orgs/{slug}/audit:
+    get:
+      summary: List audit-log events for the org
+      description: |
+        Returns audit events for the named org, newest first. Requires the
+        `audit:read` permission (granted to owner + admin roles by default).
+        Filters compose: pass any combination of `since`, `until`, and
+        `action` to narrow the result. `limit` defaults to 50 and is
+        capped at 500 server-side so a hostile caller can't drive a
+        million-row scan.
+      operationId: listAuditEvents
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+        - name: since
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: action
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:             { type: string, format: uuid }
+                    occurred_at:    { type: string, format: date-time }
+                    actor_kind:     { type: string, enum: [user, token, operator, unauthenticated, system] }
+                    actor_user_id:  { type: string, format: uuid }
+                    actor_token_id: { type: string, format: uuid }
+                    org_id:         { type: string, format: uuid }
+                    action:         { type: string }
+                    target_type:    { type: string }
+                    target_id:      { type: string, format: uuid }
+                    ip:             { type: string }
+                    user_agent:     { type: string }
+                    request_id:     { type: string }
+                    details:        { type: object, additionalProperties: true }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   # ─── Operator (CONCORD_OPERATOR_TOKEN) ─────────────────────────────────
 

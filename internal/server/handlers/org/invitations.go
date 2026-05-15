@@ -90,6 +90,12 @@ func (h *Handlers) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.audit(r, store.RecordAuditParams{
+		Action:     "invitation.create",
+		TargetType: "invitation",
+		TargetID:   &inv.ID,
+		Details:    map[string]any{"email": inv.Email, "role": inv.RoleName},
+	})
 	httpx.JSON(w, http.StatusCreated, map[string]any{
 		"invitation": viewFromInvitation(inv),
 		"token":      token,
@@ -134,6 +140,11 @@ func (h *Handlers) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.audit(r, store.RecordAuditParams{
+		Action:     "invitation.revoke",
+		TargetType: "invitation",
+		TargetID:   &id,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -99,6 +99,12 @@ func (h *Handlers) PutOverride(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.audit(r, store.RecordAuditParams{
+		Action:     "control_override.upsert",
+		TargetType: "control_override",
+		TargetID:   &co.ID,
+		Details:    map[string]any{"control_id": id, "params": body.Params},
+	})
 	httpx.JSON(w, http.StatusOK, envelopeFromOverride(co))
 }
 
@@ -113,5 +119,10 @@ func (h *Handlers) DeleteOverride(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.audit(r, store.RecordAuditParams{
+		Action:     "control_override.delete",
+		TargetType: "control_override",
+		Details:    map[string]any{"control_id": id},
+	})
 	w.WriteHeader(http.StatusNoContent)
 }

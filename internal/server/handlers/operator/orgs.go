@@ -27,6 +27,13 @@ func (h *Handlers) CreateOrg(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusConflict, err.Error())
 		return
 	}
+	h.audit(r, store.RecordAuditParams{
+		Action:     "org.create",
+		OrgID:      &org.ID,
+		TargetType: "organization",
+		TargetID:   &org.ID,
+		Details:    map[string]any{"name": org.Name, "slug": org.Slug},
+	})
 	httpx.JSON(w, http.StatusCreated, org)
 }
 
@@ -68,6 +75,12 @@ func (h *Handlers) CreateUser(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusConflict, err.Error())
 		return
 	}
+	h.audit(r, store.RecordAuditParams{
+		Action:     "user.create",
+		TargetType: "user",
+		TargetID:   &u.ID,
+		Details:    map[string]any{"email": u.Email},
+	})
 	httpx.JSON(w, http.StatusCreated, u)
 }
 

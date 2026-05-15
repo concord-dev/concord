@@ -6,10 +6,13 @@ package operator
 
 import (
 	"errors"
+	"net"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 
+	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/server/httpx"
 	"github.com/concord-dev/concord/internal/store"
 )
@@ -21,6 +24,39 @@ type Handlers struct {
 
 // New constructs Handlers with the given Store.
 func New(s *store.Store) *Handlers { return &Handlers{store: s} }
+
+// audit records an operator-actor event. Operator events carry actor_kind
+// "operator" with both ID columns NULL — the operator token is a SaaS-
+// platform principal, not a user row. Same best-effort semantics as the
+// auth-handler audit helper.
+func (h *Handlers) audit(r *http.Request, p store.RecordAuditParams) {
+	p.ActorKind = store.AuditActorOperator
+	if p.IP == "" {
+		p.IP = clientIP(r)
+	}
+	if p.UserAgent == "" {
+		p.UserAgent = r.UserAgent()
+	}
+	if p.RequestID == "" {
+		p.RequestID = logx.RequestID(r.Context())
+	}
+	h.store.RecordAudit(r.Context(), p)
+}
+
+// clientIP mirrors the auth-package helper (same shape, separate copy to
+// keep the operator subpackage free of cross-handler imports).
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.Index(xff, ","); i > 0 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
 
 // lookupOrgBySlug resolves an org by slug and writes 404/500 on failure.
 func (h *Handlers) lookupOrgBySlug(w http.ResponseWriter, r *http.Request, slug string) (store.Organization, bool) {

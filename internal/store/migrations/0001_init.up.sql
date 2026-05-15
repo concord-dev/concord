@@ -231,6 +231,44 @@ CREATE UNIQUE INDEX idx_password_reset_token_live
 CREATE INDEX idx_password_reset_user_recent
     ON password_reset(user_id, created_at DESC);
 
+-- ── 4b. Audit log ────────────────────────────────────────────────────────
+
+-- Security-sensitive actions land here so compliance teams can answer "who
+-- did what, when, from where". Actor identity is split across columns:
+-- exactly one of (actor_user_id, actor_token_id) is set for authenticated
+-- events; actor_kind disambiguates ('user', 'token', 'operator',
+-- 'unauthenticated', 'system'). Operator events (CONCORD_OPERATOR_TOKEN)
+-- carry actor_kind='operator' with both ID columns NULL — the operator is
+-- a SaaS-platform principal, not a user row.
+--
+-- ON DELETE behavior:
+--   org_id      CASCADE        — org deletion wipes its audit trail
+--   actor_user_id  SET NULL    — keep history when a user is deleted
+--   actor_token_id SET NULL    — keep history when a token is revoked
+-- The SET NULLs intentionally preserve "what happened" even after the
+-- subject row is gone.
+CREATE TABLE audit_event (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    actor_kind      TEXT        NOT NULL
+        CHECK (actor_kind IN ('user', 'token', 'operator', 'unauthenticated', 'system')),
+    actor_user_id   UUID                 REFERENCES "user"(id)     ON DELETE SET NULL,
+    actor_token_id  UUID                 REFERENCES api_token(id)  ON DELETE SET NULL,
+    org_id          UUID                 REFERENCES organization(id) ON DELETE CASCADE,
+    action          TEXT        NOT NULL,
+    target_type     TEXT,
+    target_id       UUID,
+    ip              INET,
+    user_agent      TEXT,
+    request_id      TEXT,
+    details         JSONB       NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX idx_audit_event_org_occurred  ON audit_event(org_id, occurred_at DESC)
+    WHERE org_id IS NOT NULL;
+CREATE INDEX idx_audit_event_actor_user    ON audit_event(actor_user_id, occurred_at DESC)
+    WHERE actor_user_id IS NOT NULL;
+CREATE INDEX idx_audit_event_action        ON audit_event(action, occurred_at DESC);
+
 -- ── 5. Seed: canonical roles + permissions ───────────────────────────────
 
 INSERT INTO role (name) VALUES
@@ -264,6 +302,9 @@ INSERT INTO permission (name) VALUES
     ('webhooks:delete'),
     -- Public trust portal toggle.
     ('trust_portal:manage'),
+    -- Org-scoped audit log read (org admins + owners; no write — events are
+    -- emitted by the server inline, never user-authored).
+    ('audit:read'),
     -- Billing (placeholder for the SaaS commercial layer).
     ('billing:manage');
 
