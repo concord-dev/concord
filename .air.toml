@@ -1,0 +1,36 @@
+# air config for concord-server live reload.
+# Run with:   make dev   (or:   air -c .air.toml)
+#
+# Requirements:
+#   - Postgres reachable per docker-compose.yml (`make pg`)
+#   - DATABASE_URL exported (Makefile sets a dev default)
+#   - CONCORD_ADMIN_TOKEN exported for /admin/v1/* (optional)
+
+root = "."
+testdata_dir = "testdata"
+tmp_dir = "tmp"
+
+[build]
+  bin           = "./tmp/concord-server"
+  cmd           = "go build -buildvcs=false -o ./tmp/concord-server ./cmd/server"
+  include_ext   = ["go", "yaml", "sql", "rego"]
+  exclude_dir   = ["bin", "tmp", "vendor", "testdata", ".git", ".github", "scripts", "examples"]
+  exclude_regex = ["_test\\.go$"]
+  delay         = 800       # ms — debounce rapid saves
+  kill_delay    = "2s"      # graceful SIGTERM before SIGKILL
+  send_interrupt = true
+  stop_on_error = true
+  log = "build-errors.log"
+
+[log]
+  time = false
+  main_only = false
+
+[color]
+  build   = "yellow"
+  main    = "magenta"
+  runner  = "green"
+  watcher = "cyan"
+
+[misc]
+  clean_on_exit = true

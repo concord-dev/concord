@@ -9,3 +9,6 @@ vendor/
 .vscode/
 *.swp
 .DS_Store
+# air live-reload
+tmp/
+build-errors.log
