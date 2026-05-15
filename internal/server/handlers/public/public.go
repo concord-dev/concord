@@ -1,5 +1,6 @@
 // Package public hosts the unauthenticated endpoints: /healthz, /version,
-// /openapi.yaml, /docs.
+// /openapi.yaml, /docs, and the public trust portal at
+// /v1/orgs/{slug}/trust-portal (gated by an opt-in flag per org).
 package public
 
 import (
@@ -9,17 +10,22 @@ import (
 	"github.com/concord-dev/concord/internal/controls"
 	"github.com/concord-dev/concord/internal/server/httpx"
 	"github.com/concord-dev/concord/internal/server/openapi"
+	"github.com/concord-dev/concord/internal/store"
 )
 
 // Handlers bundles dependencies for the public route group.
 type Handlers struct {
 	version  string
 	controls []controls.Loaded
+	store    *store.Store // needed for the trust-portal endpoint
 }
 
-// New constructs Handlers with the supplied build metadata + loaded controls.
-func New(version string, ctrls []controls.Loaded) *Handlers {
-	return &Handlers{version: version, controls: ctrls}
+// New constructs Handlers with the supplied build metadata, loaded controls,
+// and a Store. The Store is read-only from this subpackage — only the trust
+// portal handler reaches into it, and only to load org metadata + the latest
+// succeeded run.
+func New(version string, ctrls []controls.Loaded, s *store.Store) *Handlers {
+	return &Handlers{version: version, controls: ctrls, store: s}
 }
 
 // Health is the liveness probe (e.g. for Kubernetes / load balancers).

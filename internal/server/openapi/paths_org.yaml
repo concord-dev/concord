@@ -391,5 +391,48 @@ paths:
         '204': { description: Webhook deleted }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /v1/orgs/{slug}/trust-portal/settings:
+    get:
+      summary: Read trust-portal opt-in state + public URL
+      operationId: getTrustPortalSettings
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      responses:
+        '200':
+          description: Current settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrustPortalSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      summary: Toggle the public trust portal on or off
+      description: |
+        Requires `trust_portal:manage` (owner + admin roles by default).
+        Off by default — flip on only after confirming the org's findings
+        contain nothing the tenant would not publish.
+      operationId: putTrustPortalSettings
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrustPortalSettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   # ─── Operator (CONCORD_OPERATOR_TOKEN) ─────────────────────────────────
 

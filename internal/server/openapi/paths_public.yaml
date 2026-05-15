@@ -30,6 +30,29 @@ paths:
                   version:  { type: string }
                   controls: { type: integer }
 
+  /v1/orgs/{slug}/trust-portal:
+    get:
+      summary: Public compliance snapshot (HTML)
+      description: |
+        Renders the org's most recent succeeded run as a self-contained HTML
+        trust portal. Opt-in per org — disabled by default. When disabled (or
+        when the org doesn't exist, or when no run has succeeded yet) the
+        endpoint returns 404 with no body. The 404 is deliberately identical
+        across all "not available" cases so the route can't be used to
+        enumerate slugs.
+      operationId: getTrustPortal
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/OrgSlug'
+      responses:
+        '200':
+          description: Trust portal HTML
+          content:
+            text/html:
+              schema: { type: string }
+        '404':
+          description: Org not found, portal disabled, or no successful run yet
+
   # ─── Auth ──────────────────────────────────────────────────────────────
 
   /v1/auth/login:

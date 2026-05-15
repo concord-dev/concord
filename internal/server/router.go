@@ -25,7 +25,7 @@ import (
 // The whole tree is wrapped in the logging middleware before being returned.
 func (c *Concord) Router() http.Handler {
 	mw := middleware.New(c.Store, c.OperatorToken)
-	pub := public.New(c.Version, c.Controls)
+	pub := public.New(c.Version, c.Controls, c.Store)
 	au := auth.New(c.Store, c.SessionTTL)
 	op := operator.New(c.Store)
 	og := org.New(c.Store, c.Controls, c.worker, c.bus)
@@ -44,6 +44,8 @@ func mountPublic(mux *http.ServeMux, h *public.Handlers) {
 	mux.HandleFunc("GET /version", h.Version)
 	mux.HandleFunc("GET /openapi.yaml", h.OpenAPI)
 	mux.HandleFunc("GET /docs", h.Docs)
+	// Public trust portal — opt-in per org; 404s when disabled.
+	mux.HandleFunc("GET /v1/orgs/{slug}/trust-portal", h.TrustPortal)
 }
 
 func mountAuth(mux *http.ServeMux, h *auth.Handlers, mw *middleware.Middleware) {
@@ -86,6 +88,7 @@ func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware)
 	whCreate := mw.RequireOrgPerm("webhooks:create")
 	whDelete := mw.RequireOrgPerm("webhooks:delete")
 	orgRead := mw.RequireOrgPerm("org:read")
+	tpManage := mw.RequireOrgPerm("trust_portal:manage")
 
 	mux.Handle("GET /v1/orgs/{slug}/me", orgRead(http.HandlerFunc(h.Me)))
 
@@ -111,6 +114,10 @@ func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware)
 	mux.Handle("GET /v1/orgs/{slug}/schedule", runRead(http.HandlerFunc(h.GetSchedule)))
 	mux.Handle("PUT /v1/orgs/{slug}/schedule", runCreate(http.HandlerFunc(h.PutSchedule)))
 	mux.Handle("DELETE /v1/orgs/{slug}/schedule", runCreate(http.HandlerFunc(h.DeleteSchedule)))
+
+	// Trust portal opt-in toggle. The public render lives in mountPublic.
+	mux.Handle("GET /v1/orgs/{slug}/trust-portal/settings", orgRead(http.HandlerFunc(h.GetTrustPortalSettings)))
+	mux.Handle("PUT /v1/orgs/{slug}/trust-portal/settings", tpManage(http.HandlerFunc(h.PutTrustPortalSettings)))
 
 	// Outbound webhooks.
 	mux.Handle("GET /v1/orgs/{slug}/webhooks", whRead(http.HandlerFunc(h.ListWebhooks)))

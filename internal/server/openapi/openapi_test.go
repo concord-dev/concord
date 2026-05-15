@@ -89,6 +89,8 @@ func TestSpec_CoversEveryExpectedRoute(t *testing.T) {
 		"/v1/orgs/{slug}/schedule":                    {"get", "put", "delete"},
 		"/v1/orgs/{slug}/webhooks":                    {"get", "post"},
 		"/v1/orgs/{slug}/webhooks/{id}":               {"get", "put", "delete"},
+		"/v1/orgs/{slug}/trust-portal":                {"get"},
+		"/v1/orgs/{slug}/trust-portal/settings":       {"get", "put"},
 		// Operator (SaaS-operator back-door — gates CONCORD_OPERATOR_TOKEN).
 		"/operator/v1/orgs":                         {"get", "post"},
 		"/operator/v1/orgs/{slug}":                  {"get"},
