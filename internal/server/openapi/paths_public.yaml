@@ -1,7 +1,12 @@
 paths:
   /healthz:
     get:
-      summary: Liveness probe
+      summary: Liveness probe (process is up)
+      description: |
+        Always returns 200 as long as the HTTP server is accepting connections.
+        Never touches downstream dependencies — restarting the process can't
+        repair a downed database, so a livenessProbe wired here is a
+        crash-loop hazard. Use `/readyz` for dep-aware checks.
       operationId: getHealth
       security: []
       responses:
@@ -13,6 +18,41 @@ paths:
                 type: object
                 properties:
                   status: { type: string }
+
+  /readyz:
+    get:
+      summary: Readiness probe (deps are reachable)
+      description: |
+        Probes every external dependency the server needs to serve requests
+        (today: Postgres). Returns 200 when all are reachable, 503 when one
+        or more are failing — with a per-dep breakdown so an operator can
+        see which subsystem is down. Load balancers should drain a pod while
+        this endpoint is 503ing.
+      operationId: getReady
+      security: []
+      responses:
+        '200':
+          description: All dependencies reachable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+                  checks:
+                    type: object
+                    additionalProperties: { type: string }
+        '503':
+          description: One or more dependencies are unreachable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [degraded] }
+                  checks:
+                    type: object
+                    additionalProperties: { type: string }
 
   /version:
     get:

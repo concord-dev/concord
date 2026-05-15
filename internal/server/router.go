@@ -49,6 +49,7 @@ func (c *Concord) Router() http.Handler {
 
 func mountPublic(mux *http.ServeMux, h *public.Handlers) {
 	mux.HandleFunc("GET /healthz", h.Health)
+	mux.HandleFunc("GET /readyz", h.Ready)
 	mux.HandleFunc("GET /version", h.Version)
 	mux.HandleFunc("GET /openapi.yaml", h.OpenAPI)
 	mux.HandleFunc("GET /docs", h.Docs)

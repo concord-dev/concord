@@ -67,6 +67,7 @@ func TestSpec_CoversEveryExpectedRoute(t *testing.T) {
 	wantRoutes := map[string][]string{
 		// Public.
 		"/healthz":      {"get"},
+		"/readyz":       {"get"},
 		"/version":      {"get"},
 		// Auth.
 		"/v1/auth/login":                        {"post"},

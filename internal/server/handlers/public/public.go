@@ -4,14 +4,23 @@
 package public
 
 import (
+	"context"
 	"io"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/concord-dev/concord/internal/controls"
+	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/server/httpx"
 	"github.com/concord-dev/concord/internal/server/openapi"
 	"github.com/concord-dev/concord/internal/store"
 )
+
+// readyDepTimeout caps each dep-check probe. Long enough to tolerate a slow
+// initial connection across a region, short enough that piling-up readiness
+// probes can't accumulate goroutines if a dep is genuinely down.
+const readyDepTimeout = 2 * time.Second
 
 // Handlers bundles dependencies for the public route group.
 type Handlers struct {
@@ -28,9 +37,43 @@ func New(version string, ctrls []controls.Loaded, s *store.Store) *Handlers {
 	return &Handlers{version: version, controls: ctrls, store: s}
 }
 
-// Health is the liveness probe (e.g. for Kubernetes / load balancers).
+// Health is the liveness probe (e.g. for Kubernetes / load balancers). It
+// deliberately never touches downstream dependencies — restarting the process
+// can't repair a downed database, and a livenessProbe that fails on DB blips
+// would just crash-loop the server. Use /readyz for dep-aware checks.
 func (h *Handlers) Health(w http.ResponseWriter, _ *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+// Ready is the readiness probe: returns 200 only when every dep is reachable.
+// On failure the response is 503 with a per-dep breakdown so an operator can
+// page-load the endpoint and see which subsystem is down. K8s readinessProbes
+// should poll this; load balancers should drop the pod from rotation while
+// it's failing.
+func (h *Handlers) Ready(w http.ResponseWriter, r *http.Request) {
+	checks := map[string]string{}
+	allOK := true
+
+	dbCtx, cancel := context.WithTimeout(r.Context(), readyDepTimeout)
+	defer cancel()
+	if err := h.store.Pool().Ping(dbCtx); err != nil {
+		checks["database"] = err.Error()
+		allOK = false
+		logx.FromContext(r.Context()).Warn("readiness check failed",
+			slog.String("dep", "database"),
+			slog.String("err", err.Error()))
+	} else {
+		checks["database"] = "ok"
+	}
+
+	body := map[string]any{"checks": checks}
+	if allOK {
+		body["status"] = "ok"
+		httpx.JSON(w, http.StatusOK, body)
+		return
+	}
+	body["status"] = "degraded"
+	httpx.JSON(w, http.StatusServiceUnavailable, body)
 }
 
 // Version exposes build metadata + the loaded controls count.
