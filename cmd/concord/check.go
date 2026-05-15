@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -26,6 +27,7 @@ func newCheckCmd() *cobra.Command {
 		format       string
 		outputPath   string
 		quiet        bool
+		push         pushOpts
 	)
 	cmd := &cobra.Command{
 		Use:   "check",
@@ -55,8 +57,10 @@ func newCheckCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "Checking %d control(s)...\n\n", len(loaded))
 			}
 
+			started := time.Now().UTC()
 			r := runner.New(policy.New(), reg).SetParams(cfg.Controls.Params)
 			findings := r.RunAll(context.Background(), loaded)
+			completed := time.Now().UTC()
 
 			out, closeFn, err := openOutput(outputPath)
 			if err != nil {
@@ -67,6 +71,16 @@ func newCheckCmd() *cobra.Command {
 			summary, err := renderer.Render(out, findings)
 			if err != nil {
 				return fmt.Errorf("rendering: %w", err)
+			}
+
+			// Optional push to a Concord server. Errors here are loud but
+			// don't override the non-zero exit code below — CI should still
+			// fail on a failing audit even when the push itself succeeded.
+			if push.serverURL != "" {
+				if err := pushFindings(cmd.Context(), push, findings, started, completed); err != nil {
+					fmt.Fprintln(os.Stderr, "push failed:", err)
+					os.Exit(1)
+				}
 			}
 
 			if summary.Fail > 0 || summary.Err > 0 {
@@ -81,6 +95,7 @@ func newCheckCmd() *cobra.Command {
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text|json|oscal|markdown|trust-portal")
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Write findings to this file (default: stdout)")
 	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress prelude (Mode + Checking lines)")
+	addPushFlags(cmd, &push)
 	return cmd
 }
 

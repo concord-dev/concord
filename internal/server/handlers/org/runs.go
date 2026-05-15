@@ -80,17 +80,24 @@ func (h *Handlers) ListRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type listEntry struct {
-		ID           uuid.UUID  `json:"id"`
-		Status       string     `json:"status"`
-		StartedAt    time.Time  `json:"started_at"`
-		CompletedAt  *time.Time `json:"completed_at,omitempty"`
-		ErrorMessage string     `json:"error_message,omitempty"`
+		ID                uuid.UUID  `json:"id"`
+		Status            string     `json:"status"`
+		Source            string     `json:"source"`
+		StartedAt         time.Time  `json:"started_at"`
+		CompletedAt       *time.Time `json:"completed_at,omitempty"`
+		ErrorMessage      string     `json:"error_message,omitempty"`
+		AgentID           *uuid.UUID `json:"agent_id,omitempty"`
+		AgentVersion      string     `json:"agent_version,omitempty"`
+		SignatureVerified bool       `json:"signature_verified"`
 	}
 	out := make([]listEntry, 0, len(runs))
 	for _, r0 := range runs {
 		out = append(out, listEntry{
-			ID: r0.ID, Status: string(r0.Status), StartedAt: r0.StartedAt,
+			ID: r0.ID, Status: string(r0.Status), Source: string(r0.Source),
+			StartedAt: r0.StartedAt,
 			CompletedAt: r0.CompletedAt, ErrorMessage: r0.ErrorMessage,
+			AgentID: r0.AgentID, AgentVersion: r0.AgentVersion,
+			SignatureVerified: r0.SignatureVerified,
 		})
 	}
 	httpx.JSON(w, http.StatusOK, out)
@@ -128,12 +135,16 @@ func writeFindingsEnvelope(w http.ResponseWriter, run store.Run) {
 		_ = json.Unmarshal(run.Findings, &findings)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
-		"run_id":        run.ID,
-		"status":        run.Status,
-		"started_at":    run.StartedAt,
-		"completed_at":  run.CompletedAt,
-		"error_message": run.ErrorMessage,
-		"summary":       summary,
-		"findings":      findings,
+		"run_id":             run.ID,
+		"status":             run.Status,
+		"source":             run.Source,
+		"started_at":         run.StartedAt,
+		"completed_at":       run.CompletedAt,
+		"error_message":      run.ErrorMessage,
+		"agent_id":           run.AgentID,
+		"agent_version":      run.AgentVersion,
+		"signature_verified": run.SignatureVerified,
+		"summary":            summary,
+		"findings":           findings,
 	})
 }

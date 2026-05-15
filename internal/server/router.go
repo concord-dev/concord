@@ -89,6 +89,7 @@ func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware)
 	whDelete := mw.RequireOrgPerm("webhooks:delete")
 	orgRead := mw.RequireOrgPerm("org:read")
 	tpManage := mw.RequireOrgPerm("trust_portal:manage")
+	akManage := mw.RequireOrgPerm("agent_keys:manage")
 
 	mux.Handle("GET /v1/orgs/{slug}/me", orgRead(http.HandlerFunc(h.Me)))
 
@@ -99,10 +100,16 @@ func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware)
 
 	// Run lifecycle.
 	mux.Handle("POST /v1/orgs/{slug}/check", runCreate(http.HandlerFunc(h.Check)))
+	mux.Handle("POST /v1/orgs/{slug}/runs", runCreate(http.HandlerFunc(h.SubmitRun)))
 	mux.Handle("GET /v1/orgs/{slug}/findings", runRead(http.HandlerFunc(h.Findings)))
 	mux.Handle("GET /v1/orgs/{slug}/runs", runRead(http.HandlerFunc(h.ListRuns)))
 	mux.Handle("GET /v1/orgs/{slug}/runs/{id}", runRead(http.HandlerFunc(h.GetRun)))
 	mux.Handle("GET /v1/orgs/{slug}/events", runRead(http.HandlerFunc(h.Events)))
+
+	// Agent-push signing keys.
+	mux.Handle("GET /v1/orgs/{slug}/agent-keys", read(http.HandlerFunc(h.ListAgentKeys)))
+	mux.Handle("POST /v1/orgs/{slug}/agent-keys", akManage(http.HandlerFunc(h.CreateAgentKey)))
+	mux.Handle("DELETE /v1/orgs/{slug}/agent-keys/{id}", akManage(http.HandlerFunc(h.RevokeAgentKey)))
 
 	// Per-org control overrides — the SaaS replacement for concord.yaml.
 	mux.Handle("GET /v1/orgs/{slug}/overrides", read(http.HandlerFunc(h.ListOverrides)))

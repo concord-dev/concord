@@ -253,6 +253,59 @@ components:
             creation; subsequent GETs never expose it.
         note: { type: string }
 
+    AgentKey:
+      type: object
+      required: [id, name, public_key, created_at]
+      properties:
+        id:                  { type: string, format: uuid }
+        name:                { type: string }
+        public_key:          { type: string, description: "Ed25519 public key (base64, 32 raw bytes)" }
+        created_by_user_id:  { type: string, format: uuid, nullable: true }
+        created_at:          { type: string, format: date-time }
+        last_used_at:        { type: string, format: date-time, nullable: true }
+
+    AgentSubmission:
+      type: object
+      required: [agent, started_at, completed_at, summary, findings]
+      properties:
+        agent:
+          type: object
+          required: [version]
+          properties:
+            version:          { type: string, description: "Concord CLI version that produced the run" }
+            controls_version: { type: string, description: "Optional content hash of the loaded controls library" }
+        started_at:   { type: string, format: date-time, description: "Agent-side start time" }
+        completed_at: { type: string, format: date-time }
+        summary:
+          type: object
+          description: |
+            Pass/fail/error counts. Same shape returned by GET /runs/{id}.
+          properties:
+            pass:  { type: integer }
+            fail:  { type: integer }
+            error: { type: integer }
+            skip:  { type: integer }
+        findings:
+          type: array
+          description: |
+            One entry per control. Use `[]` for an empty run; null is rejected.
+          items: { type: object }
+
+    AgentSubmissionResult:
+      type: object
+      required: [run_id, source, signature_verified, url]
+      properties:
+        run_id: { type: string, format: uuid }
+        source:
+          type: string
+          enum: [agent, unsigned]
+          description: |
+            `agent` = Ed25519 signature was verified.
+            `unsigned` = no signature headers; API token auth only.
+        signature_verified: { type: boolean }
+        agent_id:           { type: string, format: uuid, nullable: true }
+        url:                { type: string, description: "Relative URL of the persisted run" }
+
     TrustPortalSettings:
       type: object
       required: [enabled, url]

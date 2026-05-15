@@ -22,14 +22,15 @@ import (
 
 func newWatchCmd() *cobra.Command {
 	var (
-		controlsDir   string
-		configPath    string
-		fixturesOnly  bool
-		interval      time.Duration
-		outputDir     string
-		once          bool
-		slackWebhook  string
-		genericHook   string
+		controlsDir  string
+		configPath   string
+		fixturesOnly bool
+		interval     time.Duration
+		outputDir    string
+		once         bool
+		slackWebhook string
+		genericHook  string
+		push         pushOpts
 	)
 	cmd := &cobra.Command{
 		Use:   "watch",
@@ -38,6 +39,9 @@ func newWatchCmd() *cobra.Command {
 control on --interval (default 1h), persists findings to --output-dir/last-run.json,
 and emits a one-line event to stderr whenever a control transitions between
 pass/fail/error since the previous run.
+
+Pass --to / --org-slug / --token (plus optionally --key-id + --key to sign) to
+also push every iteration's findings to a Concord server — agent mode.
 
 Use --once for cron-style scheduling: a single iteration that exits after writing
 findings. Use the default loop mode under a process supervisor (systemd, Docker)
@@ -56,11 +60,26 @@ for an always-on agent.`,
 			}
 			fmt.Fprintf(os.Stderr, "watching %d control(s) every %s; output → %s\n",
 				len(loaded), interval, outputDir)
+			if push.serverURL != "" {
+				fmt.Fprintf(os.Stderr, "agent mode: pushing each run → %s (org=%s)\n",
+					push.serverURL, push.orgSlug)
+			}
 
 			check := func(ctx context.Context) ([]apiv1.Finding, error) {
+				started := time.Now().UTC()
 				reg := wiring.BuildRegistry(ctx, fixturesOnly, os.Stderr)
 				r := runner.New(policy.New(), reg).SetParams(cfg.Controls.Params)
-				return r.RunAll(ctx, loaded), nil
+				findings := r.RunAll(ctx, loaded)
+				completed := time.Now().UTC()
+
+				// Best-effort push: a transient server outage shouldn't stop
+				// the watcher from continuing to scan and persist locally.
+				if push.serverURL != "" {
+					if err := pushFindings(ctx, push, findings, started, completed); err != nil {
+						fmt.Fprintln(os.Stderr, "push failed (continuing):", err)
+					}
+				}
+				return findings, nil
 			}
 
 			sinks := []notify.Sink{notify.Stderr(os.Stderr)}
@@ -91,5 +110,6 @@ for an always-on agent.`,
 	cmd.Flags().BoolVar(&once, "once", false, "Run a single iteration and exit (suitable for cron)")
 	cmd.Flags().StringVar(&slackWebhook, "slack-webhook", "", "Slack incoming-webhook URL to receive state-change events")
 	cmd.Flags().StringVar(&genericHook, "webhook", "", "Generic HTTP endpoint to receive each event as JSON")
+	addPushFlags(cmd, &push)
 	return cmd
 }
