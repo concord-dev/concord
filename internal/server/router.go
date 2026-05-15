@@ -25,8 +25,8 @@ import (
 // The whole tree is wrapped in the logging middleware before being returned.
 func (c *Concord) Router() http.Handler {
 	mw := middleware.New(c.Store, c.OperatorToken)
-	pub := public.New(c.Version, c.Controls, c.Store)
-	au := auth.New(c.Store, c.SessionTTL)
+	pub := public.New(c.Version, c.Controls, c.Store, c.pubLimits)
+	au := auth.New(c.Store, c.SessionTTL, c.authLimits)
 	op := operator.New(c.Store)
 	og := org.New(c.Store, c.Controls, c.bus, c.Broadcast)
 

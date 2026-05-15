@@ -36,9 +36,14 @@ import (
 
 	"github.com/google/uuid"
 
+	"golang.org/x/time/rate"
+
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
 	"github.com/concord-dev/concord/internal/server/bus"
+	"github.com/concord-dev/concord/internal/server/handlers/auth"
+	"github.com/concord-dev/concord/internal/server/handlers/public"
+	"github.com/concord-dev/concord/internal/server/limiter"
 	"github.com/concord-dev/concord/internal/server/metrics"
 	"github.com/concord-dev/concord/internal/store"
 )
@@ -53,9 +58,11 @@ type Concord struct {
 	SessionTTL         time.Duration
 	CORSAllowedOrigins []string // exact-match list; empty disables CORS
 
-	bus     *bus.Bus
-	metrics *metrics.Metrics
-	mu      sync.Mutex
+	bus         *bus.Bus
+	metrics     *metrics.Metrics
+	authLimits  auth.Limits
+	pubLimits   public.Limits
+	mu          sync.Mutex
 }
 
 // Options is the construction surface for cmd/server.
@@ -104,7 +111,38 @@ func NewConcord(opts Options) (*Concord, error) {
 		CORSAllowedOrigins: opts.CORSAllowedOrigins,
 		bus:                b,
 		metrics:            m,
+		authLimits:         defaultAuthLimits(),
+		pubLimits:          defaultPublicLimits(),
 	}, nil
+}
+
+// defaultAuthLimits is the production rate-limit policy for /v1/auth/*. The
+// burst sizes are chosen to be lenient enough for a legit user fumbling a
+// password a few times, but tight enough to stop credential-stuffing and
+// password-spray tools that hit the endpoint thousands of times per minute.
+//
+//	LoginIP       30 req/min, burst 10  — per source IP
+//	LoginEmail    10 req/min, burst 20  — per (lowercased) email
+//	PWResetIP     10 req/min, burst 5   — request endpoint
+//	PWConfirmIP   30 req/min, burst 10  — confirm endpoint (token guess attempts)
+func defaultAuthLimits() auth.Limits {
+	return auth.Limits{
+		LoginIP:     limiter.NewBucket(limiter.Config{Rate: rate.Every(2 * time.Second), Burst: 10}),
+		LoginEmail:  limiter.NewBucket(limiter.Config{Rate: rate.Every(6 * time.Second), Burst: 20}),
+		PWResetIP:   limiter.NewBucket(limiter.Config{Rate: rate.Every(6 * time.Second), Burst: 5}),
+		PWConfirmIP: limiter.NewBucket(limiter.Config{Rate: rate.Every(2 * time.Second), Burst: 10}),
+	}
+}
+
+// defaultPublicLimits is the production rate-limit policy for the
+// unauthenticated public endpoints. AcceptInvitation accepts a token in
+// the body; without a limit, an attacker can grind through tokens.
+//
+//	InviteAcceptIP 30 req/min, burst 10  — per source IP
+func defaultPublicLimits() public.Limits {
+	return public.Limits{
+		InviteAcceptIP: limiter.NewBucket(limiter.Config{Rate: rate.Every(2 * time.Second), Burst: 10}),
+	}
 }
 
 // applyDefaults fills in sensible Options defaults so callers can pass a

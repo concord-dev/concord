@@ -74,6 +74,9 @@ func (h *Handlers) PreviewInvitation(w http.ResponseWriter, r *http.Request) {
 // For existing accounts first/last/password are ignored (they keep their
 // credentials; this accept just gains them org membership).
 func (h *Handlers) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
+	if !allow(w, h.limits.InviteAcceptIP, clientIP(r)) {
+		return
+	}
 	var body struct {
 		Token     string `json:"token"`
 		FirstName string `json:"first_name"`

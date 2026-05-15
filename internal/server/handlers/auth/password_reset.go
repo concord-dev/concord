@@ -22,6 +22,9 @@ import (
 //
 // Body: { "email": "..." }
 func (h *Handlers) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
+	if !allow(w, h.limits.PWResetIP, clientIP(r)) {
+		return
+	}
 	var body struct {
 		Email string `json:"email"`
 	}
@@ -82,6 +85,9 @@ func (h *Handlers) RequestPasswordReset(w http.ResponseWriter, r *http.Request) 
 // active session for the user is revoked, and a fresh session is minted so
 // the caller is immediately logged in.
 func (h *Handlers) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
+	if !allow(w, h.limits.PWConfirmIP, clientIP(r)) {
+		return
+	}
 	var body struct {
 		Token       string `json:"token"`
 		NewPassword string `json:"new_password"`

@@ -7,28 +7,51 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/concord-dev/concord/internal/server/authctx"
 	"github.com/concord-dev/concord/internal/server/httpx"
+	"github.com/concord-dev/concord/internal/server/limiter"
 	"github.com/concord-dev/concord/internal/store"
 )
+
+// Limits is the bundle of rate-limit buckets the auth handlers consult.
+// Each may be nil — in which case that gate is disabled. The server wires
+// real buckets; tests can pass an empty struct to disable limiting.
+type Limits struct {
+	LoginIP       *limiter.Bucket // per source IP for POST /v1/auth/login
+	LoginEmail    *limiter.Bucket // per email for POST /v1/auth/login (anti-stuffing)
+	PWResetIP     *limiter.Bucket // per source IP for POST /v1/auth/password-reset
+	PWConfirmIP   *limiter.Bucket // per source IP for POST /v1/auth/password-reset/confirm
+}
 
 // Handlers bundles dependencies for the auth route group.
 type Handlers struct {
 	store      *store.Store
 	sessionTTL time.Duration
+	limits     Limits
 }
 
-// New constructs Handlers with the given Store and session lifetime.
-func New(s *store.Store, sessionTTL time.Duration) *Handlers {
-	return &Handlers{store: s, sessionTTL: sessionTTL}
+// New constructs Handlers with the given Store, session lifetime, and rate
+// limits. Pass an empty Limits{} to disable all gates (tests do this).
+func New(s *store.Store, sessionTTL time.Duration, limits Limits) *Handlers {
+	return &Handlers{store: s, sessionTTL: sessionTTL, limits: limits}
 }
 
 // Login exchanges email + password for a session token. Same error message for
 // unknown email and bad password to prevent user enumeration.
+//
+// Rate-limited per source IP and per email — the IP gate stops password
+// spraying from one host, the email gate stops credential stuffing that
+// rotates IPs against a single account. The IP check runs before JSON
+// parse so an exhausted attacker can't make the server burn cycles on
+// decoding.
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
+	if !allow(w, h.limits.LoginIP, clientIP(r)) {
+		return
+	}
 	var body struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -39,6 +62,9 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Email == "" || body.Password == "" {
 		httpx.Error(w, http.StatusBadRequest, "email and password are required")
+		return
+	}
+	if !allow(w, h.limits.LoginEmail, strings.ToLower(strings.TrimSpace(body.Email))) {
 		return
 	}
 	user, err := h.store.VerifyUserPassword(r.Context(), body.Email, body.Password)
@@ -94,6 +120,24 @@ func (h *Handlers) MyOrgs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, orgs)
+}
+
+// allow returns true and lets the caller proceed when the bucket admits this
+// key (or when the bucket is nil — limits disabled). On deny it writes a 429
+// with a Retry-After header and returns false; the caller should simply
+// return. Centralized so every rate-limited endpoint shares the same wire
+// shape and header conventions.
+func allow(w http.ResponseWriter, b *limiter.Bucket, key string) bool {
+	if b == nil {
+		return true
+	}
+	ok, retryAfter := b.Allow(key)
+	if ok {
+		return true
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
+	httpx.Error(w, http.StatusTooManyRequests, "rate limit exceeded; retry shortly")
+	return false
 }
 
 // clientIP picks the leftmost X-Forwarded-For entry, falling back to

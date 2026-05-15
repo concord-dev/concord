@@ -93,6 +93,16 @@ func newHarness(t *testing.T) *harness {
 		password: password, apiToken: plain}
 }
 
+// rebuildServer reruns Router on the Concord struct and swaps the underlying
+// httptest.Server. Use after toggling test-only state (e.g. SetLimitsForTest)
+// since the router captures handler-level deps at construction time.
+func (h *harness) rebuildServer(t *testing.T) {
+	t.Helper()
+	h.srv.Close()
+	h.srv = httptest.NewServer(h.c.Router())
+	t.Cleanup(h.srv.Close)
+}
+
 func (h *harness) do(t *testing.T, method, path, body, auth string) (*http.Response, []byte) {
 	t.Helper()
 	var br io.Reader

@@ -8,11 +8,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/concord-dev/concord/internal/controls"
 	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/server/httpx"
+	"github.com/concord-dev/concord/internal/server/limiter"
 	"github.com/concord-dev/concord/internal/server/openapi"
 	"github.com/concord-dev/concord/internal/store"
 )
@@ -22,19 +24,40 @@ import (
 // probes can't accumulate goroutines if a dep is genuinely down.
 const readyDepTimeout = 2 * time.Second
 
+// Limits is the bundle of rate-limit buckets the public handlers consult.
+// Each may be nil — disabling that gate.
+type Limits struct {
+	InviteAcceptIP *limiter.Bucket // per source IP for POST /v1/invitations/accept
+}
+
 // Handlers bundles dependencies for the public route group.
 type Handlers struct {
 	version  string
 	controls []controls.Loaded
 	store    *store.Store // needed for the trust-portal endpoint
+	limits   Limits
 }
 
 // New constructs Handlers with the supplied build metadata, loaded controls,
-// and a Store. The Store is read-only from this subpackage — only the trust
-// portal handler reaches into it, and only to load org metadata + the latest
-// succeeded run.
-func New(version string, ctrls []controls.Loaded, s *store.Store) *Handlers {
-	return &Handlers{version: version, controls: ctrls, store: s}
+// a Store, and rate limits. The Store is read-only from this subpackage —
+// only the trust portal handler reaches into it, and only to load org
+// metadata + the latest succeeded run.
+func New(version string, ctrls []controls.Loaded, s *store.Store, limits Limits) *Handlers {
+	return &Handlers{version: version, controls: ctrls, store: s, limits: limits}
+}
+
+// allow is the per-handler 429 gate. Nil bucket = disabled.
+func allow(w http.ResponseWriter, b *limiter.Bucket, key string) bool {
+	if b == nil {
+		return true
+	}
+	ok, retryAfter := b.Allow(key)
+	if ok {
+		return true
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
+	httpx.Error(w, http.StatusTooManyRequests, "rate limit exceeded; retry shortly")
+	return false
 }
 
 // Health is the liveness probe (e.g. for Kubernetes / load balancers). It
