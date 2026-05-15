@@ -6,8 +6,7 @@ package bus
 
 import (
 	"encoding/json"
-	"fmt"
-	"os"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -97,8 +96,9 @@ func (b *Bus) Publish(e Event) {
 		select {
 		case sub.ch <- e:
 		default:
-			fmt.Fprintf(os.Stderr, "bus: subscriber for org %s is full, dropping %s\n",
-				e.OrgID, e.Kind)
+			slog.Warn("bus subscriber backlog full; event dropped",
+				slog.String("org_id", e.OrgID.String()),
+				slog.String("kind", string(e.Kind)))
 		}
 	}
 }

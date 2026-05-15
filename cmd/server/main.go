@@ -15,6 +15,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/server"
 	"github.com/concord-dev/concord/internal/store"
 )
@@ -79,6 +81,8 @@ func runServe(args []string) error {
 		databaseURL   string
 		operatorToken string
 		corsOrigins   string
+		logFormat     string
+		logLevel      string
 		skipMigrate   bool
 	)
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
@@ -89,10 +93,14 @@ func runServe(args []string) error {
 	fs.StringVar(&operatorToken, "operator-token", os.Getenv("CONCORD_OPERATOR_TOKEN"), "Operator token for /operator/v1/* (or set CONCORD_OPERATOR_TOKEN)")
 	fs.StringVar(&corsOrigins, "cors-allow-origins", os.Getenv("CONCORD_CORS_ALLOWED_ORIGINS"),
 		"Comma-separated exact origins permitted to call the API from a browser (e.g. https://app.example.com). Empty disables CORS.")
+	fs.StringVar(&logFormat, "log-format", envOr("CONCORD_LOG_FORMAT", "json"), "Log output format: json|text")
+	fs.StringVar(&logLevel, "log-level", envOr("CONCORD_LOG_LEVEL", "info"), "Minimum log level: debug|info|warn|error")
 	fs.BoolVar(&skipMigrate, "skip-migrate", false, "Don't run schema migrations on startup")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+
+	logx.Init(logFormat, logLevel)
 
 	if databaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required (e.g. postgres://concord:dev@localhost:5432/concord?sslmode=disable)")
@@ -140,10 +148,13 @@ func runServe(args []string) error {
 	}
 
 	if operatorToken == "" {
-		fmt.Fprintln(os.Stderr, "warning: CONCORD_OPERATOR_TOKEN not set; /operator/v1/* will refuse every request")
+		slog.Warn("operator token not set; /operator/v1/* will refuse every request")
 	}
-	fmt.Fprintf(os.Stderr, "concord-server %s listening on %s (%d controls loaded; agent-push mode)\n",
-		version, listenAddr, len(c.Controls))
+	slog.Info("listening",
+		slog.String("version", version),
+		slog.String("addr", listenAddr),
+		slog.Int("controls", len(c.Controls)),
+		slog.String("mode", "agent-push"))
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -157,11 +168,11 @@ func runServe(args []string) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		fmt.Fprintln(os.Stderr, "shutting down…")
+		slog.Info("shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			fmt.Fprintln(os.Stderr, "http shutdown:", err)
+			slog.Error("http shutdown failed", slog.String("err", err.Error()))
 		}
 		return c.Shutdown(shutdownCtx)
 	}

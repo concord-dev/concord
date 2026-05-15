@@ -3,11 +3,11 @@ package auth
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
+	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 
+	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/server/httpx"
 	"github.com/concord-dev/concord/internal/store"
 )
@@ -17,7 +17,7 @@ import (
 // Always returns 200 with `{"status":"ok"}` — even when the email is unknown
 // — to avoid leaking which addresses have accounts (user-enumeration via
 // the response is a classic mistake). The reset token, when minted, is
-// logged to stderr; production deployments should send it via email and
+// logged at info level; production deployments should send it via email and
 // stop printing it.
 //
 // Body: { "email": "..." }
@@ -41,12 +41,15 @@ func (h *Handlers) RequestPasswordReset(w http.ResponseWriter, r *http.Request) 
 		"note":   "If an account exists for that email, a reset link has been issued.",
 	})
 
+	log := logx.FromContext(r.Context())
 	user, err := h.store.GetUserByEmail(r.Context(), body.Email)
 	if errors.Is(err, store.ErrNotFound) {
 		return // silently — no enumeration leak
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "password-reset: lookup error for %s: %v\n", body.Email, err)
+		log.Error("password reset lookup failed",
+			slog.String("email", body.Email),
+			slog.String("err", err.Error()))
 		return
 	}
 
@@ -56,16 +59,19 @@ func (h *Handlers) RequestPasswordReset(w http.ResponseWriter, r *http.Request) 
 		RequesterUA: r.UserAgent(),
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "password-reset: insert error for user %s: %v\n", user.ID, err)
+		log.Error("password reset insert failed",
+			slog.String("user_id", user.ID.String()),
+			slog.String("err", err.Error()))
 		return
 	}
-	// Out-of-band delivery is the operator's responsibility today. Log loudly
-	// so the path is obvious; replace with real email when that lands.
-	fmt.Fprintf(os.Stderr,
-		"password-reset: token issued for user %s (email %s).\n"+
-			"  Deliver this URL to the user — it is the ONLY way to confirm the reset:\n"+
-			"  %s/v1/auth/password-reset/confirm?token=%s\n",
-		user.ID, user.Email, resetBaseURL(r), token)
+	// Out-of-band delivery is the operator's responsibility today; surface the
+	// confirm URL on the access log so the path is obvious until real email
+	// delivery lands.
+	log.Info("password reset issued",
+		slog.String("user_id", user.ID.String()),
+		slog.String("email", user.Email),
+		slog.String("confirm_url",
+			resetBaseURL(r)+"/v1/auth/password-reset/confirm?token="+token))
 }
 
 // ConfirmPasswordReset handles `POST /v1/auth/password-reset/confirm`.

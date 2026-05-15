@@ -37,11 +37,14 @@ func (c *Concord) Router() http.Handler {
 	mountSession(mux, au, mw)
 	mountOrgAPI(mux, og, mw)
 
-	// Stack order: Logging(CORS(mux)). CORS short-circuits preflights, and
-	// we still want those 204s in the access log. When AllowedOrigins is
-	// empty, cors.New returns a no-op so non-browser callers keep working.
+	// Stack order: RequestID(Logging(CORS(mux))). RequestID is the
+	// outermost so the request context it injects is visible to the
+	// access-log middleware (which reads request_id from ctx). CORS sits
+	// closest to the mux so its preflight short-circuits still get logged
+	// — and tagged with an ID. When AllowedOrigins is empty, cors.New
+	// returns a no-op so non-browser callers keep working.
 	corsMW := cors.New(cors.Config{AllowedOrigins: c.CORSAllowedOrigins})
-	return httpx.Logging(corsMW(mux))
+	return middleware.RequestID(httpx.Logging(corsMW(mux)))
 }
 
 func mountPublic(mux *http.ServeMux, h *public.Handlers) {

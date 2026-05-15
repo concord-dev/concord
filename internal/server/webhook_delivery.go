@@ -9,8 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/concord-dev/concord/internal/server/bus"
@@ -66,7 +66,9 @@ func (c *Concord) fireWebhooks(e bus.Event) {
 
 	hooks, err := c.Store.ListEnabledWebhooks(ctx, e.OrgID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "webhooks: list for org %s: %v\n", e.OrgID, err)
+		slog.Error("webhook list failed",
+			slog.String("org_id", e.OrgID.String()),
+			slog.String("err", err.Error()))
 		return
 	}
 	if len(hooks) == 0 {
@@ -74,7 +76,9 @@ func (c *Concord) fireWebhooks(e bus.Event) {
 	}
 	body, err := json.Marshal(e)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "webhooks: marshal event: %v\n", err)
+		slog.Error("webhook marshal failed",
+			slog.String("org_id", e.OrgID.String()),
+			slog.String("err", err.Error()))
 		return
 	}
 	for _, wh := range hooks {
@@ -120,7 +124,10 @@ func (c *Concord) deliverOne(wh store.Webhook, kind bus.Kind, body []byte) {
 	resp, err := webhookHTTPClient.Do(req)
 	if err != nil {
 		_ = c.Store.RecordWebhookResult(context.Background(), wh.ID, 0, err.Error())
-		fmt.Fprintf(os.Stderr, "webhook %s POST %s: %v\n", wh.ID, wh.URL, err)
+		slog.Error("webhook delivery failed",
+			slog.String("webhook_id", wh.ID.String()),
+			slog.String("url", wh.URL),
+			slog.String("err", err.Error()))
 		return
 	}
 	defer resp.Body.Close()
