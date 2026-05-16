@@ -1,14 +1,18 @@
 package org
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/concord-dev/concord/internal/notify/mail"
 	"github.com/concord-dev/concord/internal/server/authctx"
 	"github.com/concord-dev/concord/internal/server/httpx"
 	"github.com/concord-dev/concord/internal/store"
@@ -96,6 +100,11 @@ func (h *Handlers) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		TargetID:   &inv.ID,
 		Details:    map[string]any{"email": inv.Email, "role": inv.RoleName},
 	})
+	// Deliver the invitation email asynchronously. We still return the
+	// accept_url in the response so an admin who needs to share it
+	// manually (out-of-band, e.g. on a Slack DM) can copy/paste — email
+	// is the default, not the only, path.
+	go sendInvitationEmail(h.mailer, inv.Email, p.Org.Name, inv.RoleName, acceptURL(r, token))
 	httpx.JSON(w, http.StatusCreated, map[string]any{
 		"invitation": viewFromInvitation(inv),
 		"token":      token,
@@ -103,6 +112,41 @@ func (h *Handlers) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		"note": "Share the link with the invitee. The token is shown ONCE — " +
 			"if lost, revoke this invitation and issue a new one.",
 	})
+}
+
+// sendInvitationEmail composes + dispatches the "you're invited to {org}"
+// email. Off the request goroutine because SMTP latency must not extend
+// the admin's HTTP response time. Failures slog but never propagate —
+// the admin still sees the accept_url in the response and can re-share.
+//
+// nil mailer (e.g. tests) degrades to a log line carrying the URL so the
+// dev workflow keeps working without an SMTP relay.
+func sendInvitationEmail(mailer mail.Mailer, to, orgName, role, acceptURL string) {
+	if mailer == nil {
+		slog.Info("invitation: no mailer configured; accept link follows",
+			slog.String("to", to),
+			slog.String("org", orgName),
+			slog.String("accept_url", acceptURL))
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	body := fmt.Sprintf(
+		"Hi,\n\nYou've been invited to join the %q organization on Concord as a %s.\n\n"+
+			"Open the link below to accept. If you don't already have a Concord account, "+
+			"you'll be prompted to set a password when you click through.\n\n%s\n\n"+
+			"If you weren't expecting this, you can safely ignore the email — the invitation will expire.\n\n— Concord",
+		orgName, role, acceptURL,
+	)
+	if err := mailer.Send(ctx, mail.Message{
+		To:      to,
+		Subject: fmt.Sprintf("You're invited to %s on Concord", orgName),
+		Body:    body,
+	}); err != nil {
+		slog.Error("invitation: mail delivery failed",
+			slog.String("to", to),
+			slog.String("err", err.Error()))
+	}
 }
 
 // ListInvitations returns every pending invitation for the org. Accepted /

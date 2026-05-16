@@ -40,6 +40,7 @@ import (
 
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
+	"github.com/concord-dev/concord/internal/notify/mail"
 	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/server/handlers/auth"
 	"github.com/concord-dev/concord/internal/server/handlers/public"
@@ -60,6 +61,7 @@ type Concord struct {
 
 	bus         *bus.Bus
 	metrics     *metrics.Metrics
+	mailer      mail.Mailer
 	authLimits  auth.Limits
 	pubLimits   public.Limits
 	mu          sync.Mutex
@@ -74,6 +76,10 @@ type Options struct {
 	Version            string
 	SessionTTL         time.Duration
 	CORSAllowedOrigins []string
+	// SMTP configures outbound mail. A zero value yields a LogMailer that
+	// just prints the message body — fine for local dev, never reaches a
+	// real inbox. Set Host (and From) to wire a real relay.
+	SMTP mail.Config
 }
 
 // NewConcord loads controls + config and wires the Store and event bus.
@@ -111,10 +117,16 @@ func NewConcord(opts Options) (*Concord, error) {
 		CORSAllowedOrigins: opts.CORSAllowedOrigins,
 		bus:                b,
 		metrics:            m,
+		mailer:             mail.New(opts.SMTP),
 		authLimits:         defaultAuthLimits(),
 		pubLimits:          defaultPublicLimits(),
 	}, nil
 }
+
+// Mailer exposes the configured mail.Mailer so router-wired handlers can
+// inject it. Returns the LogMailer fallback when SMTP is unconfigured —
+// callers never need to nil-check.
+func (c *Concord) Mailer() mail.Mailer { return c.mailer }
 
 // defaultAuthLimits is the production rate-limit policy for /v1/auth/*. The
 // burst sizes are chosen to be lenient enough for a legit user fumbling a

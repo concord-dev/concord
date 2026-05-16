@@ -8,8 +8,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/controls"
+	"github.com/concord-dev/concord/internal/logx"
+	"github.com/concord-dev/concord/internal/notify/mail"
 	"github.com/concord-dev/concord/internal/server/authctx"
 	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/store"
@@ -32,19 +33,21 @@ type Handlers struct {
 	controls  []controls.Loaded
 	bus       *bus.Bus
 	broadcast Broadcaster
+	mailer    mail.Mailer
 }
 
 // New constructs Handlers wired to the supplied infrastructure. A zero
 // Broadcaster is filled with no-op funcs so SubmitRun never nil-deref's
-// in tests that don't care about side-effects.
-func New(s *store.Store, ctrls []controls.Loaded, b *bus.Bus, broadcast Broadcaster) *Handlers {
+// in tests that don't care about side-effects. Mailer may be nil; the
+// invitation handler degrades to logging the accept URL when it is.
+func New(s *store.Store, ctrls []controls.Loaded, b *bus.Bus, broadcast Broadcaster, mailer mail.Mailer) *Handlers {
 	if broadcast.RunCompleted == nil {
 		broadcast.RunCompleted = func(store.Run, []byte) {}
 	}
 	if broadcast.DriftDetected == nil {
 		broadcast.DriftDetected = func(store.Run, []bus.Transition) {}
 	}
-	return &Handlers{store: s, controls: ctrls, bus: b, broadcast: broadcast}
+	return &Handlers{store: s, controls: ctrls, bus: b, broadcast: broadcast, mailer: mailer}
 }
 
 // audit fills in the actor (from the authctx Principal) and request-scoped

@@ -19,11 +19,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/concord-dev/concord/internal/logx"
+	"github.com/concord-dev/concord/internal/notify/mail"
 	"github.com/concord-dev/concord/internal/server"
 	"github.com/concord-dev/concord/internal/store"
 )
@@ -98,6 +100,29 @@ func runServe(args []string) error {
 		"Comma-separated exact origins permitted to call the API from a browser (e.g. https://app.example.com). Empty disables CORS.")
 	fs.StringVar(&logFormat, "log-format", envOr("CONCORD_LOG_FORMAT", "json"), "Log output format: json|text")
 	fs.StringVar(&logLevel, "log-level", envOr("CONCORD_LOG_LEVEL", "info"), "Minimum log level: debug|info|warn|error")
+	// SMTP — leave Host empty for the dev-mode LogMailer (no real
+	// delivery, body printed to slog so the developer can still click the
+	// reset / invite URL out of the terminal).
+	var (
+		smtpHost     string
+		smtpPortStr  string
+		smtpUser     string
+		smtpPassword string
+		smtpFrom     string
+		smtpTLS      string
+	)
+	fs.StringVar(&smtpHost, "smtp-host", os.Getenv("CONCORD_SMTP_HOST"),
+		"SMTP relay hostname (or CONCORD_SMTP_HOST). Empty disables SMTP and falls back to logging.")
+	fs.StringVar(&smtpPortStr, "smtp-port", envOr("CONCORD_SMTP_PORT", "587"),
+		"SMTP relay port (or CONCORD_SMTP_PORT)")
+	fs.StringVar(&smtpUser, "smtp-username", os.Getenv("CONCORD_SMTP_USERNAME"),
+		"SMTP PLAIN auth username (or CONCORD_SMTP_USERNAME). Empty disables auth.")
+	fs.StringVar(&smtpPassword, "smtp-password", os.Getenv("CONCORD_SMTP_PASSWORD"),
+		"SMTP PLAIN auth password (or CONCORD_SMTP_PASSWORD).")
+	fs.StringVar(&smtpFrom, "smtp-from", os.Getenv("CONCORD_SMTP_FROM"),
+		"From: address used on outbound mail (or CONCORD_SMTP_FROM). e.g. 'Concord <noreply@acme.test>'.")
+	fs.StringVar(&smtpTLS, "smtp-tls", envOr("CONCORD_SMTP_TLS", "auto"),
+		"SMTP transport encryption: auto|none|starttls|implicit (or CONCORD_SMTP_TLS).")
 	fs.BoolVar(&skipMigrate, "skip-migrate", false, "Don't run schema migrations on startup")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -129,6 +154,10 @@ func runServe(args []string) error {
 		}
 	}
 
+	smtpPort, err := strconv.Atoi(smtpPortStr)
+	if err != nil {
+		return fmt.Errorf("--smtp-port must be an integer: %w", err)
+	}
 	c, err := server.NewConcord(server.Options{
 		ControlsDir:        controlsDir,
 		ConfigPath:         configPath,
@@ -136,6 +165,14 @@ func runServe(args []string) error {
 		OperatorToken:      operatorToken,
 		Version:            version,
 		CORSAllowedOrigins: splitCSV(corsOrigins),
+		SMTP: mail.Config{
+			Host:     smtpHost,
+			Port:     smtpPort,
+			Username: smtpUser,
+			Password: smtpPassword,
+			From:     smtpFrom,
+			TLS:      mail.TLSMode(smtpTLS),
+		},
 	})
 	if err != nil {
 		return err

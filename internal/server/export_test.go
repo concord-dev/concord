@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/concord-dev/concord/internal/notify/mail"
 	"github.com/concord-dev/concord/internal/server/handlers/auth"
 	"github.com/concord-dev/concord/internal/server/handlers/public"
 )
@@ -11,4 +12,12 @@ import (
 func (c *Concord) SetLimitsForTest(a auth.Limits, p public.Limits) {
 	c.authLimits = a
 	c.pubLimits = p
+}
+
+// SetMailerForTest swaps in a capture mailer (or any Mailer impl) so
+// handler tests can assert on the messages the server attempted to send.
+// Same export-test discipline as SetLimitsForTest — production callers
+// configure the mailer via server.Options.SMTP.
+func (c *Concord) SetMailerForTest(m mail.Mailer) {
+	c.mailer = m
 }

@@ -1,13 +1,17 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/concord-dev/concord/internal/logx"
+	"github.com/concord-dev/concord/internal/notify/mail"
 	"github.com/concord-dev/concord/internal/server/httpx"
 	"github.com/concord-dev/concord/internal/store"
 )
@@ -67,14 +71,15 @@ func (h *Handlers) RequestPasswordReset(w http.ResponseWriter, r *http.Request) 
 			slog.String("err", err.Error()))
 		return
 	}
-	// Out-of-band delivery is the operator's responsibility today; surface the
-	// confirm URL on the access log so the path is obvious until real email
-	// delivery lands.
+	confirmURL := resetBaseURL(r) + "/v1/auth/password-reset/confirm?token=" + token
 	log.Info("password reset issued",
 		slog.String("user_id", user.ID.String()),
-		slog.String("email", user.Email),
-		slog.String("confirm_url",
-			resetBaseURL(r)+"/v1/auth/password-reset/confirm?token="+token))
+		slog.String("email", user.Email))
+	// Deliver via mail asynchronously so SMTP latency / failures never
+	// extend the HTTP response time on a hot endpoint. The LogMailer
+	// fallback prints the URL — sufficient for local dev — so this also
+	// keeps the "I forgot, show me the URL" workflow alive without a relay.
+	go sendPasswordResetEmail(h.mailer, user.Email, confirmURL)
 	h.audit(r, store.RecordAuditParams{
 		ActorKind:   store.AuditActorUnauthenticated,
 		Action:      "auth.password_reset.request",
@@ -82,6 +87,40 @@ func (h *Handlers) RequestPasswordReset(w http.ResponseWriter, r *http.Request) 
 		TargetID:    &user.ID,
 		Details:     map[string]any{"email": user.Email},
 	})
+}
+
+// sendPasswordResetEmail composes + delivers the reset-link email. Runs
+// off the request goroutine — we don't want SMTP latency on the response
+// path. Failures are loud (slog) but never propagated: the caller already
+// returned 200 to the user (anti-enumeration) and we can't unwind that.
+//
+// When mailer is nil (handler constructed without one — tests do this),
+// degrade to a slog line that carries the URL, so the dev still has a way
+// to complete the flow.
+func sendPasswordResetEmail(mailer mail.Mailer, to, confirmURL string) {
+	if mailer == nil {
+		slog.Info("password reset: no mailer configured; reset link follows",
+			slog.String("to", to),
+			slog.String("confirm_url", confirmURL))
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	body := fmt.Sprintf(
+		"Hi,\n\nWe received a request to reset the password for the Concord account associated with this email.\n\n"+
+			"Open the link below to choose a new password. The link is single-use and expires shortly.\n\n%s\n\n"+
+			"If you didn't request this, you can ignore this email — your password won't change.\n\n— Concord",
+		confirmURL,
+	)
+	if err := mailer.Send(ctx, mail.Message{
+		To:      to,
+		Subject: "Reset your Concord password",
+		Body:    body,
+	}); err != nil {
+		slog.Error("password reset: mail delivery failed",
+			slog.String("to", to),
+			slog.String("err", err.Error()))
+	}
 }
 
 // ConfirmPasswordReset handles `POST /v1/auth/password-reset/confirm`.

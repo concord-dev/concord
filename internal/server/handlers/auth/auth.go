@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/concord-dev/concord/internal/logx"
+	"github.com/concord-dev/concord/internal/notify/mail"
 	"github.com/concord-dev/concord/internal/server/authctx"
 	"github.com/concord-dev/concord/internal/server/httpx"
 	"github.com/concord-dev/concord/internal/server/limiter"
@@ -39,12 +40,15 @@ type Handlers struct {
 	store      *store.Store
 	sessionTTL time.Duration
 	limits     Limits
+	mailer     mail.Mailer
 }
 
-// New constructs Handlers with the given Store, session lifetime, and rate
-// limits. Pass an empty Limits{} to disable all gates (tests do this).
-func New(s *store.Store, sessionTTL time.Duration, limits Limits) *Handlers {
-	return &Handlers{store: s, sessionTTL: sessionTTL, limits: limits}
+// New constructs Handlers with the given Store, session lifetime, rate
+// limits, and mailer. Pass an empty Limits{} to disable all gates (tests
+// do this); pass nil for the mailer to drop email delivery entirely
+// (handlers fall back to logging the URL).
+func New(s *store.Store, sessionTTL time.Duration, limits Limits, mailer mail.Mailer) *Handlers {
+	return &Handlers{store: s, sessionTTL: sessionTTL, limits: limits, mailer: mailer}
 }
 
 // Login exchanges email + password for a session token. Same error message for
