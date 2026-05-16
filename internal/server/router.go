@@ -41,15 +41,24 @@ func (c *Concord) Router() http.Handler {
 	mountSession(mux, au, mw)
 	mountOrgAPI(mux, og, mw)
 
-	// Stack order: RequestID(Logging(Metrics(CORS(mux)))). RequestID is the
-	// outermost so the request context it injects is visible to every
-	// downstream middleware. Metrics sits inside Logging because it reads
-	// r.Pattern (set during ServeMux routing) and we want the access log's
-	// duration to bracket the metrics observation, not the other way
-	// around. CORS sits closest to the mux so its preflight short-circuits
-	// still get observed.
+	// Stack order:
+	//   RequestID(Logging(Metrics(SecurityHeaders(CORS(mux)))))
+	//
+	// RequestID is the outermost so the request context it injects is
+	// visible to every downstream middleware. Metrics sits inside Logging
+	// because it reads r.Pattern (set during ServeMux routing) and we
+	// want the access log's duration to bracket the metrics observation.
+	// SecurityHeaders sits inside Metrics (still outside CORS) so 4xx/5xx
+	// responses minted before reaching the handler still carry the hardening
+	// headers, and so SecurityHeaders can skip CORS preflights via the
+	// Access-Control-Request-Method sniff without racing with the CORS
+	// middleware's short-circuit.
 	corsMW := cors.New(cors.Config{AllowedOrigins: c.CORSAllowedOrigins})
-	return middleware.RequestID(httpx.Logging(c.metrics.Middleware(corsMW(mux))))
+	secHdr := middleware.SecurityHeaders(middleware.SecurityHeadersConfig{})
+	return middleware.RequestID(
+		httpx.Logging(
+			c.metrics.Middleware(
+				secHdr(corsMW(mux)))))
 }
 
 func mountPublic(mux *http.ServeMux, h *public.Handlers) {
