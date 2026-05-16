@@ -28,7 +28,10 @@ func (c *Concord) Router() http.Handler {
 	pub := public.New(c.Version, c.Controls, c.Store, c.pubLimits)
 	au := auth.New(c.Store, c.SessionTTL, c.authLimits)
 	op := operator.New(c.Store)
-	og := org.New(c.Store, c.Controls, c.bus, c.Broadcast)
+	og := org.New(c.Store, c.Controls, c.bus, org.Broadcaster{
+		RunCompleted:  c.Broadcast,
+		DriftDetected: c.BroadcastDrift,
+	})
 
 	mux := http.NewServeMux()
 	mountPublic(mux, pub)
@@ -136,6 +139,9 @@ func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware)
 	mux.Handle("GET /v1/orgs/{slug}/runs", runRead(http.HandlerFunc(h.ListRuns)))
 	mux.Handle("GET /v1/orgs/{slug}/runs/{id}", runRead(http.HandlerFunc(h.GetRun)))
 	mux.Handle("GET /v1/orgs/{slug}/events", runRead(http.HandlerFunc(h.Events)))
+	// Drift inbox: per-control regression / remediation history. Gated by
+	// runs:read because drift is meta-on-runs — no separate permission.
+	mux.Handle("GET /v1/orgs/{slug}/drift", runRead(http.HandlerFunc(h.ListDriftEvents)))
 
 	// Per-org control overrides (read on the server; agents can fetch and
 	// apply locally before running).

@@ -16,10 +16,15 @@ import (
 )
 
 // Broadcaster is the side-effect surface SubmitRun needs after a run lands:
-// publish a run.completed event on the in-process bus AND fire outbound
-// webhooks. Injected as a func rather than concrete type so the org handler
-// stays decoupled from webhook delivery internals.
-type Broadcaster func(run store.Run, summary []byte)
+//   - RunCompleted publishes the run.completed event + fires webhooks
+//   - DriftDetected publishes the control.drifted event + fires webhooks
+//     (called only when there's at least one transition)
+// Injected as a struct of funcs rather than a concrete type so the org
+// handler stays decoupled from webhook delivery internals.
+type Broadcaster struct {
+	RunCompleted  func(run store.Run, summary []byte)
+	DriftDetected func(run store.Run, transitions []bus.Transition)
+}
 
 // Handlers bundles dependencies for the org route group.
 type Handlers struct {
@@ -29,12 +34,15 @@ type Handlers struct {
 	broadcast Broadcaster
 }
 
-// New constructs Handlers wired to the supplied infrastructure.
+// New constructs Handlers wired to the supplied infrastructure. A zero
+// Broadcaster is filled with no-op funcs so SubmitRun never nil-deref's
+// in tests that don't care about side-effects.
 func New(s *store.Store, ctrls []controls.Loaded, b *bus.Bus, broadcast Broadcaster) *Handlers {
-	if broadcast == nil {
-		// No-op default so SubmitRun never nil-deref's in tests that don't
-		// care about side-effects.
-		broadcast = func(store.Run, []byte) {}
+	if broadcast.RunCompleted == nil {
+		broadcast.RunCompleted = func(store.Run, []byte) {}
+	}
+	if broadcast.DriftDetected == nil {
+		broadcast.DriftDetected = func(store.Run, []bus.Transition) {}
 	}
 	return &Handlers{store: s, controls: ctrls, bus: b, broadcast: broadcast}
 }

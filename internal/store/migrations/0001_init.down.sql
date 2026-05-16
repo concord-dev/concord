@@ -23,6 +23,10 @@ DROP TABLE IF EXISTS invitation         CASCADE;
 -- Audit log (references org + user + token).
 DROP TABLE IF EXISTS audit_event        CASCADE;
 
+-- Drift events (references run, which is dropped below — order doesn't
+-- matter with CASCADE but keep this near audit_event for readability).
+DROP TABLE IF EXISTS drift_event        CASCADE;
+
 -- Domain tables.
 DROP TABLE IF EXISTS webhook            CASCADE;
 DROP TABLE IF EXISTS control_override   CASCADE;

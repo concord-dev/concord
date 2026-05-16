@@ -20,17 +20,38 @@ const (
 	RunStarted   Kind = "run.started"
 	RunCompleted Kind = "run.completed"
 	RunFailed    Kind = "run.failed"
+	// ControlDrifted fires once per run whose findings include at least one
+	// control whose status changed relative to the prior run. The
+	// Transitions field carries every changed control; consumers (webhook
+	// or SSE) get one event per run, not per control, so 50-control mass
+	// regressions don't fan out to 50 webhook deliveries.
+	ControlDrifted Kind = "control.drifted"
 )
+
+// Transition mirrors drift.Transition but is duplicated here so the bus
+// package stays free of a cyclic dependency on the drift package (drift
+// pulls in pkg/api/v1 today; bus must remain a leaf so server can import
+// it). Field tags match drift.Transition exactly so the wire shape is
+// stable across packages.
+type Transition struct {
+	ControlID string `json:"control_id"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Rationale string `json:"rationale,omitempty"`
+}
 
 // Event is the wire shape pushed over SSE to subscribed clients.
 type Event struct {
-	Kind    Kind            `json:"kind"`
-	OrgID   uuid.UUID       `json:"org_id"`
-	RunID   uuid.UUID       `json:"run_id"`
-	At      time.Time       `json:"at"`
-	Status  string          `json:"status,omitempty"`
-	Summary json.RawMessage `json:"summary,omitempty"`
-	Error   string          `json:"error,omitempty"`
+	Kind        Kind            `json:"kind"`
+	OrgID       uuid.UUID       `json:"org_id"`
+	RunID       uuid.UUID       `json:"run_id"`
+	At          time.Time       `json:"at"`
+	Status      string          `json:"status,omitempty"`
+	Summary     json.RawMessage `json:"summary,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	// Transitions is populated only on ControlDrifted events; nil on every
+	// other kind. JSON `omitempty` keeps the wire shape clean.
+	Transitions []Transition `json:"transitions,omitempty"`
 }
 
 // Bus fans events out to per-org subscribers.

@@ -60,6 +60,29 @@ func (c *Concord) Broadcast(run store.Run, summary []byte) {
 	go c.fireWebhooks(evt)
 }
 
+// BroadcastDrift publishes a control.drifted event when SubmitRun detected
+// at least one control transition. Mirrors Broadcast's shape but carries
+// the per-control transition payload. No-op when transitions is empty so
+// callers don't need to guard.
+func (c *Concord) BroadcastDrift(run store.Run, transitions []bus.Transition) {
+	if len(transitions) == 0 {
+		return
+	}
+	at := time.Now().UTC()
+	if run.CompletedAt != nil {
+		at = *run.CompletedAt
+	}
+	evt := bus.Event{
+		Kind:        bus.ControlDrifted,
+		OrgID:       run.OrgID,
+		RunID:       run.ID,
+		At:          at,
+		Transitions: transitions,
+	}
+	c.bus.Publish(evt)
+	go c.fireWebhooks(evt)
+}
+
 func (c *Concord) fireWebhooks(e bus.Event) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

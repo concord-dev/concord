@@ -141,6 +141,33 @@ func (s *Store) ListRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]Run
 	return out, rows.Err()
 }
 
+// GetPreviousRunFindings returns the findings JSONB blob + run ID of the
+// most recent run for `orgID` that is NOT `excludeRunID`. Used by the
+// drift detector inside SubmitRun: pass the freshly-inserted run's ID as
+// `excludeRunID` and you get its immediate predecessor.
+//
+// Returns ErrNotFound when no prior run exists (i.e. this org's first
+// run). Findings can be `[]` legitimately — caller distinguishes via the
+// (nil, ErrNotFound) vs ([]byte{...}, nil) split, not via length.
+func (s *Store) GetPreviousRunFindings(ctx context.Context, orgID, excludeRunID uuid.UUID) ([]byte, uuid.UUID, error) {
+	var (
+		priorID  uuid.UUID
+		findings []byte
+	)
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, findings
+		 FROM run
+		 WHERE org_id = $1 AND id <> $2
+		 ORDER BY started_at DESC
+		 LIMIT 1`,
+		orgID, excludeRunID,
+	).Scan(&priorID, &findings)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, uuid.Nil, ErrNotFound
+	}
+	return findings, priorID, err
+}
+
 // nullIfEmpty converts an empty string to a nil interface so pgx writes SQL NULL.
 func nullIfEmpty(s string) any {
 	if s == "" {

@@ -95,6 +95,7 @@ func TestSpec_CoversEveryExpectedRoute(t *testing.T) {
 		"/v1/orgs/{slug}/runs":                    {"get", "post"},
 		"/v1/orgs/{slug}/runs/{id}":               {"get"},
 		"/v1/orgs/{slug}/events":                  {"get"},
+		"/v1/orgs/{slug}/drift":                   {"get"},
 		"/v1/orgs/{slug}/overrides":               {"get"},
 		"/v1/orgs/{slug}/controls/{id}/overrides": {"get", "put", "delete"},
 		"/v1/orgs/{slug}/webhooks":                {"get", "post"},

@@ -1,14 +1,20 @@
 package org
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/report"
 	"github.com/concord-dev/concord/internal/server/authctx"
+	"github.com/concord-dev/concord/internal/server/bus"
+	"github.com/concord-dev/concord/internal/server/drift"
 	"github.com/concord-dev/concord/internal/server/httpx"
 	"github.com/concord-dev/concord/internal/store"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
@@ -91,7 +97,14 @@ func (h *Handlers) SubmitRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.broadcast(run, summaryJSON)
+	// Drift detection: compare the freshly-inserted run's findings to the
+	// prior run's. detectAndPersistDrift handles the "no prior" case (first
+	// run for the org) and any errors itself — its log calls are loud
+	// enough for an operator but never failed the user's submission.
+	transitions := h.detectAndPersistDrift(r.Context(), run, sub.Findings)
+
+	h.broadcast.RunCompleted(run, summaryJSON)
+	h.broadcast.DriftDetected(run, transitions)
 
 	slug := r.PathValue("slug")
 	httpx.JSON(w, http.StatusCreated, map[string]any{
@@ -99,4 +112,75 @@ func (h *Handlers) SubmitRun(w http.ResponseWriter, r *http.Request) {
 		"source": run.Source,
 		"url":    fmt.Sprintf("/v1/orgs/%s/runs/%s", slug, run.ID),
 	})
+}
+
+// detectAndPersistDrift loads the prior run's findings, runs the drift
+// detector against the new submission, persists every transition as a
+// drift_event row, and returns the transitions (re-cast to bus.Transition)
+// for publication. Returns nil on the first-ever run (no prior to
+// compare to) and logs but swallows every infrastructure error: a single
+// failure here must NEVER reject a legit submission.
+func (h *Handlers) detectAndPersistDrift(ctx context.Context, run store.Run, currentFindings []apiv1.Finding) []bus.Transition {
+	log := logx.FromContext(ctx)
+	priorFindingsRaw, priorRunID, err := h.store.GetPreviousRunFindings(ctx, run.OrgID, run.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil // first run for this org — no prior to compare to
+	}
+	if err != nil {
+		log.Error("drift: load prior run failed",
+			slog.String("org_id", run.OrgID.String()),
+			slog.String("err", err.Error()))
+		return nil
+	}
+	var prior []apiv1.Finding
+	if len(priorFindingsRaw) > 0 {
+		if err := json.Unmarshal(priorFindingsRaw, &prior); err != nil {
+			log.Error("drift: parse prior findings failed",
+				slog.String("prior_run_id", priorRunID.String()),
+				slog.String("err", err.Error()))
+			return nil
+		}
+	}
+
+	transitions := drift.Detect(prior, currentFindings)
+	if len(transitions) == 0 {
+		return nil
+	}
+
+	rows := make([]store.RecordDriftEventParams, 0, len(transitions))
+	out := make([]bus.Transition, 0, len(transitions))
+	priorRunRef := priorRunID
+	for _, t := range transitions {
+		rows = append(rows, store.RecordDriftEventParams{
+			OrgID:      run.OrgID,
+			RunID:      run.ID,
+			PriorRunID: &priorRunRef,
+			ControlID:  t.ControlID,
+			From:       string(t.From),
+			To:         string(t.To),
+			Rationale:  t.Rationale,
+		})
+		out = append(out, bus.Transition{
+			ControlID: t.ControlID,
+			From:      string(t.From),
+			To:        string(t.To),
+			Rationale: t.Rationale,
+		})
+	}
+	if err := h.store.RecordDriftEvents(ctx, rows); err != nil {
+		log.Error("drift: persist failed",
+			slog.String("run_id", run.ID.String()),
+			slog.Int("transitions", len(rows)),
+			slog.String("err", err.Error()))
+		// Still publish on the bus — losing the audit trail is bad, but
+		// losing the page-someone webhook would be worse. Trade-off
+		// chosen deliberately.
+	}
+	// Surface a friendly summary on the access log so operators reading
+	// logs see drift the way they see auth events.
+	log.Info("drift detected",
+		slog.String("run_id", run.ID.String()),
+		slog.String("prior_run_id", priorRunID.String()),
+		slog.Int("transitions", len(out)))
+	return out
 }

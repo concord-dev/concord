@@ -279,6 +279,37 @@ CREATE UNIQUE INDEX idx_mfa_challenge_token_live
     WHERE consumed_at IS NULL;
 CREATE INDEX idx_mfa_challenge_user ON mfa_challenge(user_id);
 
+-- ── 4a-ter. Control drift events ─────────────────────────────────────────
+
+-- Drift events: per-run record of every control whose pass/fail status
+-- changed relative to the previous run. Powers webhook delivery
+-- ("page on regression") and the GET /v1/orgs/{slug}/drift inbox.
+--
+-- One row per (control_id, transition); a single run that regresses 20
+-- controls writes 20 rows. The cardinality is bounded by the size of the
+-- control library, not the volume of runs — runs that don't drift write
+-- no rows. The (org_id, control_id) index supports the most common UI
+-- query: "show me the history of control X in this org."
+--
+-- prior_run_id can be NULL: when an org's very first run is submitted
+-- there's no prior to compare to, so no drift events are written; this
+-- column is only NULL when a prior run existed but was later DELETEd
+-- (the FK is ON DELETE SET NULL so history survives run pruning).
+CREATE TABLE drift_event (
+    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id       UUID        NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+    run_id       UUID        NOT NULL REFERENCES run(id)          ON DELETE CASCADE,
+    prior_run_id UUID                 REFERENCES run(id)          ON DELETE SET NULL,
+    control_id   TEXT        NOT NULL,
+    from_status  TEXT        NOT NULL,
+    to_status    TEXT        NOT NULL,
+    rationale    TEXT,
+    occurred_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_drift_event_org_occurred ON drift_event(org_id, occurred_at DESC);
+CREATE INDEX idx_drift_event_run          ON drift_event(run_id);
+CREATE INDEX idx_drift_event_control      ON drift_event(org_id, control_id, occurred_at DESC);
+
 -- ── 4b. Audit log ────────────────────────────────────────────────────────
 
 -- Security-sensitive actions land here so compliance teams can answer "who

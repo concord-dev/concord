@@ -446,6 +446,79 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /v1/orgs/{slug}/drift:
+    get:
+      summary: List per-control drift events (regressions + remediations)
+      description: |
+        Returns every pass/fail status change Concord has detected between
+        consecutive runs of this org, newest first. Each event names the
+        control, the from/to statuses, the rationale from the new
+        finding, and the run pair that produced the transition.
+
+        Filter by `?control_id=` for one control's history, by
+        `?from=pass&to=fail` for the page-someone subset, by `?run_id=`
+        for everything attributed to a specific run, and the usual
+        `since` / `until` / `limit` knobs.
+
+        Gated by the `runs:read` permission (drift is meta-on-runs; no
+        separate permission). Pair with a webhook subscribed to
+        `control.drifted` events to actually page someone on
+        regressions — this endpoint is the read-only inbox.
+      operationId: listDriftEvents
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+        - name: since
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: control_id
+          in: query
+          required: false
+          schema: { type: string }
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, enum: [pass, fail, error, skip] }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, enum: [pass, fail, error, skip] }
+        - name: run_id
+          in: query
+          required: false
+          description: When set, returns drift events for that one run and ignores other filters
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:           { type: string, format: uuid }
+                    org_id:       { type: string, format: uuid }
+                    run_id:       { type: string, format: uuid }
+                    prior_run_id: { type: string, format: uuid }
+                    control_id:   { type: string }
+                    from:         { type: string }
+                    to:           { type: string }
+                    rationale:    { type: string }
+                    occurred_at:  { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /v1/orgs/{slug}/audit:
     get:
       summary: List audit-log events for the org
