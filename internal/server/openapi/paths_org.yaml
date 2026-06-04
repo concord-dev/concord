@@ -575,5 +575,60 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /v1/orgs/{slug}/audit-package:
+    get:
+      summary: Download a self-contained ZIP of compliance evidence
+      description: |
+        Streams a single ZIP archive an external auditor can take home:
+        latest findings, recent run history, drift transitions, audit-
+        event trail, and current control overrides. Gated by the
+        `audit:read` permission (granted to owner + admin roles, AND
+        carried automatically by users with the cross-org `is_auditor`
+        flag).
+
+        Filter the audit + drift extracts with `since` / `until`; cap
+        rows with `max_runs` / `max_audit_events` / `max_drift_events`.
+        The bundle's `metadata.json` records the requesting principal,
+        time window, and per-section counts so downstream tooling can
+        decide whether to paginate via additional requests.
+
+        Each export emits an `audit_package.export` audit event for
+        SOC 2 traceability — bundles are themselves auditable.
+      operationId: exportAuditPackage
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/OrgSlug' }
+        - name: since
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: max_runs
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 100 }
+        - name: max_audit_events
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 5000 }
+        - name: max_drift_events
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 5000 }
+      responses:
+        '200':
+          description: ZIP archive
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   # ─── Operator (CONCORD_OPERATOR_TOKEN) ─────────────────────────────────
 

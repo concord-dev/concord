@@ -141,6 +141,32 @@ func (s *Store) ListRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]Run
 	return out, rows.Err()
 }
 
+// GetLatestSucceededRun returns the most recent run for orgID whose
+// status is RunSucceeded, including its findings + summary JSON. Used by
+// the audit-package export ("point-in-time evidence") and the trust
+// portal. Returns ErrNotFound when the org has no successful runs yet.
+func (s *Store) GetLatestSucceededRun(ctx context.Context, orgID uuid.UUID) (Run, error) {
+	var r Run
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, org_id, status, source, started_at, completed_at,
+		        COALESCE(error_message,''), summary, findings,
+		        triggered_by_token, triggered_by_user,
+		        COALESCE(agent_version,'')
+		 FROM run
+		 WHERE org_id = $1 AND status = 'succeeded'
+		 ORDER BY started_at DESC
+		 LIMIT 1`,
+		orgID,
+	).Scan(&r.ID, &r.OrgID, &r.Status, &r.Source, &r.StartedAt, &r.CompletedAt,
+		&r.ErrorMessage, &r.Summary, &r.Findings,
+		&r.TriggeredByToken, &r.TriggeredByUser,
+		&r.AgentVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Run{}, ErrNotFound
+	}
+	return r, err
+}
+
 // GetPreviousRunFindings returns the findings JSONB blob + run ID of the
 // most recent run for `orgID` that is NOT `excludeRunID`. Used by the
 // drift detector inside SubmitRun: pass the freshly-inserted run's ID as

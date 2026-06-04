@@ -173,6 +173,10 @@ func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware)
 
 	// Audit log read (owner + admin via the audit:read permission).
 	mux.Handle("GET /v1/orgs/{slug}/audit", auditRead(http.HandlerFunc(h.ListAuditEvents)))
+	// One-shot evidence bundle for compliance reviews. Same audit:read
+	// permission so auditors with the cross-org flag can pull bundles
+	// on every tenant in scope.
+	mux.Handle("GET /v1/orgs/{slug}/audit-package", auditRead(http.HandlerFunc(h.ExportAuditPackage)))
 
 	// Trust portal opt-in toggle. The public render lives in mountPublic.
 	mux.Handle("GET /v1/orgs/{slug}/trust-portal/settings", orgRead(http.HandlerFunc(h.GetTrustPortalSettings)))
