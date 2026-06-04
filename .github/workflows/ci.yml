@@ -5,25 +5,156 @@ on:
   push:
     branches: [main]
 
+# Cancel superseded runs on the same branch — a force-push during CI
+# shouldn't burn two parallel test runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Single source of truth for the toolchain. Bump here and in
+  # Dockerfile.server in lockstep.
+  GO_VERSION: '1.25.11'
+
 jobs:
-  test:
+  lint:
+    name: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Vet
+      - name: go vet
         run: go vet ./...
 
-      - name: Test
-        run: go test -buildvcs=false -race ./...
+      - name: install analyzers
+        run: make tools
 
-      - name: Build
+      - name: staticcheck
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          staticcheck ./...
+
+      - name: deadcode
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          deadcode -test ./...
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+  vuln:
+    name: vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+
+      - name: govulncheck
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          govulncheck ./...
+
+  test:
+    name: test (race)
+    runs-on: ubuntu-latest
+
+    # Real Postgres in CI — tests that need a DB don't get to skip silently.
+    # The harness already targets localhost:5432 with the concord-dev creds.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: concord
+          POSTGRES_PASSWORD: concord-dev
+          POSTGRES_DB: concord
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U concord -d concord"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: wait for postgres
+        run: |
+          for i in {1..30}; do
+            pg_isready -h 127.0.0.1 -U concord && exit 0
+            sleep 1
+          done
+          echo "postgres never came up"; exit 1
+        env:
+          PGPASSWORD: concord-dev
+
+      - name: test (race + count=1)
+        run: go test -buildvcs=false -race -count=1 ./...
+        env:
+          CONCORD_TEST_DATABASE_URL: postgres://concord:concord-dev@127.0.0.1:5432/concord?sslmode=disable
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: build cli
         run: go build -buildvcs=false -o /tmp/concord ./cmd/concord
 
-      - name: Self-check (smoke test)
+      - name: build server
+        run: go build -buildvcs=false -o /tmp/concord-server ./cmd/server
+
+      - name: smoke (controls library loads + check runs)
         run: /tmp/concord check --fixtures --quiet --controls ./controls
+
+  helm:
+    name: helm lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: helm lint (with realistic overrides)
+        run: |
+          helm lint deploy/helm/concord \
+            --set database.databaseUrlSecret.name=concord-db
+
+      - name: helm template (verify rendering)
+        run: |
+          helm template concord deploy/helm/concord \
+            --set image.tag=test \
+            --set database.databaseUrlSecret.name=concord-db \
+            > /tmp/rendered.yaml
+          test -s /tmp/rendered.yaml

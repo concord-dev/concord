@@ -6,7 +6,10 @@ DATABASE_URL ?= postgres://concord:concord-dev@localhost:5432/concord?sslmode=di
 CONCORD_OPERATOR_TOKEN ?= dev-admin-token
 LISTEN_ADDR ?= :8080
 
-.PHONY: tidy build server test lint check clean run dev pg pg-down pg-logs psql air-install help
+# Analyzer binaries — installed into $(go env GOPATH)/bin by `make tools`.
+GOPATH_BIN := $(shell go env GOPATH)/bin
+
+.PHONY: tidy build server test test-race lint vet staticcheck deadcode vuln tools check clean run dev pg pg-down pg-logs psql air-install help
 
 help:
 	@echo "Common targets:"
@@ -16,6 +19,10 @@ help:
 	@echo "  make build       — build the concord CLI"
 	@echo "  make server      — build cmd/server (concord-server)"
 	@echo "  make test        — full test sweep"
+	@echo "  make test-race   — full test sweep with the race detector"
+	@echo "  make lint        — vet + staticcheck + deadcode (all must pass)"
+	@echo "  make vuln        — govulncheck for stdlib + dependency CVEs"
+	@echo "  make tools       — install staticcheck/deadcode/govulncheck"
 	@echo "  make psql        — open psql against the dev DB"
 
 tidy:
@@ -32,8 +39,37 @@ server:
 test:
 	go test -buildvcs=false ./... -count=1
 
-lint:
+test-race:
+	go test -buildvcs=false -race ./... -count=1
+
+# ── Analyzers ───────────────────────────────────────────────────────
+#
+# `lint` is the umbrella every PR must pass. govulncheck is split into
+# its own `vuln` target because it depends on the online vuln database
+# and shouldn't block offline dev. Both run in CI.
+
+vet:
 	go vet ./...
+
+staticcheck:
+	$(GOPATH_BIN)/staticcheck ./...
+
+deadcode:
+	$(GOPATH_BIN)/deadcode -test ./...
+
+lint: vet staticcheck deadcode
+	@echo "✓ lint clean"
+
+vuln:
+	$(GOPATH_BIN)/govulncheck ./...
+
+# Install the analyzer binaries. Versioned so a fresh clone gets a
+# known-good set. Bumping these is a deliberate PR.
+tools:
+	go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+	go install golang.org/x/tools/cmd/deadcode@v0.45.0
+	go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+	@echo "✓ analyzers installed into $(GOPATH_BIN)"
 
 check: build
 	./$(BIN) check --controls ./controls

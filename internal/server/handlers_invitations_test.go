@@ -70,7 +70,8 @@ func TestInvitations_ReinviteSupersedesPriorPending(t *testing.T) {
 	assert.Equal(t, "viewer", listed[0]["role"], "the latest invite wins")
 
 	// The superseded token must no longer resolve.
-	respP, _ := http.Get(h.srv.URL + "/v1/invitations/accept?token=" + url.QueryEscape(c1.Token))
+	respP, err := http.Get(h.srv.URL + "/v1/invitations/accept?token=" + url.QueryEscape(c1.Token))
+	require.NoError(t, err)
 	defer respP.Body.Close()
 	assert.Equal(t, http.StatusNotFound, respP.StatusCode,
 		"first token must be invalid after the re-invite revoked it")
@@ -214,7 +215,8 @@ func TestInvitations_AcceptFlowExistingUserNoCredsNeeded(t *testing.T) {
 
 func TestInvitations_UnknownTokenIs404(t *testing.T) {
 	h := newHarness(t)
-	resp, _ := http.Get(h.srv.URL + "/v1/invitations/accept?token=concord_inv_definitely-not-real")
+	resp, err := http.Get(h.srv.URL + "/v1/invitations/accept?token=concord_inv_definitely-not-real")
+	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
