@@ -23,11 +23,11 @@ import (
 // Each may be nil — in which case that gate is disabled. The server wires
 // real buckets; tests can pass an empty struct to disable limiting.
 type Limits struct {
-	LoginIP     *limiter.Bucket // per source IP for POST /v1/auth/login
-	LoginEmail  *limiter.Bucket // per email for POST /v1/auth/login (anti-stuffing)
-	PWResetIP   *limiter.Bucket // per source IP for POST /v1/auth/password-reset
-	PWConfirmIP *limiter.Bucket // per source IP for POST /v1/auth/password-reset/confirm
-	MFASubmitIP *limiter.Bucket // per source IP for POST /v1/auth/login/mfa
+	LoginIP     limiter.Bucket // per source IP for POST /v1/auth/login
+	LoginEmail  limiter.Bucket // per email for POST /v1/auth/login (anti-stuffing)
+	PWResetIP   limiter.Bucket // per source IP for POST /v1/auth/password-reset
+	PWConfirmIP limiter.Bucket // per source IP for POST /v1/auth/password-reset/confirm
+	MFASubmitIP limiter.Bucket // per source IP for POST /v1/auth/login/mfa
 }
 
 // mfaChallengeTTL is the lifetime of a challenge token returned by Login.
@@ -213,7 +213,7 @@ func (h *Handlers) MyOrgs(w http.ResponseWriter, r *http.Request) {
 // with a Retry-After header and returns false; the caller should simply
 // return. Centralized so every rate-limited endpoint shares the same wire
 // shape and header conventions.
-func allow(w http.ResponseWriter, b *limiter.Bucket, key string) bool {
+func allow(w http.ResponseWriter, b limiter.Bucket, key string) bool {
 	if b == nil {
 		return true
 	}

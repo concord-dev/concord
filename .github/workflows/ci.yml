@@ -76,8 +76,10 @@ jobs:
     name: test (race)
     runs-on: ubuntu-latest
 
-    # Real Postgres in CI — tests that need a DB don't get to skip silently.
-    # The harness already targets localhost:5432 with the concord-dev creds.
+    # Real Postgres + Redis in CI — tests that need a DB or shared
+    # rate-limiter don't get to skip silently. The harness already
+    # targets localhost:5432 with the concord-dev creds; the limiter
+    # tests skip unless CONCORD_TEST_REDIS_ADDR is set.
     services:
       postgres:
         image: postgres:16-alpine
@@ -89,6 +91,15 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd="pg_isready -U concord -d concord"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
           --health-interval=5s
           --health-timeout=3s
           --health-retries=10
@@ -115,6 +126,7 @@ jobs:
         run: go test -buildvcs=false -race -count=1 ./...
         env:
           CONCORD_TEST_DATABASE_URL: postgres://concord:concord-dev@127.0.0.1:5432/concord?sslmode=disable
+          CONCORD_TEST_REDIS_ADDR: 127.0.0.1:6379
 
   build:
     name: build

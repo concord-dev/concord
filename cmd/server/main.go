@@ -24,9 +24,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/notify/mail"
 	"github.com/concord-dev/concord/internal/otelx"
+	"github.com/concord-dev/concord/internal/redisx"
 	"github.com/concord-dev/concord/internal/server"
 	"github.com/concord-dev/concord/internal/store"
 )
@@ -144,6 +147,58 @@ func runServe(args []string) error {
 		"From: address used on outbound mail (or CONCORD_SMTP_FROM). e.g. 'Concord <noreply@acme.test>'.")
 	fs.StringVar(&smtpTLS, "smtp-tls", envOr("CONCORD_SMTP_TLS", "auto"),
 		"SMTP transport encryption: auto|none|starttls|implicit (or CONCORD_SMTP_TLS).")
+	// Rate limiter — leave --rate-limiter empty (or "memory") for the
+	// in-memory per-pod buckets; set "redis" with --redis-addr (or
+	// --redis-sentinel-addrs + --redis-sentinel-master) to share buckets
+	// across the fleet. The Lua-scripted Redis impl atomically refills +
+	// spends a token per call; on Redis error the FailoverBucket drops to
+	// a tightened in-memory bucket so auth keeps responding.
+	var (
+		rateLimiter           string
+		redisMode             string
+		redisAddr             string
+		redisSentinelMaster   string
+		redisSentinelAddrsCSV string
+		redisUsername         string
+		redisPassword         string
+		redisDB               int
+		redisTLS              bool
+		redisInsecureSkip     bool
+		redisServerName       string
+		redisDialTimeoutStr   string
+		redisReadTimeoutStr   string
+		redisWriteTimeoutStr  string
+		limiterFallbackRatio  float64
+	)
+	fs.StringVar(&rateLimiter, "rate-limiter", envOr("CONCORD_RATE_LIMITER", "memory"),
+		"Rate limiter backend: memory|redis. Memory is per-pod; redis shares budgets across replicas.")
+	fs.StringVar(&redisMode, "redis-mode", envOr("CONCORD_REDIS_MODE", ""),
+		"Redis topology: single|sentinel. Inferred from --redis-sentinel-addrs / --redis-addr when empty.")
+	fs.StringVar(&redisAddr, "redis-addr", os.Getenv("CONCORD_REDIS_ADDR"),
+		"Redis host:port (single mode).")
+	fs.StringVar(&redisSentinelMaster, "redis-sentinel-master", os.Getenv("CONCORD_REDIS_SENTINEL_MASTER"),
+		"Sentinel master name (sentinel mode).")
+	fs.StringVar(&redisSentinelAddrsCSV, "redis-sentinel-addrs", os.Getenv("CONCORD_REDIS_SENTINEL_ADDRS"),
+		"Comma-separated Sentinel host:port list (sentinel mode).")
+	fs.StringVar(&redisUsername, "redis-username", os.Getenv("CONCORD_REDIS_USERNAME"),
+		"Redis AUTH username (Redis 6+ ACL).")
+	fs.StringVar(&redisPassword, "redis-password", os.Getenv("CONCORD_REDIS_PASSWORD"),
+		"Redis AUTH password.")
+	fs.IntVar(&redisDB, "redis-db", 0, "Redis logical DB index (single mode only).")
+	fs.BoolVar(&redisTLS, "redis-tls", envOr("CONCORD_REDIS_TLS", "false") == "true",
+		"Connect to Redis over TLS.")
+	fs.BoolVar(&redisInsecureSkip, "redis-tls-insecure", envOr("CONCORD_REDIS_TLS_INSECURE", "false") == "true",
+		"Skip TLS verification (dev only; never enable in production).")
+	fs.StringVar(&redisServerName, "redis-tls-servername", os.Getenv("CONCORD_REDIS_TLS_SERVERNAME"),
+		"SNI server name for the Redis TLS handshake.")
+	fs.StringVar(&redisDialTimeoutStr, "redis-dial-timeout", envOr("CONCORD_REDIS_DIAL_TIMEOUT", "2s"),
+		"Redis dial timeout (Go duration).")
+	fs.StringVar(&redisReadTimeoutStr, "redis-read-timeout", envOr("CONCORD_REDIS_READ_TIMEOUT", "200ms"),
+		"Redis read timeout per command.")
+	fs.StringVar(&redisWriteTimeoutStr, "redis-write-timeout", envOr("CONCORD_REDIS_WRITE_TIMEOUT", "200ms"),
+		"Redis write timeout per command.")
+	fs.Float64Var(&limiterFallbackRatio, "limiter-fallback-ratio", parseFloatEnvOr("CONCORD_LIMITER_FALLBACK_RATIO", 0.33),
+		"Per-pod fallback budget as a fraction of the shared Redis budget. 0.33 keeps the fleet-wide ceiling near the configured rate for the canonical 3-replica deploy.")
 	fs.BoolVar(&skipMigrate, "skip-migrate", false, "Don't run schema migrations on startup")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -200,6 +255,32 @@ func runServe(args []string) error {
 		tracing, _ = otelx.Init(ctx, otelx.Config{}) // safe no-op fallback
 	}
 
+	// Redis rate limiter — only built when --rate-limiter=redis. We
+	// intentionally fail fast on misconfiguration (unparseable timeouts,
+	// missing Sentinel master) so the operator sees the error at startup
+	// instead of as a runtime 500 the first time a login arrives.
+	rdb, err := openLimiterRedis(ctx, rateLimiter, redisx.Config{
+		Mode:               redisx.Mode(redisMode),
+		Addr:               redisAddr,
+		SentinelMaster:     redisSentinelMaster,
+		SentinelAddrs:      redisx.ParseSentinelAddrs(redisSentinelAddrsCSV),
+		Username:           redisUsername,
+		Password:           redisPassword,
+		DB:                 redisDB,
+		TLS:                redisTLS,
+		ServerName:         redisServerName,
+		InsecureSkipVerify: redisInsecureSkip,
+		DialTimeout:        mustDuration(redisDialTimeoutStr, "redis-dial-timeout"),
+		ReadTimeout:        mustDuration(redisReadTimeoutStr, "redis-read-timeout"),
+		WriteTimeout:       mustDuration(redisWriteTimeoutStr, "redis-write-timeout"),
+	})
+	if err != nil {
+		return err
+	}
+	if rdb != nil {
+		defer rdb.Close()
+	}
+
 	c, err := server.NewConcord(server.Options{
 		ControlsDir:        controlsDir,
 		ConfigPath:         configPath,
@@ -215,7 +296,9 @@ func runServe(args []string) error {
 			From:     smtpFrom,
 			TLS:      mail.TLSMode(smtpTLS),
 		},
-		Tracing: tracing,
+		Tracing:                tracing,
+		RedisLimiter:           rdb,
+		LimiterFallbackTighten: limiterFallbackRatio,
 	})
 	if err != nil {
 		return err
@@ -320,6 +403,47 @@ func parseFloatEnvOr(key string, fallback float64) float64 {
 		return fallback
 	}
 	return parsed
+}
+
+// openLimiterRedis builds the rate-limiter Redis client when --rate-limiter
+// is "redis", or returns (nil, nil) when it's anything else. A non-nil
+// client is verified with a short Ping before NewConcord wires it; an
+// unreachable Redis at startup is treated as a configuration error so the
+// pod restarts via k8s instead of silently running on per-pod limits.
+func openLimiterRedis(ctx context.Context, mode string, cfg redisx.Config) (*redis.Client, error) {
+	switch mode {
+	case "", "memory":
+		return nil, nil
+	case "redis":
+		rdb, err := redisx.Open(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("redis limiter: %w", err)
+		}
+		pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		if err := redisx.Ping(pingCtx, rdb); err != nil {
+			_ = rdb.Close()
+			return nil, fmt.Errorf("redis limiter: unable to reach redis at startup: %w", err)
+		}
+		slog.Info("rate limiter: redis backend enabled",
+			slog.String("mode", string(cfg.Mode)),
+			slog.String("addr", cfg.Addr))
+		return rdb, nil
+	default:
+		return nil, fmt.Errorf("unknown --rate-limiter %q (want memory|redis)", mode)
+	}
+}
+
+// mustDuration parses a Go duration string, panicking with a flag-named
+// message on failure. Used for the Redis timeout flags where a bad value
+// is a deploy-time configuration mistake — better to crash loudly at
+// startup than ship a server that silently uses the zero default.
+func mustDuration(s, flag string) time.Duration {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		panic(fmt.Sprintf("--%s must be a Go duration (got %q): %v", flag, s, err))
+	}
+	return d
 }
 
 // splitCSV trims and de-empties a comma-separated origin list. We don't use

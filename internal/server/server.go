@@ -34,8 +34,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"golang.org/x/time/rate"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
@@ -88,6 +87,23 @@ type Options struct {
 	// Leave nil to disable tracing entirely (handlers still compile —
 	// the global otel.Tracer fallback is a no-op).
 	Tracing *otelx.Provider
+
+	// RedisLimiter, when non-nil, switches the rate-limiter from per-pod
+	// in-memory buckets to fleet-wide Redis-backed buckets wrapped in a
+	// FailoverBucket. The fallback is a tightened in-memory bucket so a
+	// Redis outage degrades gracefully rather than 503'ing auth, but
+	// without amplifying an attack to N× the configured budget. Nil
+	// keeps the historical per-pod behaviour (fine for single-replica
+	// deploys and tests).
+	RedisLimiter *redis.Client
+
+	// LimiterFallbackTighten is the multiplier applied to Rate and Burst
+	// when constructing the in-memory fallback inside a FailoverBucket.
+	// 0.33 (the default) means each pod's fallback budget is ~1/3 the
+	// shared budget — for the canonical 3-replica deploy that keeps the
+	// fleet-wide ceiling at the configured rate during a Redis outage.
+	// Operators with more replicas should pass a smaller value.
+	LimiterFallbackTighten float64
 }
 
 // NewConcord loads controls + config and wires the Store and event bus.
@@ -128,40 +144,107 @@ func NewConcord(opts Options) (*Concord, error) {
 		mailer:             mail.New(opts.SMTP),
 		bg:                 bg.New(),
 		tracing:            opts.Tracing,
-		authLimits:         defaultAuthLimits(),
-		pubLimits:          defaultPublicLimits(),
+		authLimits:         buildAuthLimits(opts.RedisLimiter, opts.LimiterFallbackTighten, m),
+		pubLimits:          buildPublicLimits(opts.RedisLimiter, opts.LimiterFallbackTighten, m),
 	}, nil
 }
 
-// defaultAuthLimits is the production rate-limit policy for /v1/auth/*. The
-// burst sizes are chosen to be lenient enough for a legit user fumbling a
-// password a few times, but tight enough to stop credential-stuffing and
-// password-spray tools that hit the endpoint thousands of times per minute.
+// gateConfig pairs a gate name (used in metric labels + Redis key prefix)
+// with the desired token-bucket policy. cmd/server uses the same shape
+// for every gate so a future per-gate flag override has a place to land.
+type gateConfig struct {
+	name string
+	cfg  limiter.Config
+}
+
+// authGates is the production rate-limit policy for /v1/auth/*. The
+// burst sizes are chosen to be lenient enough for a legit user fumbling
+// a password a few times, but tight enough to stop credential-stuffing
+// and password-spray tools that hit the endpoint thousands of times
+// per minute.
 //
-//	LoginIP       30 req/min, burst 10  — per source IP
-//	LoginEmail    10 req/min, burst 20  — per (lowercased) email
-//	PWResetIP     10 req/min, burst 5   — request endpoint
-//	PWConfirmIP   30 req/min, burst 10  — confirm endpoint (token guess attempts)
-//	MFASubmitIP   30 req/min, burst 10  — second-leg login (TOTP / recovery code)
-func defaultAuthLimits() auth.Limits {
+//	login_ip        30 req/min, burst 10  — per source IP
+//	login_email     10 req/min, burst 20  — per (lowercased) email
+//	pw_reset_ip     10 req/min, burst 5   — request endpoint
+//	pw_confirm_ip   30 req/min, burst 10  — confirm endpoint (token guess attempts)
+//	mfa_submit_ip   30 req/min, burst 10  — second-leg login (TOTP / recovery code)
+var authGates = struct {
+	loginIP, loginEmail, pwResetIP, pwConfirmIP, mfaSubmitIP gateConfig
+}{
+	loginIP:     gateConfig{"login_ip", limiter.Config{Rate: limiter.Every(2 * time.Second), Burst: 10}},
+	loginEmail:  gateConfig{"login_email", limiter.Config{Rate: limiter.Every(6 * time.Second), Burst: 20}},
+	pwResetIP:   gateConfig{"pw_reset_ip", limiter.Config{Rate: limiter.Every(6 * time.Second), Burst: 5}},
+	pwConfirmIP: gateConfig{"pw_confirm_ip", limiter.Config{Rate: limiter.Every(2 * time.Second), Burst: 10}},
+	mfaSubmitIP: gateConfig{"mfa_submit_ip", limiter.Config{Rate: limiter.Every(2 * time.Second), Burst: 10}},
+}
+
+// publicGates is the production rate-limit policy for the unauthenticated
+// public endpoints. AcceptInvitation accepts a token in the body;
+// without a limit, an attacker can grind through tokens.
+//
+//	invite_accept_ip 30 req/min, burst 10  — per source IP
+var publicGates = struct {
+	inviteAcceptIP gateConfig
+}{
+	inviteAcceptIP: gateConfig{"invite_accept_ip", limiter.Config{Rate: limiter.Every(2 * time.Second), Burst: 10}},
+}
+
+func buildAuthLimits(rdb *redis.Client, tighten float64, m *metrics.Metrics) auth.Limits {
 	return auth.Limits{
-		LoginIP:     limiter.NewBucket(limiter.Config{Rate: rate.Every(2 * time.Second), Burst: 10}),
-		LoginEmail:  limiter.NewBucket(limiter.Config{Rate: rate.Every(6 * time.Second), Burst: 20}),
-		PWResetIP:   limiter.NewBucket(limiter.Config{Rate: rate.Every(6 * time.Second), Burst: 5}),
-		PWConfirmIP: limiter.NewBucket(limiter.Config{Rate: rate.Every(2 * time.Second), Burst: 10}),
-		MFASubmitIP: limiter.NewBucket(limiter.Config{Rate: rate.Every(2 * time.Second), Burst: 10}),
+		LoginIP:     buildBucket(authGates.loginIP, rdb, tighten, m),
+		LoginEmail:  buildBucket(authGates.loginEmail, rdb, tighten, m),
+		PWResetIP:   buildBucket(authGates.pwResetIP, rdb, tighten, m),
+		PWConfirmIP: buildBucket(authGates.pwConfirmIP, rdb, tighten, m),
+		MFASubmitIP: buildBucket(authGates.mfaSubmitIP, rdb, tighten, m),
 	}
 }
 
-// defaultPublicLimits is the production rate-limit policy for the
-// unauthenticated public endpoints. AcceptInvitation accepts a token in
-// the body; without a limit, an attacker can grind through tokens.
-//
-//	InviteAcceptIP 30 req/min, burst 10  — per source IP
-func defaultPublicLimits() public.Limits {
+func buildPublicLimits(rdb *redis.Client, tighten float64, m *metrics.Metrics) public.Limits {
 	return public.Limits{
-		InviteAcceptIP: limiter.NewBucket(limiter.Config{Rate: rate.Every(2 * time.Second), Burst: 10}),
+		InviteAcceptIP: buildBucket(publicGates.inviteAcceptIP, rdb, tighten, m),
 	}
+}
+
+// buildBucket returns a MemoryBucket when no Redis client is wired, or a
+// FailoverBucket(RedisBucket, tightenedMemoryBucket) when one is. The
+// tightenedMemoryBucket clamps Rate and Burst by `tighten` (default 0.33)
+// so a sustained Redis outage can't be used to amplify an attack across
+// pods — each pod's fallback budget is a fraction of the shared budget.
+func buildBucket(g gateConfig, rdb *redis.Client, tighten float64, m *metrics.Metrics) limiter.Bucket {
+	if rdb == nil {
+		return limiter.NewMemoryBucket(g.cfg)
+	}
+	if tighten <= 0 || tighten > 1 {
+		tighten = 0.33
+	}
+
+	primary, err := limiter.NewRedisBucket(rdb, limiter.RedisBucketOptions{
+		Config: g.cfg,
+		Prefix: "concord:rl:" + g.name + ":",
+	})
+	if err != nil {
+		// Misconfiguration — fall back to memory rather than panicking
+		// at startup. metrics is best-effort here.
+		return limiter.NewMemoryBucket(g.cfg)
+	}
+
+	fallbackCfg := limiter.Config{
+		Rate:  limiter.PerSecond(float64(g.cfg.Rate) * tighten),
+		Burst: int(float64(g.cfg.Burst) * tighten),
+		TTL:   g.cfg.TTL,
+	}
+	if fallbackCfg.Burst < 1 {
+		fallbackCfg.Burst = 1
+	}
+	fallback := limiter.NewMemoryBucket(fallbackCfg)
+
+	fb, err := limiter.NewFailoverBucket(primary, fallback)
+	if err != nil {
+		return limiter.NewMemoryBucket(g.cfg)
+	}
+	gateName := g.name
+	fb.OnPrimaryError = func(error) { m.RecordLimiterPrimaryError(gateName) }
+	return fb
 }
 
 // applyDefaults fills in sensible Options defaults so callers can pass a

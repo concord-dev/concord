@@ -10,7 +10,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/time/rate"
 
 	"github.com/concord-dev/concord/internal/server/handlers/auth"
 	"github.com/concord-dev/concord/internal/server/handlers/public"
@@ -20,18 +19,18 @@ import (
 // tightLimitsForTest builds a Limits bundle with very small buckets so a
 // handful of requests is enough to trip the 429 path.
 func tightAuthLimits(burst int) auth.Limits {
-	cfg := limiter.Config{Rate: rate.Every(time.Minute), Burst: burst}
+	cfg := limiter.Config{Rate: limiter.Every(time.Minute), Burst: burst}
 	return auth.Limits{
-		LoginIP:     limiter.NewBucket(cfg),
-		LoginEmail:  limiter.NewBucket(cfg),
-		PWResetIP:   limiter.NewBucket(cfg),
-		PWConfirmIP: limiter.NewBucket(cfg),
+		LoginIP:     limiter.NewMemoryBucket(cfg),
+		LoginEmail:  limiter.NewMemoryBucket(cfg),
+		PWResetIP:   limiter.NewMemoryBucket(cfg),
+		PWConfirmIP: limiter.NewMemoryBucket(cfg),
 	}
 }
 
 func tightPublicLimits(burst int) public.Limits {
-	cfg := limiter.Config{Rate: rate.Every(time.Minute), Burst: burst}
-	return public.Limits{InviteAcceptIP: limiter.NewBucket(cfg)}
+	cfg := limiter.Config{Rate: limiter.Every(time.Minute), Burst: burst}
+	return public.Limits{InviteAcceptIP: limiter.NewMemoryBucket(cfg)}
 }
 
 func TestLogin_ReturnsTooManyRequestsAfterBurstExceeded(t *testing.T) {

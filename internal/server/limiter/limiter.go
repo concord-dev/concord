@@ -1,110 +1,81 @@
-// Package limiter is the server's in-memory token-bucket rate limiter. It
-// guards the handful of endpoints where an unauthenticated caller can burn
-// compute (login, password-reset request) or guess a secret (invitation
-// accept, password-reset confirm).
+// Package limiter is the server's token-bucket rate limiter. It guards the
+// handful of endpoints where an unauthenticated caller can burn compute
+// (login, password-reset request) or guess a secret (invitation accept,
+// password-reset confirm).
 //
-// Each Bucket holds a map of `key → *rate.Limiter` and a coarse TTL eviction
-// policy so the map can't grow without bound when callers rotate IPs or
-// emails. Single-process by design — moving to a distributed limiter
-// (Redis/Memcached) is a separate piece of work and is not needed until the
-// server is horizontally scaled.
+// Bucket is the abstraction every handler depends on. Three implementations
+// ship with this package:
+//
+//   - MemoryBucket — per-pod token bucket via golang.org/x/time/rate. Cheap
+//     and zero-dependency; correct enough on a single replica. With N
+//     replicas the effective limit is N× the configured rate (each pod
+//     sees a disjoint slice of traffic).
+//
+//   - RedisBucket — shared token bucket implemented atomically via a Lua
+//     script on Redis. The whole fleet shares one budget per key, so the
+//     configured rate is the real rate regardless of replica count. This
+//     is what production runs in front of /v1/auth/login.
+//
+//   - FailoverBucket — wraps a primary (typically RedisBucket) and a
+//     fallback (typically a tightened MemoryBucket). When the primary
+//     errors or times out, requests fall through to the fallback so a
+//     single Redis blip can't 503 the auth surface. The fallback is
+//     deliberately tighter than the primary so a long Redis outage can't
+//     be used to amplify an attack across pods.
+//
+// All three return (true, 0) on allow and (false, retryAfter) on deny, with
+// retryAfter rounded up to whole seconds for the Retry-After HTTP header.
+//
+// Empty keys always pass — callers pass "" when they can't determine an
+// identity to bill, and collapsing every anonymous caller into one bucket
+// would be a self-inflicted DoS during traffic spikes.
 package limiter
 
-import (
-	"sync"
-	"time"
+import "time"
 
-	"golang.org/x/time/rate"
-)
+// Bucket is the interface every rate-limited handler depends on. Allow
+// returns (true, 0) when the call may proceed, or (false, retryAfter)
+// when the call should be denied with a Retry-After header.
+//
+// Allow must be safe for concurrent use.
+type Bucket interface {
+	Allow(key string) (bool, time.Duration)
+}
 
 // Config configures a Bucket. Rate is the steady-state token replenishment
 // rate; Burst is the max instant burst above the rate (and the bucket's
 // initial fill). TTL is how long an unseen key is kept around before the
-// next-touch GC sweeps it — sized so a legitimate user idling a few minutes
-// doesn't lose their bucket state, but a one-off scanner's IP doesn't pin
-// memory forever.
+// next-touch GC sweeps it (MemoryBucket only) — sized so a legitimate user
+// idling a few minutes doesn't lose their bucket state, but a one-off
+// scanner's IP doesn't pin memory forever. For RedisBucket the TTL also
+// drives the EXPIRE on the per-key HASH.
 type Config struct {
-	Rate  rate.Limit
+	Rate  Rate
 	Burst int
 	TTL   time.Duration
 }
 
-// Bucket is a keyed token-bucket limiter. Use NewBucket to construct;
-// the zero value is not useful. Allow is safe for concurrent use.
-type Bucket struct {
-	cfg     Config
-	mu      sync.Mutex
-	entries map[string]*entry
-	lastGC  time.Time
-	now     func() time.Time // injectable for tests
+// Rate is the token replenishment rate, expressed as tokens per second. We
+// avoid taking golang.org/x/time/rate.Limit into the public surface so the
+// Redis impl (which does its own math in Lua) doesn't import x/time/rate.
+// Use Every / PerSecond to construct without an import dance.
+type Rate float64
+
+// Every returns the Rate that produces one token every interval.
+func Every(interval time.Duration) Rate {
+	if interval <= 0 {
+		return 0
+	}
+	return Rate(float64(time.Second) / float64(interval))
 }
 
-type entry struct {
-	lim      *rate.Limiter
-	lastUsed time.Time
-}
-
-// NewBucket constructs a Bucket. A zero or negative TTL is replaced with a
-// sensible default so callers can omit it.
-func NewBucket(cfg Config) *Bucket {
-	if cfg.TTL <= 0 {
-		cfg.TTL = 10 * time.Minute
-	}
-	return &Bucket{
-		cfg:     cfg,
-		entries: make(map[string]*entry),
-		now:     time.Now,
-	}
-}
-
-// Allow returns (true, 0) when the caller for `key` has a token to spend.
-// On deny it returns (false, retryAfter) — retryAfter is the duration until
-// the next token would be available, rounded up to whole seconds for use
-// in the HTTP Retry-After header. Empty keys are always allowed (callers
-// pass an empty string when they can't determine an identity to bill —
-// the alternative is collapsing every anonymous caller into one bucket,
-// which is a self-inflicted DoS).
-func (b *Bucket) Allow(key string) (bool, time.Duration) {
-	if key == "" {
-		return true, 0
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	now := b.now()
-	if now.Sub(b.lastGC) > b.cfg.TTL {
-		for k, e := range b.entries {
-			if now.Sub(e.lastUsed) > b.cfg.TTL {
-				delete(b.entries, k)
-			}
-		}
-		b.lastGC = now
-	}
-
-	e, ok := b.entries[key]
-	if !ok {
-		e = &entry{lim: rate.NewLimiter(b.cfg.Rate, b.cfg.Burst)}
-		b.entries[key] = e
-	}
-	e.lastUsed = now
-
-	if e.lim.AllowN(now, 1) {
-		return true, 0
-	}
-	return false, retryAfter(b.cfg.Rate, e.lim.TokensAt(now))
-}
-
-// Size returns the number of tracked keys. Test-only.
-func (b *Bucket) Size() int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return len(b.entries)
-}
+// PerSecond returns the Rate that produces tokens at n per second.
+func PerSecond(n float64) Rate { return Rate(n) }
 
 // retryAfter is a coarse estimate: time until the bucket has at least one
 // full token. Rounded up to whole seconds because that's the Retry-After
 // header's resolution.
-func retryAfter(r rate.Limit, tokens float64) time.Duration {
+func retryAfter(r Rate, tokens float64) time.Duration {
 	need := 1.0 - tokens
 	if need <= 0 || r <= 0 {
 		return time.Second

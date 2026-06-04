@@ -16,6 +16,36 @@ data:
   {{- with .Values.config.corsAllowedOrigins }}
   CONCORD_CORS_ALLOWED_ORIGINS: {{ join "," . | quote }}
   {{- end }}
+  {{- if eq .Values.redis.rateLimiter "redis" }}
+  # Shared Redis-backed rate limiter. The server fails fast at startup
+  # if Redis is unreachable, so make sure the Pod can reach it before
+  # rollout (NetworkPolicy + DNS + auth).
+  CONCORD_RATE_LIMITER: "redis"
+  {{- if .Values.redis.mode }}
+  CONCORD_REDIS_MODE: {{ .Values.redis.mode | quote }}
+  {{- end }}
+  {{- if .Values.redis.addr }}
+  CONCORD_REDIS_ADDR: {{ .Values.redis.addr | quote }}
+  {{- end }}
+  {{- if .Values.redis.sentinelMaster }}
+  CONCORD_REDIS_SENTINEL_MASTER: {{ .Values.redis.sentinelMaster | quote }}
+  {{- end }}
+  {{- with .Values.redis.sentinelAddrs }}
+  CONCORD_REDIS_SENTINEL_ADDRS: {{ join "," . | quote }}
+  {{- end }}
+  CONCORD_REDIS_DB: {{ .Values.redis.db | quote }}
+  CONCORD_REDIS_TLS: {{ .Values.redis.tls.enabled | quote }}
+  {{- if .Values.redis.tls.insecureSkipVerify }}
+  CONCORD_REDIS_TLS_INSECURE: "true"
+  {{- end }}
+  {{- if .Values.redis.tls.serverName }}
+  CONCORD_REDIS_TLS_SERVERNAME: {{ .Values.redis.tls.serverName | quote }}
+  {{- end }}
+  CONCORD_REDIS_DIAL_TIMEOUT: {{ .Values.redis.timeouts.dial | quote }}
+  CONCORD_REDIS_READ_TIMEOUT: {{ .Values.redis.timeouts.read | quote }}
+  CONCORD_REDIS_WRITE_TIMEOUT: {{ .Values.redis.timeouts.write | quote }}
+  CONCORD_LIMITER_FALLBACK_RATIO: {{ .Values.redis.fallbackRatio | quote }}
+  {{- end }}
   {{- if .Values.smtp.host }}
   CONCORD_SMTP_HOST: {{ .Values.smtp.host | quote }}
   CONCORD_SMTP_PORT: {{ .Values.smtp.port | quote }}

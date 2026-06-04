@@ -69,6 +69,41 @@ otel:
   sampleRatio: 1.0     # 0.0..1.0 head sampler ratio
   serviceName: ""      # defaults to "concord-server" when empty
 
+# Shared rate limiter backed by Redis. When enabled, login / password-reset /
+# invitation-accept rate limits are enforced across the whole fleet instead
+# of per-pod; a Redis outage falls back to per-pod buckets tightened by
+# `fallbackRatio` so an outage can't be used to amplify an attack.
+#
+# Set rateLimiter: redis and EITHER addr (single mode) OR sentinelMaster +
+# sentinelAddrs (Sentinel failover mode). The chart does NOT provision
+# Redis — point at a managed instance (ElastiCache, Memorystore,
+# Cloud Memorystore, Bitnami Sentinel chart, ...).
+redis:
+  rateLimiter: "memory"          # memory | redis
+  mode: ""                        # single | sentinel (inferred when empty)
+  addr: ""                        # host:port (single mode)
+  sentinelMaster: ""              # required in sentinel mode
+  sentinelAddrs: []               # list of host:port (sentinel mode)
+  db: 0
+  tls:
+    enabled: false
+    insecureSkipVerify: false
+    serverName: ""
+  timeouts:
+    dial: "2s"
+    read: "200ms"
+    write: "200ms"
+  # Per-pod fallback budget as a fraction of the shared Redis budget. The
+  # default 0.33 keeps the fleet-wide ceiling near the configured rate
+  # for a 3-replica deploy during a Redis outage. Tune down when running
+  # more replicas (e.g. 0.1 for ~10 replicas).
+  fallbackRatio: 0.33
+  # Optional Redis AUTH credentials. Both keys are optional; leave the
+  # Secret unset to disable AUTH (Redis 6 ACL: empty user uses 'default').
+  credentialsSecretName: ""
+  credentialsSecretUsernameKey: "username"
+  credentialsSecretPasswordKey: "password"
+
 # Transactional email via SMTP. Empty `host` disables real delivery
 # (the LogMailer prints message bodies to slog — fine for non-prod).
 smtp:

@@ -30,7 +30,7 @@ const readyDepTimeout = 2 * time.Second
 // Limits is the bundle of rate-limit buckets the public handlers consult.
 // Each may be nil — disabling that gate.
 type Limits struct {
-	InviteAcceptIP *limiter.Bucket // per source IP for POST /v1/invitations/accept
+	InviteAcceptIP limiter.Bucket // per source IP for POST /v1/invitations/accept
 }
 
 // Handlers bundles dependencies for the public route group.
@@ -67,7 +67,7 @@ func (h *Handlers) audit(r *http.Request, p store.RecordAuditParams) {
 }
 
 // allow is the per-handler 429 gate. Nil bucket = disabled.
-func allow(w http.ResponseWriter, b *limiter.Bucket, key string) bool {
+func allow(w http.ResponseWriter, b limiter.Bucket, key string) bool {
 	if b == nil {
 		return true
 	}

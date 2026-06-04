@@ -101,6 +101,20 @@ spec:
                   name: {{ .Values.smtp.credentialsSecretName }}
                   key: {{ .Values.smtp.credentialsSecretPasswordKey }}
             {{- end }}
+            {{- if and (eq .Values.redis.rateLimiter "redis") .Values.redis.credentialsSecretName .Values.redis.credentialsSecretUsernameKey }}
+            - name: CONCORD_REDIS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.redis.credentialsSecretName }}
+                  key: {{ .Values.redis.credentialsSecretUsernameKey }}
+            {{- end }}
+            {{- if and (eq .Values.redis.rateLimiter "redis") .Values.redis.credentialsSecretName .Values.redis.credentialsSecretPasswordKey }}
+            - name: CONCORD_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.redis.credentialsSecretName }}
+                  key: {{ .Values.redis.credentialsSecretPasswordKey }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

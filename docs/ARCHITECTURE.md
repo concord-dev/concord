@@ -40,6 +40,7 @@ internal/
   logx/            slog wrapper + request-id context plumbing
   notify/          watcher-side notify Sinks + server-side mail/
   otelx/           OpenTelemetry SDK wiring (no-op default)
+  redisx/          go-redis client factory (single + Sentinel modes)
   policy/          OPA/Rego evaluator
   report/          renderers (text, json, oscal, markdown, trust-portal)
   runner/          orchestrates evidence × policy per control
@@ -56,7 +57,7 @@ internal/
       org/             /v1/orgs/{slug}/*
       public/          unauthenticated routes (/healthz, /readyz, /metrics, ...)
     httpx/           JSON/Error helpers + access-log middleware + ClientIP
-    limiter/         keyed token-bucket rate limiter (in-memory)
+    limiter/         keyed token-bucket rate limiter (memory + redis + failover)
     metrics/         Prometheus collectors
     middleware/      auth + security-headers + request-id middleware
     openapi/         embedded OpenAPI 3.0.3 spec
@@ -169,8 +170,33 @@ a single `CONCORD_SHUTDOWN_TIMEOUT` budget.
 - Process kill / panic / OOM = lost notifications.
 - No retries, no backoff, no DLQ.
 - Each replica processes its own dispatch — N replicas don't share work.
-- Rate limiter (`limiter.Bucket`) is in-memory per-pod; budgets multiply
-  by replica count.
+
+## Rate limiting
+
+`internal/server/limiter` is the gate in front of every unauthenticated
+endpoint where a caller can burn compute (login, password-reset request)
+or guess a secret (invitation accept, password-reset confirm). `Bucket`
+is the interface every handler depends on; three impls ship:
+
+- **MemoryBucket** — per-pod token bucket via `golang.org/x/time/rate`.
+  Zero dependency, correct on a single replica; with N replicas the
+  effective limit is N× the configured rate.
+- **RedisBucket** — fleet-wide token bucket implemented atomically via
+  a Lua script. Stores `{tokens, last_refill_ns}` as a HASH per key
+  with an EXPIRE so eviction is automatic. Every call runs against a
+  ~50ms per-call timeout — a sick or failing-over Redis returns
+  context.DeadlineExceeded promptly.
+- **FailoverBucket** — wraps a primary (RedisBucket) and a fallback
+  (tightened MemoryBucket). Primary errors route to the fallback, which
+  enforces a fraction (default 0.33) of the original rate so a Redis
+  outage can't be used to amplify an attack to N× across pods.
+  `concord_limiter_primary_errors_total{gate}` records each route.
+
+`cmd/server` picks the wiring via `--rate-limiter=memory|redis`. The
+Helm chart exposes `redis.rateLimiter`, `redis.mode`, `redis.addr`,
+`redis.sentinelMaster`, `redis.sentinelAddrs`, TLS knobs, timeouts, and
+`redis.fallbackRatio`. AUTH credentials live in a Secret referenced via
+`redis.credentialsSecretName`.
 
 ## Observability
 
@@ -229,7 +255,7 @@ Run locally with `make lint && make test-race && make vuln`.
 
 | Phase | Scope |
 |---|---|
-| 1     | Redis-backed rate limiter (interface + impl + fallback) |
+| 1     | Redis-backed rate limiter (interface + impl + fallback) — DONE |
 | 2     | Kafka producer for `concord.events` (idempotency via event_id) |
 | 3     | `cmd/concord-worker` binary + Kafka consumer + per-attempt webhook delivery table |
 | 4     | DLQ inspection + replay endpoints |
