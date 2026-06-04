@@ -38,6 +38,7 @@ import (
 
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
+	"github.com/concord-dev/concord/internal/eventbus"
 	"github.com/concord-dev/concord/internal/notify/mail"
 	"github.com/concord-dev/concord/internal/otelx"
 	"github.com/concord-dev/concord/internal/server/bg"
@@ -66,6 +67,15 @@ type Concord struct {
 	tracing    *otelx.Provider
 	authLimits auth.Limits
 	pubLimits  public.Limits
+
+	// outbox is the durable event pipe to Kafka. Handlers write here in
+	// the same SQL tx as their state change (transactional outbox
+	// pattern); the dispatcher polls and ships. Always non-nil — when
+	// Kafka is not configured the publisher is a no-op recorder so rows
+	// still accrue durably and can be replayed once Kafka comes online.
+	outbox     *eventbus.Outbox
+	dispatcher *eventbus.Dispatcher
+	dispCancel context.CancelFunc // stops the dispatcher loop in Shutdown
 }
 
 // Options is the construction surface for cmd/server.
@@ -104,6 +114,18 @@ type Options struct {
 	// fleet-wide ceiling at the configured rate during a Redis outage.
 	// Operators with more replicas should pass a smaller value.
 	LimiterFallbackTighten float64
+
+	// EventPublisher is the Kafka-or-equivalent sink the outbox
+	// dispatcher ships rows to. When nil, NewConcord wires a no-op
+	// publisher that returns nil — rows still get marked published so
+	// the queue drains; nothing reaches a broker. This is the dev /
+	// "Kafka not configured yet" path.
+	EventPublisher eventbus.Publisher
+
+	// DispatcherConfig overrides the outbox dispatcher's defaults
+	// (poll interval, batch size, max attempts, …). Zero values fall
+	// back to NewDispatcher's defaults.
+	DispatcherConfig eventbus.DispatcherConfig
 }
 
 // NewConcord loads controls + config and wires the Store and event bus.
@@ -131,6 +153,31 @@ func NewConcord(opts Options) (*Concord, error) {
 	b := bus.New()
 	b.OnDrop = func(_ uuid.UUID, k bus.Kind) { m.RecordBusDrop(string(k)) }
 
+	outbox := eventbus.NewOutbox(opts.Store.Pool())
+	publisher := opts.EventPublisher
+	if publisher == nil {
+		// No Kafka wired — rows still accrue durably; a no-op
+		// publisher just returns nil so the dispatcher marks them
+		// published and the queue drains. Switch to a real publisher
+		// later and the in-flight rows ship on the next tick.
+		publisher = eventbus.PublisherFunc(func(_ context.Context, _ string, _ []byte, _ map[string]string) error { return nil })
+	}
+	dispatcher, err := eventbus.NewDispatcher(outbox, publisher, opts.DispatcherConfig, eventbus.DispatcherMetrics{
+		Published:   func(k string) { m.OutboxPublishedTotal.WithLabelValues(k).Inc() },
+		Failed:      func(k string) { m.OutboxFailedTotal.WithLabelValues(k).Inc() },
+		Dead:        func(k string) { m.OutboxDeadTotal.WithLabelValues(k).Inc() },
+		PublishTime: func(s float64) { m.OutboxPublishDuration.Observe(s) },
+		Lag:         func(s float64) { m.OutboxLagSeconds.Set(s) },
+		Cleaned:     func(n int64) { m.OutboxCleanupDeletedTotal.Add(float64(n)) },
+		TickError:   func(stage string, _ error) { m.OutboxTickErrorsTotal.WithLabelValues(stage).Inc() },
+	})
+	if err != nil {
+		return nil, fmt.Errorf("event dispatcher: %w", err)
+	}
+
+	dispCtx, dispCancel := context.WithCancel(context.Background())
+	go dispatcher.Run(dispCtx)
+
 	return &Concord{
 		Controls:           loaded,
 		Config:             cfg,
@@ -146,6 +193,9 @@ func NewConcord(opts Options) (*Concord, error) {
 		tracing:            opts.Tracing,
 		authLimits:         buildAuthLimits(opts.RedisLimiter, opts.LimiterFallbackTighten, m),
 		pubLimits:          buildPublicLimits(opts.RedisLimiter, opts.LimiterFallbackTighten, m),
+		outbox:             outbox,
+		dispatcher:         dispatcher,
+		dispCancel:         dispCancel,
 	}, nil
 }
 
@@ -273,6 +323,16 @@ func applyDefaults(opts *Options) {
 // notifications may not have reached their destinations" and decide
 // whether to re-fire or live with the loss.
 func (c *Concord) Shutdown(ctx context.Context) error {
+	// Stop the dispatcher first so it doesn't keep claiming rows during
+	// the bg drain. Then wait for in-flight tracked goroutines (webhook
+	// delivery, async email). The dispatcher's Run goroutine notices
+	// dispCancel and exits its select; we don't wait on it explicitly
+	// because the only side effects are completed Kafka publishes
+	// (already commited to the DB) — partially-acked publishes will be
+	// re-claimed on the next process start.
+	if c.dispCancel != nil {
+		c.dispCancel()
+	}
 	return c.bg.Wait(ctx)
 }
 

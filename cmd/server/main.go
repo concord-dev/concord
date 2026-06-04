@@ -25,7 +25,10 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/segmentio/kafka-go"
 
+	"github.com/concord-dev/concord/internal/eventbus"
+	"github.com/concord-dev/concord/internal/kafkax"
 	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/notify/mail"
 	"github.com/concord-dev/concord/internal/otelx"
@@ -199,6 +202,57 @@ func runServe(args []string) error {
 		"Redis write timeout per command.")
 	fs.Float64Var(&limiterFallbackRatio, "limiter-fallback-ratio", parseFloatEnvOr("CONCORD_LIMITER_FALLBACK_RATIO", 0.33),
 		"Per-pod fallback budget as a fraction of the shared Redis budget. 0.33 keeps the fleet-wide ceiling near the configured rate for the canonical 3-replica deploy.")
+	// Kafka producer for the durable event pipe (concord.events). When
+	// brokers are empty, the outbox still accrues rows durably; a no-op
+	// publisher marks them shipped so the queue drains. Wire real
+	// brokers to forward to a Phase 3 worker / downstream consumer.
+	var (
+		kafkaBrokersCSV    string
+		kafkaTopic         string
+		kafkaClientID      string
+		kafkaTLS           bool
+		kafkaTLSInsecure   bool
+		kafkaTLSServerName string
+		kafkaSASLMech      string
+		kafkaSASLUsername  string
+		kafkaSASLPassword  string
+		kafkaCompression   string
+		kafkaWriteTimeout  string
+		kafkaBatchTimeout  string
+		outboxPollInterval string
+		outboxBatchSize    int
+		outboxMaxAttempts  int
+	)
+	fs.StringVar(&kafkaBrokersCSV, "kafka-brokers", os.Getenv("CONCORD_KAFKA_BROKERS"),
+		"Comma-separated Kafka bootstrap brokers (host:port). Empty disables Kafka (outbox rows still accrue durably).")
+	fs.StringVar(&kafkaTopic, "kafka-topic", envOr("CONCORD_KAFKA_TOPIC", "concord.events"),
+		"Topic the outbox dispatcher publishes to.")
+	fs.StringVar(&kafkaClientID, "kafka-client-id", envOr("CONCORD_KAFKA_CLIENT_ID", "concord-server"),
+		"Kafka client ID for broker-side telemetry / quota attribution.")
+	fs.BoolVar(&kafkaTLS, "kafka-tls", envOr("CONCORD_KAFKA_TLS", "false") == "true",
+		"Connect to Kafka over TLS.")
+	fs.BoolVar(&kafkaTLSInsecure, "kafka-tls-insecure", envOr("CONCORD_KAFKA_TLS_INSECURE", "false") == "true",
+		"Skip Kafka TLS verification (dev only; never enable in production).")
+	fs.StringVar(&kafkaTLSServerName, "kafka-tls-servername", os.Getenv("CONCORD_KAFKA_TLS_SERVERNAME"),
+		"SNI server name for the Kafka TLS handshake.")
+	fs.StringVar(&kafkaSASLMech, "kafka-sasl-mechanism", envOr("CONCORD_KAFKA_SASL_MECHANISM", ""),
+		"Kafka SASL mechanism: plain|scram-sha-256|scram-sha-512. Empty disables SASL.")
+	fs.StringVar(&kafkaSASLUsername, "kafka-sasl-username", os.Getenv("CONCORD_KAFKA_SASL_USERNAME"),
+		"Kafka SASL username.")
+	fs.StringVar(&kafkaSASLPassword, "kafka-sasl-password", os.Getenv("CONCORD_KAFKA_SASL_PASSWORD"),
+		"Kafka SASL password.")
+	fs.StringVar(&kafkaCompression, "kafka-compression", envOr("CONCORD_KAFKA_COMPRESSION", "snappy"),
+		"Wire compression: snappy|gzip|lz4|zstd. Empty disables compression.")
+	fs.StringVar(&kafkaWriteTimeout, "kafka-write-timeout", envOr("CONCORD_KAFKA_WRITE_TIMEOUT", "5s"),
+		"Maximum time one produce may take (Go duration).")
+	fs.StringVar(&kafkaBatchTimeout, "kafka-batch-timeout", envOr("CONCORD_KAFKA_BATCH_TIMEOUT", "10ms"),
+		"Linger time before a partial batch is flushed (Go duration).")
+	fs.StringVar(&outboxPollInterval, "outbox-poll-interval", envOr("CONCORD_OUTBOX_POLL_INTERVAL", "200ms"),
+		"How often the outbox dispatcher polls for new pending rows when previously idle.")
+	fs.IntVar(&outboxBatchSize, "outbox-batch-size", parseIntEnvOr("CONCORD_OUTBOX_BATCH_SIZE", 50),
+		"Maximum rows the outbox dispatcher claims per tick.")
+	fs.IntVar(&outboxMaxAttempts, "outbox-max-attempts", parseIntEnvOr("CONCORD_OUTBOX_MAX_ATTEMPTS", 20),
+		"How many publish failures before an outbox row is left for operator inspection (dead-letter).")
 	fs.BoolVar(&skipMigrate, "skip-migrate", false, "Don't run schema migrations on startup")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -281,6 +335,44 @@ func runServe(args []string) error {
 		defer rdb.Close()
 	}
 
+	// Kafka writer for the outbox dispatcher. Empty brokers → nil
+	// writer → NewConcord wires the no-op publisher. Anything else
+	// fails-fast at startup so misconfiguration is caught before the
+	// first event tries to publish.
+	kafkaCfg := kafkax.Config{
+		Brokers:            kafkax.ParseBrokers(kafkaBrokersCSV),
+		Topic:              kafkaTopic,
+		ClientID:           kafkaClientID,
+		TLS:                kafkaTLS,
+		ServerName:         kafkaTLSServerName,
+		InsecureSkipVerify: kafkaTLSInsecure,
+		SASLMechanism:      kafkax.SASLMechanism(kafkaSASLMech),
+		SASLUsername:       kafkaSASLUsername,
+		SASLPassword:       kafkaSASLPassword,
+		Compression:        kafkax.Compression(kafkaCompression),
+		WriteTimeout:       mustDuration(kafkaWriteTimeout, "kafka-write-timeout"),
+		BatchTimeout:       mustDuration(kafkaBatchTimeout, "kafka-batch-timeout"),
+	}
+	var kafkaWriter *kafka.Writer
+	var eventPublisher eventbus.Publisher
+	if len(kafkaCfg.Brokers) > 0 {
+		pingCtx, pingCancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := kafkax.Ping(pingCtx, kafkaCfg); err != nil {
+			pingCancel()
+			return fmt.Errorf("kafka: unable to reach %v at startup: %w", kafkaCfg.Brokers, err)
+		}
+		pingCancel()
+		kafkaWriter, err = kafkax.NewWriter(kafkaCfg)
+		if err != nil {
+			return fmt.Errorf("kafka writer: %w", err)
+		}
+		defer kafkaWriter.Close()
+		eventPublisher = eventbus.NewKafkaPublisher(kafkaWriter)
+		slog.Info("kafka producer enabled",
+			slog.String("topic", kafkaCfg.Topic),
+			slog.Any("brokers", kafkaCfg.Brokers))
+	}
+
 	c, err := server.NewConcord(server.Options{
 		ControlsDir:        controlsDir,
 		ConfigPath:         configPath,
@@ -299,6 +391,12 @@ func runServe(args []string) error {
 		Tracing:                tracing,
 		RedisLimiter:           rdb,
 		LimiterFallbackTighten: limiterFallbackRatio,
+		EventPublisher:         eventPublisher,
+		DispatcherConfig: eventbus.DispatcherConfig{
+			PollInterval: mustDuration(outboxPollInterval, "outbox-poll-interval"),
+			BatchSize:    outboxBatchSize,
+			MaxAttempts:  outboxMaxAttempts,
+		},
 	})
 	if err != nil {
 		return err
@@ -399,6 +497,20 @@ func parseFloatEnvOr(key string, fallback float64) float64 {
 		return fallback
 	}
 	parsed, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+// parseIntEnvOr is the int sibling of parseFloatEnvOr — for env-driven
+// numeric flags whose default depends on the deployment shape.
+func parseIntEnvOr(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(v)
 	if err != nil {
 		return fallback
 	}

@@ -115,6 +115,20 @@ spec:
                   name: {{ .Values.redis.credentialsSecretName }}
                   key: {{ .Values.redis.credentialsSecretPasswordKey }}
             {{- end }}
+            {{- if and .Values.kafka.brokers .Values.kafka.sasl.mechanism .Values.kafka.sasl.credentialsSecretName .Values.kafka.sasl.credentialsSecretUsernameKey }}
+            - name: CONCORD_KAFKA_SASL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kafka.sasl.credentialsSecretName }}
+                  key: {{ .Values.kafka.sasl.credentialsSecretUsernameKey }}
+            {{- end }}
+            {{- if and .Values.kafka.brokers .Values.kafka.sasl.mechanism .Values.kafka.sasl.credentialsSecretName .Values.kafka.sasl.credentialsSecretPasswordKey }}
+            - name: CONCORD_KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kafka.sasl.credentialsSecretName }}
+                  key: {{ .Values.kafka.sasl.credentialsSecretPasswordKey }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

@@ -37,6 +37,21 @@ type Metrics struct {
 	// for "Redis is sick"; sustained high rate means the fleet is no
 	// longer honouring the shared limit.
 	LimiterPrimaryErrorsTotal *prometheus.CounterVec
+
+	// Outbox + Dispatcher instrumentation. The outbox is the canonical
+	// transactional pipe to Kafka — a stalled dispatcher or a stuck
+	// broker shows up here long before downstream consumers notice.
+	//
+	// OutboxEnqueuedTotal is bumped by handlers when they write to
+	// event_outbox; the rest are bumped by the Dispatcher.
+	OutboxEnqueuedTotal    *prometheus.CounterVec   // labels: kind
+	OutboxPublishedTotal   *prometheus.CounterVec   // labels: kind
+	OutboxFailedTotal      *prometheus.CounterVec   // labels: kind — publish failed, will retry
+	OutboxDeadTotal        *prometheus.CounterVec   // labels: kind — reached MaxAttempts
+	OutboxPublishDuration  prometheus.Histogram     // wall time of one Publish call
+	OutboxLagSeconds       prometheus.Gauge         // age of oldest unpublished, non-dead row
+	OutboxCleanupDeletedTotal prometheus.Counter    // rows the periodic delete sweep removed
+	OutboxTickErrorsTotal  *prometheus.CounterVec   // labels: stage (tick|cleanup|lag)
 }
 
 // New builds a Metrics with a private registry and registers every collector
@@ -87,6 +102,60 @@ func New() *Metrics {
 			},
 			[]string{"gate"},
 		),
+		OutboxEnqueuedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "concord_outbox_enqueued_total",
+				Help: "Domain events written to event_outbox, partitioned by event kind.",
+			},
+			[]string{"kind"},
+		),
+		OutboxPublishedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "concord_outbox_published_total",
+				Help: "Outbox rows the Dispatcher successfully shipped to Kafka, partitioned by event kind.",
+			},
+			[]string{"kind"},
+		),
+		OutboxFailedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "concord_outbox_failed_total",
+				Help: "Outbox publishes that errored and will be retried (rows below max-attempts), partitioned by event kind.",
+			},
+			[]string{"kind"},
+		),
+		OutboxDeadTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "concord_outbox_dead_total",
+				Help: "Outbox rows that reached max-attempts and will not be retried automatically — operator intervention required.",
+			},
+			[]string{"kind"},
+		),
+		OutboxPublishDuration: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "concord_outbox_publish_duration_seconds",
+				Help:    "Wall-time of a single Publish call from the Dispatcher.",
+				Buckets: prometheus.ExponentialBuckets(0.005, 2, 10), // 5ms..2.5s
+			},
+		),
+		OutboxLagSeconds: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "concord_outbox_lag_seconds",
+				Help: "Age (seconds) of the oldest unpublished, non-dead outbox row. 0 when the queue is empty.",
+			},
+		),
+		OutboxCleanupDeletedTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "concord_outbox_cleanup_deleted_total",
+				Help: "Published outbox rows the periodic cleanup sweep has deleted since process start.",
+			},
+		),
+		OutboxTickErrorsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "concord_outbox_tick_errors_total",
+				Help: "Unexpected errors from the Dispatcher loop (DB or internal), partitioned by stage (tick|cleanup|lag).",
+			},
+			[]string{"stage"},
+		),
 	}
 	reg.MustRegister(
 		m.HTTPRequestsTotal,
@@ -95,6 +164,14 @@ func New() *Metrics {
 		m.WebhookDeliveriesTotal,
 		m.BusEventsDroppedTotal,
 		m.LimiterPrimaryErrorsTotal,
+		m.OutboxEnqueuedTotal,
+		m.OutboxPublishedTotal,
+		m.OutboxFailedTotal,
+		m.OutboxDeadTotal,
+		m.OutboxPublishDuration,
+		m.OutboxLagSeconds,
+		m.OutboxCleanupDeletedTotal,
+		m.OutboxTickErrorsTotal,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
@@ -129,4 +206,10 @@ func (m *Metrics) RecordBusDrop(kind string) {
 // in cmd/server's limiter factory.
 func (m *Metrics) RecordLimiterPrimaryError(gate string) {
 	m.LimiterPrimaryErrorsTotal.WithLabelValues(gate).Inc()
+}
+
+// RecordOutboxEnqueued bumps the enqueue counter for the named event kind.
+// Wired from handlers when they INSERT a row into event_outbox.
+func (m *Metrics) RecordOutboxEnqueued(kind string) {
+	m.OutboxEnqueuedTotal.WithLabelValues(kind).Inc()
 }

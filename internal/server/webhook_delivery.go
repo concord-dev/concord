@@ -13,10 +13,23 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 
+	"github.com/concord-dev/concord/internal/eventbus"
 	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/store"
+)
+
+// kindRunCompleted and kindDriftDetected are the canonical Kafka event
+// names — distinct from the in-process bus.Kind values so the wire
+// schema doesn't bleed the internal SSE event taxonomy. The downstream
+// worker (Phase 3) switches on these to drive webhook delivery.
+const (
+	kindRunCompleted  = "run.completed"
+	kindDriftDetected = "drift.detected"
 )
 
 // webhookHTTPClient is the single client every outbound delivery uses. A
@@ -66,6 +79,11 @@ func (c *Concord) Broadcast(run store.Run, summary []byte) {
 		Summary: summary,
 	}
 	c.bus.Publish(evt)
+	c.enqueueOutbox(context.Background(), kindRunCompleted, run.OrgID, at, map[string]any{
+		"run_id":  run.ID,
+		"status":  string(run.Status),
+		"summary": json.RawMessage(summary),
+	})
 	c.bg.Go(func() { c.fireWebhooks(evt) })
 }
 
@@ -89,7 +107,50 @@ func (c *Concord) BroadcastDrift(run store.Run, transitions []bus.Transition) {
 		Transitions: transitions,
 	}
 	c.bus.Publish(evt)
+	c.enqueueOutbox(context.Background(), kindDriftDetected, run.OrgID, at, map[string]any{
+		"run_id":      run.ID,
+		"transitions": transitions,
+	})
 	c.bg.Go(func() { c.fireWebhooks(evt) })
+}
+
+// enqueueOutbox writes one row to event_outbox so the dispatcher ships
+// it to Kafka. Best-effort: the underlying SubmitRun has already
+// committed the run row by the time we're called, so an outbox failure
+// here means a missed event but a valid run. The error path bumps the
+// tick-error metric and logs loudly so an operator notices a sustained
+// outage; for the canonical happy path the call is sub-millisecond
+// because the INSERT goes against a single-row index.
+//
+// The traceparent header is captured from the caller's context (when
+// present) so the consumer span links back to the originating HTTP
+// request.
+func (c *Concord) enqueueOutbox(ctx context.Context, kind string, orgID uuid.UUID, occurredAt time.Time, data any) {
+	if c.outbox == nil {
+		return
+	}
+	var traceparent string
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+	if tp, ok := carrier["traceparent"]; ok {
+		traceparent = tp
+	}
+	if _, err := c.outbox.Enqueue(ctx, eventbus.Event{
+		EventID:     uuid.New(),
+		OrgID:       orgID,
+		Kind:        kind,
+		OccurredAt:  occurredAt,
+		Data:        data,
+		Traceparent: traceparent,
+	}); err != nil {
+		c.metrics.OutboxTickErrorsTotal.WithLabelValues("enqueue").Inc()
+		slog.Error("event outbox enqueue failed",
+			slog.String("kind", kind),
+			slog.String("org_id", orgID.String()),
+			slog.String("err", err.Error()))
+		return
+	}
+	c.metrics.RecordOutboxEnqueued(kind)
 }
 
 func (c *Concord) fireWebhooks(e bus.Event) {

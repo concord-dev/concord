@@ -103,6 +103,10 @@ jobs:
           --health-interval=5s
           --health-timeout=3s
           --health-retries=10
+      # NOTE: Redpanda is started in a step below, not here. Services{}
+      # doesn't support passing a custom command, and Redpanda needs
+      # `--advertise-kafka-addr` so the test client can reach it over
+      # localhost. See the "Start Redpanda" step.
 
     steps:
       - uses: actions/checkout@v4
@@ -122,11 +126,31 @@ jobs:
         env:
           PGPASSWORD: concord-dev
 
+      - name: start Redpanda
+        # Single-binary Kafka-API broker. `--advertise-kafka-addr` is
+        # what lets the test client (running on the host) reach the
+        # broker through the published port mapping.
+        run: |
+          docker run -d --name redpanda -p 19092:19092 \
+            docker.redpanda.com/redpandadata/redpanda:v24.2.13 \
+            redpanda start \
+              --smp 1 --memory 512M --reserve-memory 0M --overprovisioned --check=false \
+              --kafka-addr PLAINTEXT://0.0.0.0:19092 \
+              --advertise-kafka-addr PLAINTEXT://127.0.0.1:19092
+          for i in {1..60}; do
+            if docker exec redpanda rpk cluster health -X brokers=127.0.0.1:19092 2>/dev/null | grep -q 'Healthy:.*true'; then
+              echo "redpanda ready"; exit 0
+            fi
+            sleep 1
+          done
+          echo "redpanda never reported healthy"; docker logs redpanda; exit 1
+
       - name: test (race + count=1)
         run: go test -buildvcs=false -race -count=1 ./...
         env:
           CONCORD_TEST_DATABASE_URL: postgres://concord:concord-dev@127.0.0.1:5432/concord?sslmode=disable
           CONCORD_TEST_REDIS_ADDR: 127.0.0.1:6379
+          CONCORD_TEST_KAFKA_BROKERS: 127.0.0.1:19092
 
   build:
     name: build

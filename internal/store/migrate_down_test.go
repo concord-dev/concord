@@ -22,12 +22,16 @@ func TestMigrateDown_RollsBackAppliedVersion(t *testing.T) {
 	require.NotEmpty(t, versions, "openTestStore must leave at least one migration applied")
 	startCount := len(versions)
 
-	require.NoError(t, s.MigrateDown(ctx, 1))
+	// Roll back ALL of them — that's the only invariant we can check
+	// without coupling the test to the current migration count. After
+	// MigrateDown(startCount) every schema-creating object should be
+	// gone, and AppliedMigrationVersions must be empty.
+	require.NoError(t, s.MigrateDown(ctx, startCount))
 
 	versions, err = s.AppliedMigrationVersions(ctx)
 	require.NoError(t, err)
-	assert.Len(t, versions, startCount-1,
-		"one migration must come off schema_migrations after MigrateDown(1)")
+	assert.Empty(t, versions,
+		"schema_migrations must be empty after rolling everything back")
 
 	// Tables should genuinely be gone — query an organization to confirm
 	// the down migration's DROP TABLE ran (not just a schema_migrations

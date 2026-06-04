@@ -30,6 +30,34 @@ services:
       timeout: 3s
       retries: 10
 
+  # Redpanda is a Kafka-API-compatible broker in a single binary — starts
+  # in ~5s, no Zookeeper / KRaft ceremony. Production runs against real
+  # Kafka; local dev uses this so the producer codepath is identical.
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.13
+    container_name: concord-redpanda
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://127.0.0.1:19092
+      - --rpc-addr=0.0.0.0:33145
+      - --advertise-rpc-addr=redpanda:33145
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+    ports:
+      - "19092:19092"   # external Kafka API (used by host-running tests / dev server)
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health -X brokers=127.0.0.1:9092 | grep -q 'Healthy: *true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   server:
     profiles: ["server"]
     build:
@@ -42,11 +70,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      redpanda:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://concord:concord-dev@postgres:5432/concord?sslmode=disable
       LISTEN_ADDR: ":8080"
       CONCORD_RATE_LIMITER: "redis"
       CONCORD_REDIS_ADDR: "redis:6379"
+      CONCORD_KAFKA_BROKERS: "redpanda:9092"
+      CONCORD_KAFKA_TOPIC: "concord.events"
     ports:
       - "8080:8080"
 

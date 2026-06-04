@@ -40,6 +40,8 @@ internal/
   logx/            slog wrapper + request-id context plumbing
   notify/          watcher-side notify Sinks + server-side mail/
   otelx/           OpenTelemetry SDK wiring (no-op default)
+  eventbus/        durable Outbox + Dispatcher; ships event_outbox rows to Kafka
+  kafkax/          segmentio/kafka-go writer factory (TLS + SASL + compression)
   redisx/          go-redis client factory (single + Sentinel modes)
   policy/          OPA/Rego evaluator
   report/          renderers (text, json, oscal, markdown, trust-portal)
@@ -141,6 +143,49 @@ CASCADE semantics:
   SET NULL so the forensic trail survives.
 - Run delete: drift_event.prior_run_id is SET NULL so the drift history
   survives run pruning.
+
+## Durable events
+
+Domain events (`run.completed`, `drift.detected`, …) flow through a
+**transactional outbox** so a process crash never loses an event. The
+flow is:
+
+```
+handler          eventbus.Outbox       Postgres            eventbus.Dispatcher        Kafka
+   │                  │                  │                       │                      │
+   ├─ Enqueue(evt)───▶│                  │                       │                      │
+   │                  ├─ INSERT row ────▶│                       │                      │
+   │                  │   (in same tx    │                       │                      │
+   │                  │    as state)     │                       │                      │
+   │                  │                  │                       │                      │
+   │                  │                  │   poll (200ms tick) ◀─┤                      │
+   │                  │                  │   FOR UPDATE          │                      │
+   │                  │                  │   SKIP LOCKED ───────▶│                      │
+   │                  │                  │                       ├─ Publish(env) ──────▶│
+   │                  │                  │   UPDATE published_at◀┤                      │
+   │                  │                  │                       │                      │
+```
+
+- **At-least-once delivery** — failed publishes bump `attempt_count` +
+  `last_error` and reschedule via jittered exponential backoff
+  (1s → 5min, capped at MaxAttempts=20).
+- **Multi-replica safe** — `SELECT FOR UPDATE SKIP LOCKED` shards
+  pending rows across dispatcher replicas without coordination. Tested
+  with two dispatchers + 100 enqueued events → exactly 100 publishes.
+- **Phase 2 boundary** — the in-process bus + webhook delivery still
+  runs for SSE + immediate webhook fan-out; the outbox is the durable
+  parallel path the Phase 3 worker will consume. Kafka is *optional* —
+  when unconfigured, the no-op publisher marks rows shipped so the
+  queue drains; configure brokers later and in-flight rows resume.
+- **Dead-letter** — rows that hit MaxAttempts stay un-published and
+  visible to operators. Phase 4 will add `/operator/v1/dlq` for
+  inspect + replay.
+
+Wire shape on the topic:
+- Topic: `concord.events` (configurable)
+- Partition key: `org_id` (per-tenant ordering preserved)
+- Body: `{version, event_id, org_id, kind, occurred_at, data}` JSON
+- Headers: `event-id`, `event-kind`, `org-id`, `traceparent`
 
 ## Background work
 
@@ -256,7 +301,7 @@ Run locally with `make lint && make test-race && make vuln`.
 | Phase | Scope |
 |---|---|
 | 1     | Redis-backed rate limiter (interface + impl + fallback) — DONE |
-| 2     | Kafka producer for `concord.events` (idempotency via event_id) |
+| 2     | Transactional outbox + Kafka producer for `concord.events` — DONE |
 | 3     | `cmd/concord-worker` binary + Kafka consumer + per-attempt webhook delivery table |
 | 4     | DLQ inspection + replay endpoints |
 | 5     | Idempotency-Key for POST mutations, circuit breakers, audit partitioning, PII redaction |

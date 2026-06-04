@@ -46,6 +46,31 @@ data:
   CONCORD_REDIS_WRITE_TIMEOUT: {{ .Values.redis.timeouts.write | quote }}
   CONCORD_LIMITER_FALLBACK_RATIO: {{ .Values.redis.fallbackRatio | quote }}
   {{- end }}
+  {{- if .Values.kafka.brokers }}
+  # Durable event pipe to Kafka. server fails fast at startup if brokers
+  # are unreachable, so make sure the Pod can reach them before rollout.
+  CONCORD_KAFKA_BROKERS: {{ join "," .Values.kafka.brokers | quote }}
+  CONCORD_KAFKA_TOPIC: {{ .Values.kafka.topic | quote }}
+  CONCORD_KAFKA_CLIENT_ID: {{ .Values.kafka.clientId | quote }}
+  {{- if .Values.kafka.compression }}
+  CONCORD_KAFKA_COMPRESSION: {{ .Values.kafka.compression | quote }}
+  {{- end }}
+  CONCORD_KAFKA_WRITE_TIMEOUT: {{ .Values.kafka.writeTimeout | quote }}
+  CONCORD_KAFKA_BATCH_TIMEOUT: {{ .Values.kafka.batchTimeout | quote }}
+  CONCORD_KAFKA_TLS: {{ .Values.kafka.tls.enabled | quote }}
+  {{- if .Values.kafka.tls.insecureSkipVerify }}
+  CONCORD_KAFKA_TLS_INSECURE: "true"
+  {{- end }}
+  {{- if .Values.kafka.tls.serverName }}
+  CONCORD_KAFKA_TLS_SERVERNAME: {{ .Values.kafka.tls.serverName | quote }}
+  {{- end }}
+  {{- if .Values.kafka.sasl.mechanism }}
+  CONCORD_KAFKA_SASL_MECHANISM: {{ .Values.kafka.sasl.mechanism | quote }}
+  {{- end }}
+  {{- end }}
+  CONCORD_OUTBOX_POLL_INTERVAL: {{ .Values.outbox.pollInterval | quote }}
+  CONCORD_OUTBOX_BATCH_SIZE: {{ .Values.outbox.batchSize | quote }}
+  CONCORD_OUTBOX_MAX_ATTEMPTS: {{ .Values.outbox.maxAttempts | quote }}
   {{- if .Values.smtp.host }}
   CONCORD_SMTP_HOST: {{ .Values.smtp.host | quote }}
   CONCORD_SMTP_PORT: {{ .Values.smtp.port | quote }}

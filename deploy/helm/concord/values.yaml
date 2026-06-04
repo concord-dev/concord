@@ -104,6 +104,44 @@ redis:
   credentialsSecretUsernameKey: "username"
   credentialsSecretPasswordKey: "password"
 
+# Kafka producer for the durable concord.events topic. When `brokers` is
+# empty the outbox still accrues rows; the dispatcher just no-ops the
+# publish so the queue drains. Wire real brokers to forward events to a
+# Phase 3 worker or any external consumer.
+#
+# The chart does NOT provision Kafka — point at a managed cluster (MSK,
+# Confluent Cloud, Aiven, …) or a self-hosted Strimzi / Bitnami install.
+# SASL/PLAIN credentials live in a Secret referenced by
+# `sasl.credentialsSecretName`; SCRAM-SHA-256 / SCRAM-SHA-512 use the
+# same Secret schema.
+kafka:
+  brokers: []                          # list of host:port; empty disables Kafka
+  topic: "concord.events"
+  clientId: "concord-server"
+  compression: "snappy"                # snappy|gzip|lz4|zstd|"" (no compression)
+  writeTimeout: "5s"
+  batchTimeout: "10ms"
+  tls:
+    enabled: false
+    insecureSkipVerify: false
+    serverName: ""
+  sasl:
+    mechanism: ""                      # plain | scram-sha-256 | scram-sha-512 | "" (none)
+    credentialsSecretName: ""
+    credentialsSecretUsernameKey: "username"
+    credentialsSecretPasswordKey: "password"
+
+# Outbox dispatcher tuning. The dispatcher is what reads event_outbox
+# rows and ships them to Kafka. Tune for your throughput shape:
+#   pollInterval — idle-poll cadence; lower = lower latency, higher CPU
+#   batchSize    — rows claimed per tick; higher = better throughput
+#   maxAttempts  — after this many publish failures a row is left for
+#                  operator inspection (Phase 4 will surface a DLQ API)
+outbox:
+  pollInterval: "200ms"
+  batchSize: 50
+  maxAttempts: 20
+
 # Transactional email via SMTP. Empty `host` disables real delivery
 # (the LogMailer prints message bodies to slog — fine for non-prod).
 smtp:
