@@ -41,6 +41,7 @@ import (
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
 	"github.com/concord-dev/concord/internal/notify/mail"
+	"github.com/concord-dev/concord/internal/server/bg"
 	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/server/handlers/auth"
 	"github.com/concord-dev/concord/internal/server/handlers/public"
@@ -62,6 +63,7 @@ type Concord struct {
 	bus         *bus.Bus
 	metrics     *metrics.Metrics
 	mailer      mail.Mailer
+	bg          *bg.Runner
 	authLimits  auth.Limits
 	pubLimits   public.Limits
 	mu          sync.Mutex
@@ -118,6 +120,7 @@ func NewConcord(opts Options) (*Concord, error) {
 		bus:                b,
 		metrics:            m,
 		mailer:             mail.New(opts.SMTP),
+		bg:                 bg.New(),
 		authLimits:         defaultAuthLimits(),
 		pubLimits:          defaultPublicLimits(),
 	}, nil
@@ -173,12 +176,19 @@ func applyDefaults(opts *Options) {
 	}
 }
 
-// Shutdown is a no-op today (no background workers to drain) but kept so
-// cmd/server can call it during signal handling without conditionals. In
-// the future it'll cancel any long-running webhook deliveries in flight.
+// Shutdown blocks until every tracked background goroutine (webhook
+// deliveries, transactional emails, bus-drop accounting) finishes, or
+// ctx expires — whichever comes first. After this returns the Concord
+// instance refuses new background work; callers should have already
+// drained the HTTP server (via *http.Server.Shutdown) so handlers can't
+// still be spawning work.
+//
+// Returns ctx.Err() (typically context.DeadlineExceeded) when the drain
+// timed out. Operators reading that error should treat it as "some
+// notifications may not have reached their destinations" and decide
+// whether to re-fire or live with the loss.
 func (c *Concord) Shutdown(ctx context.Context) error {
-	_ = ctx
-	return nil
+	return c.bg.Wait(ctx)
 }
 
 // Bus exposes the event bus to callers (the SSE handler).

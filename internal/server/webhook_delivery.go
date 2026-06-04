@@ -57,7 +57,7 @@ func (c *Concord) Broadcast(run store.Run, summary []byte) {
 		Summary: summary,
 	}
 	c.bus.Publish(evt)
-	go c.fireWebhooks(evt)
+	c.bg.Go(func() { c.fireWebhooks(evt) })
 }
 
 // BroadcastDrift publishes a control.drifted event when SubmitRun detected
@@ -80,7 +80,7 @@ func (c *Concord) BroadcastDrift(run store.Run, transitions []bus.Transition) {
 		Transitions: transitions,
 	}
 	c.bus.Publish(evt)
-	go c.fireWebhooks(evt)
+	c.bg.Go(func() { c.fireWebhooks(evt) })
 }
 
 func (c *Concord) fireWebhooks(e bus.Event) {
@@ -108,7 +108,11 @@ func (c *Concord) fireWebhooks(e bus.Event) {
 		if !eventKindAllowed(wh.EventKinds, e.Kind) {
 			continue
 		}
-		go c.deliverOne(wh, e.Kind, body)
+		// Capture wh by value so the loop variable's reuse doesn't race
+		// with the goroutine reading it. (Go 1.22+ per-iteration scoping
+		// makes this defensive; keeping it explicit for readers.)
+		wh := wh
+		c.bg.Go(func() { c.deliverOne(wh, e.Kind, body) })
 	}
 }
 

@@ -79,7 +79,7 @@ func (h *Handlers) RequestPasswordReset(w http.ResponseWriter, r *http.Request) 
 	// extend the HTTP response time on a hot endpoint. The LogMailer
 	// fallback prints the URL — sufficient for local dev — so this also
 	// keeps the "I forgot, show me the URL" workflow alive without a relay.
-	go sendPasswordResetEmail(h.mailer, user.Email, confirmURL)
+	h.goAsync(func() { sendPasswordResetEmail(h.mailer, user.Email, confirmURL) })
 	h.audit(r, store.RecordAuditParams{
 		ActorKind:   store.AuditActorUnauthenticated,
 		Action:      "auth.password_reset.request",

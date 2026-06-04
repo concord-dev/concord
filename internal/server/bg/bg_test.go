@@ -38,17 +38,26 @@ func TestWait_ReturnsContextErrorWhenTasksOutlastTheDeadline(t *testing.T) {
 		"a shutdown that times out must surface context.DeadlineExceeded so operators see WHY the drain didn't complete")
 }
 
-func TestGo_AfterWaitIsDroppedNotLeaked(t *testing.T) {
-	// After shutdown starts, new Go calls must be no-ops. Otherwise a
-	// late-arriving HTTP handler could spawn work the Wait already returned
-	// from — undefined behavior at best, hung shutdown at worst.
+func TestGo_NestedSpawnsAreTrackedByTheSameWaitGroup(t *testing.T) {
+	// Real call sites (e.g. webhook fireWebhooks → deliverOne) nest: a
+	// tracked goroutine spawns more tracked goroutines. Wait must wait
+	// for the inner ones too, not just the outer.
 	r := bg.New()
+	var outer, inner atomic.Bool
+	r.Go(func() {
+		// Outer simulates fireWebhooks doing prep work, then fanning out
+		// to per-receiver deliveries that take longer.
+		time.Sleep(20 * time.Millisecond)
+		r.Go(func() {
+			time.Sleep(50 * time.Millisecond)
+			inner.Store(true)
+		})
+		outer.Store(true)
+	})
 	require.NoError(t, r.Wait(context.Background()))
-	var ran atomic.Bool
-	r.Go(func() { ran.Store(true) })
-	time.Sleep(50 * time.Millisecond)
-	assert.False(t, ran.Load(),
-		"Go submissions after Wait must be dropped — Wait already promised drain completion")
+	assert.True(t, outer.Load(), "outer task must complete")
+	assert.True(t, inner.Load(),
+		"nested task must also complete — without this, a webhook fan-out would lose deliveries during shutdown")
 }
 
 func TestGo_RecoversFromPanicsInsteadOfCrashingTheProcess(t *testing.T) {

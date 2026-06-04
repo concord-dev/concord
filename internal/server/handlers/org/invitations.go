@@ -104,7 +104,9 @@ func (h *Handlers) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	// accept_url in the response so an admin who needs to share it
 	// manually (out-of-band, e.g. on a Slack DM) can copy/paste — email
 	// is the default, not the only, path.
-	go sendInvitationEmail(h.mailer, inv.Email, p.Org.Name, inv.RoleName, acceptURL(r, token))
+	h.goAsync(func() {
+		sendInvitationEmail(h.mailer, inv.Email, p.Org.Name, inv.RoleName, acceptURL(r, token))
+	})
 	httpx.JSON(w, http.StatusCreated, map[string]any{
 		"invitation": viewFromInvitation(inv),
 		"token":      token,

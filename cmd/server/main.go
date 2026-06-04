@@ -100,6 +100,9 @@ func runServe(args []string) error {
 		"Comma-separated exact origins permitted to call the API from a browser (e.g. https://app.example.com). Empty disables CORS.")
 	fs.StringVar(&logFormat, "log-format", envOr("CONCORD_LOG_FORMAT", "json"), "Log output format: json|text")
 	fs.StringVar(&logLevel, "log-level", envOr("CONCORD_LOG_LEVEL", "info"), "Minimum log level: debug|info|warn|error")
+	var shutdownTimeoutStr string
+	fs.StringVar(&shutdownTimeoutStr, "shutdown-timeout", envOr("CONCORD_SHUTDOWN_TIMEOUT", "30s"),
+		"Maximum time to drain HTTP + webhook + email backlog on SIGTERM before forcing exit")
 	// SMTP — leave Host empty for the dev-mode LogMailer (no real
 	// delivery, body printed to slog so the developer can still click the
 	// reset / invite URL out of the terminal).
@@ -204,17 +207,47 @@ func runServe(args []string) error {
 		close(errCh)
 	}()
 
+	shutdownTimeout, err := time.ParseDuration(shutdownTimeoutStr)
+	if err != nil || shutdownTimeout <= 0 {
+		return fmt.Errorf("--shutdown-timeout must be a positive Go duration (got %q)", shutdownTimeoutStr)
+	}
+
 	select {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		slog.Info("shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		// Drain order:
+		//   1. srv.Shutdown — stop accepting new connections, let
+		//      in-flight HTTP requests finish.
+		//   2. c.Shutdown   — wait for tracked background goroutines
+		//      (webhook deliveries, transactional emails) to finish.
+		// Both share the same overall budget; if HTTP drain takes the
+		// whole window, the background drain returns DeadlineExceeded
+		// instantly. That's intentional — a deploy waiting on us is a
+		// stronger signal than "give every webhook one more retry".
+		slog.Info("shutting down",
+			slog.String("timeout", shutdownTimeout.String()))
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
+		drainStart := time.Now()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			slog.Error("http shutdown failed", slog.String("err", err.Error()))
 		}
-		return c.Shutdown(shutdownCtx)
+		httpDrain := time.Since(drainStart)
+		bgErr := c.Shutdown(shutdownCtx)
+		totalDrain := time.Since(drainStart)
+		switch {
+		case bgErr != nil:
+			slog.Error("background drain timed out — some webhooks/emails may not have shipped",
+				slog.Duration("http_drain", httpDrain),
+				slog.Duration("total", totalDrain),
+				slog.String("err", bgErr.Error()))
+		default:
+			slog.Info("shutdown complete",
+				slog.Duration("http_drain", httpDrain),
+				slog.Duration("total", totalDrain))
+		}
+		return bgErr
 	}
 }
 

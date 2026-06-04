@@ -26,12 +26,12 @@ import (
 func (c *Concord) Router() http.Handler {
 	mw := middleware.New(c.Store, c.OperatorToken)
 	pub := public.New(c.Version, c.Controls, c.Store, c.pubLimits)
-	au := auth.New(c.Store, c.SessionTTL, c.authLimits, c.mailer)
+	au := auth.New(c.Store, c.SessionTTL, c.authLimits, c.mailer, c.bg)
 	op := operator.New(c.Store)
 	og := org.New(c.Store, c.Controls, c.bus, org.Broadcaster{
 		RunCompleted:  c.Broadcast,
 		DriftDetected: c.BroadcastDrift,
-	}, c.mailer)
+	}, c.mailer, c.bg)
 
 	mux := http.NewServeMux()
 	mountPublic(mux, pub)

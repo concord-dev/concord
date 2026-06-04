@@ -14,6 +14,7 @@ import (
 	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/notify/mail"
 	"github.com/concord-dev/concord/internal/server/authctx"
+	"github.com/concord-dev/concord/internal/server/bg"
 	"github.com/concord-dev/concord/internal/server/httpx"
 	"github.com/concord-dev/concord/internal/server/limiter"
 	"github.com/concord-dev/concord/internal/store"
@@ -41,14 +42,33 @@ type Handlers struct {
 	sessionTTL time.Duration
 	limits     Limits
 	mailer     mail.Mailer
+	bg         *bg.Runner
 }
 
 // New constructs Handlers with the given Store, session lifetime, rate
-// limits, and mailer. Pass an empty Limits{} to disable all gates (tests
-// do this); pass nil for the mailer to drop email delivery entirely
-// (handlers fall back to logging the URL).
-func New(s *store.Store, sessionTTL time.Duration, limits Limits, mailer mail.Mailer) *Handlers {
-	return &Handlers{store: s, sessionTTL: sessionTTL, limits: limits, mailer: mailer}
+// limits, mailer, and background-runner. The runner is the seam graceful
+// shutdown uses to drain async email sends; pass nil only in tests that
+// don't care about shutdown semantics — production must always wire the
+// shared *bg.Runner from Concord so SIGTERM doesn't drop an in-flight
+// password-reset email.
+//
+// Pass an empty Limits{} to disable all rate gates (tests do this); pass
+// nil for the mailer to drop email delivery entirely (handlers fall back
+// to logging the URL).
+func New(s *store.Store, sessionTTL time.Duration, limits Limits, mailer mail.Mailer, runner *bg.Runner) *Handlers {
+	return &Handlers{store: s, sessionTTL: sessionTTL, limits: limits, mailer: mailer, bg: runner}
+}
+
+// goAsync runs fn on the tracked background runner when one is wired,
+// otherwise spawns an untracked goroutine. The fallback exists for tests
+// that construct Handlers directly without a runner; production callers
+// always pass one.
+func (h *Handlers) goAsync(fn func()) {
+	if h.bg != nil {
+		h.bg.Go(fn)
+		return
+	}
+	go fn()
 }
 
 // Login exchanges email + password for a session token. Same error message for

@@ -12,6 +12,7 @@ import (
 	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/notify/mail"
 	"github.com/concord-dev/concord/internal/server/authctx"
+	"github.com/concord-dev/concord/internal/server/bg"
 	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/store"
 )
@@ -34,20 +35,35 @@ type Handlers struct {
 	bus       *bus.Bus
 	broadcast Broadcaster
 	mailer    mail.Mailer
+	bg        *bg.Runner
 }
 
 // New constructs Handlers wired to the supplied infrastructure. A zero
 // Broadcaster is filled with no-op funcs so SubmitRun never nil-deref's
 // in tests that don't care about side-effects. Mailer may be nil; the
 // invitation handler degrades to logging the accept URL when it is.
-func New(s *store.Store, ctrls []controls.Loaded, b *bus.Bus, broadcast Broadcaster, mailer mail.Mailer) *Handlers {
+// runner may be nil in tests; production wires the shared *bg.Runner
+// from Concord so graceful shutdown can drain in-flight invitation
+// emails before the process exits.
+func New(s *store.Store, ctrls []controls.Loaded, b *bus.Bus, broadcast Broadcaster, mailer mail.Mailer, runner *bg.Runner) *Handlers {
 	if broadcast.RunCompleted == nil {
 		broadcast.RunCompleted = func(store.Run, []byte) {}
 	}
 	if broadcast.DriftDetected == nil {
 		broadcast.DriftDetected = func(store.Run, []bus.Transition) {}
 	}
-	return &Handlers{store: s, controls: ctrls, bus: b, broadcast: broadcast, mailer: mailer}
+	return &Handlers{store: s, controls: ctrls, bus: b, broadcast: broadcast, mailer: mailer, bg: runner}
+}
+
+// goAsync runs fn on the tracked background runner when one is wired,
+// otherwise spawns an untracked goroutine. Same fallback pattern as the
+// auth handler — production wires a runner; tests may not.
+func (h *Handlers) goAsync(fn func()) {
+	if h.bg != nil {
+		h.bg.Go(fn)
+		return
+	}
+	go fn()
 }
 
 // audit fills in the actor (from the authctx Principal) and request-scoped
