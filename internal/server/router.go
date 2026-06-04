@@ -106,6 +106,12 @@ func mountOperator(mux *http.ServeMux, h *operator.Handlers, mw *middleware.Midd
 	mux.Handle("GET /operator/v1/users", gate(http.HandlerFunc(h.ListUsers)))
 	mux.Handle("GET /operator/v1/roles", gate(http.HandlerFunc(h.ListRoles)))
 	mux.Handle("GET /operator/v1/permissions", gate(http.HandlerFunc(h.ListPermissions)))
+
+	// Auditor population — cross-org read-only principals (external
+	// auditors). Operator-managed; per-org admins cannot self-promote.
+	mux.Handle("GET /operator/v1/auditors", gate(http.HandlerFunc(h.ListAuditors)))
+	mux.Handle("POST /operator/v1/auditors", gate(http.HandlerFunc(h.GrantAuditor)))
+	mux.Handle("DELETE /operator/v1/auditors", gate(http.HandlerFunc(h.RevokeAuditor)))
 }
 
 func mountSession(mux *http.ServeMux, h *auth.Handlers, mw *middleware.Middleware) {

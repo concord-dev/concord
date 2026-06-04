@@ -35,6 +35,13 @@ CREATE TABLE organization (
 
 -- "user" is a reserved word in SQL; quoting keeps the table name human while
 -- forcing every reference site to quote consistently.
+--
+-- is_auditor is the cross-org read flag for external compliance auditors:
+-- when true, HasPermission grants every `*:read` permission on every
+-- organization regardless of user_org_role membership. Granted/revoked
+-- exclusively by the operator (CONCORD_OPERATOR_TOKEN); members of an
+-- org cannot self-promote into auditor status. Indexed partially so the
+-- auditor count + listing pages are cheap regardless of total user count.
 CREATE TABLE "user" (
     id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     first_name        TEXT        NOT NULL,
@@ -42,9 +49,11 @@ CREATE TABLE "user" (
     email             TEXT        NOT NULL UNIQUE,
     password_hash     TEXT,                       -- NULL for SSO-only or invite-pending users
     email_verified_at TIMESTAMPTZ,
+    is_auditor        BOOLEAN     NOT NULL DEFAULT FALSE,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX idx_user_is_auditor ON "user"(id) WHERE is_auditor;
 -- Case-insensitive email lookup; the unique constraint above is case-sensitive,
 -- so this covers the actual login path.
 CREATE UNIQUE INDEX idx_user_email_lower ON "user" (lower(email));

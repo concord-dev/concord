@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 )
@@ -103,6 +104,13 @@ func (s *Store) ListOrgMembers(ctx context.Context, orgID uuid.UUID) ([]OrgMembe
 }
 
 // ListUserOrgs returns every org the user belongs to with the roles they hold.
+//
+// Auditor expansion: when the user has the cross-org is_auditor flag,
+// the result also includes every other organization in the system with
+// a synthetic "auditor" role — that's how the dashboard surfaces "you
+// can read this org as an auditor" alongside real memberships. The
+// synthetic role has a zero UUID and a stable name so consumers can
+// distinguish read-only auditor access from real memberships.
 func (s *Store) ListUserOrgs(ctx context.Context, userID uuid.UUID) ([]UserOrg, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT o.id, o.name, o.slug, o.created_at, o.updated_at,
@@ -137,6 +145,44 @@ func (s *Store) ListUserOrgs(ctx context.Context, userID uuid.UUID) ([]UserOrg, 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+
+	// Auditor expansion happens in a follow-up query rather than a UNION
+	// inside the main one so the common (non-auditor) path stays a single
+	// indexed scan over user_org_role. Auditors are rare; one extra query
+	// for them is fine.
+	isAuditor, err := s.IsUserAuditor(ctx, userID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	if isAuditor {
+		extras, err := s.pool.Query(ctx,
+			`SELECT o.id, o.name, o.slug, o.created_at, o.updated_at
+			 FROM organization o
+			 WHERE o.id NOT IN (
+			   SELECT org_id FROM user_org_role WHERE user_id = $1
+			 )
+			 ORDER BY o.created_at`,
+			userID)
+		if err != nil {
+			return nil, err
+		}
+		defer extras.Close()
+		for extras.Next() {
+			var o Organization
+			if err := extras.Scan(&o.ID, &o.Name, &o.Slug, &o.CreatedAt, &o.UpdatedAt); err != nil {
+				return nil, err
+			}
+			byOrg[o.ID] = &UserOrg{
+				Organization: o,
+				Roles:        []Role{{Name: "auditor"}},
+			}
+			order = append(order, o.ID)
+		}
+		if err := extras.Err(); err != nil {
+			return nil, err
+		}
+	}
+
 	out := make([]UserOrg, 0, len(order))
 	for _, id := range order {
 		out = append(out, *byOrg[id])
@@ -147,16 +193,32 @@ func (s *Store) ListUserOrgs(ctx context.Context, userID uuid.UUID) ([]UserOrg, 
 // HasPermission reports whether the user holds any role in the org that
 // grants the named permission. Returns false (no error) when the user has
 // no membership in the org.
+//
+// Auditor short-circuit: when the user has the cross-org is_auditor flag
+// AND the permission ends in ":read", the check returns true without
+// requiring a per-org role. This is how external compliance auditors get
+// broad read access without being added as a member to every tenant.
+// Write permissions are NOT granted by the auditor flag — only reads.
+//
+// The flag is checked in the same query as the role lookup so the hot
+// path stays a single round trip.
 func (s *Store) HasPermission(ctx context.Context, userID, orgID uuid.UUID, permission string) (bool, error) {
 	var got bool
 	err := s.pool.QueryRow(ctx,
-		`SELECT EXISTS (
-		    SELECT 1
-		    FROM user_org_role uor
-		    JOIN role_permission rp ON rp.role_id = uor.role_id
-		    JOIN permission p       ON p.id = rp.permission_id
-		    WHERE uor.user_id = $1 AND uor.org_id = $2 AND p.name = $3
-		 )`,
+		`SELECT
+		    -- Auditor cross-org read grant.
+		    (EXISTS (SELECT 1 FROM "user" u
+		             WHERE u.id = $1 AND u.is_auditor)
+		     AND $3 LIKE '%:read')
+		 OR
+		    -- Normal per-org role check.
+		    EXISTS (
+		      SELECT 1
+		      FROM user_org_role uor
+		      JOIN role_permission rp ON rp.role_id = uor.role_id
+		      JOIN permission p       ON p.id = rp.permission_id
+		      WHERE uor.user_id = $1 AND uor.org_id = $2 AND p.name = $3
+		    )`,
 		userID, orgID, permission,
 	).Scan(&got)
 	return got, err

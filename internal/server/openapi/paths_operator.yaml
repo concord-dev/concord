@@ -236,5 +236,73 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/Permission' }
 
+  /operator/v1/auditors:
+    get:
+      summary: List users with cross-org read access (auditors)
+      description: |
+        Auditors are users with the `is_auditor` flag set — they have
+        read-only access to every organization, regardless of
+        membership. The flag is operator-managed; org admins cannot
+        grant it. Review this list periodically as part of an access
+        review (SOC 2 CC6.1).
+      operationId: operatorListAuditors
+      security: [{ operatorToken: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/User' }
+    post:
+      summary: Grant cross-org read access (auditor flag)
+      description: |
+        Sets `is_auditor = true` for the named user. Idempotent. The
+        target may be specified by user_id OR email. Subsequent
+        `*:read` permission checks on any org will succeed for this
+        user without per-org role membership. Write permissions are
+        NOT affected by the flag.
+      operationId: operatorGrantAuditor
+      security: [{ operatorToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id: { type: string, format: uuid }
+                email:   { type: string, format: email }
+      responses:
+        '200':
+          description: User updated; response carries the user row with is_auditor=true
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Revoke cross-org read access (auditor flag)
+      description: |
+        Sets `is_auditor = false`. Idempotent. Active sessions for the
+        user are NOT invalidated automatically — operate separately if a
+        hard cutoff is required.
+      operationId: operatorRevokeAuditor
+      security: [{ operatorToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id: { type: string, format: uuid }
+                email:   { type: string, format: email }
+      responses:
+        '204': { description: Revoked }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 # Default security: every operation falls back to bearerAuth unless its own
 # `security:` overrides. Public endpoints declare `security: []`.
