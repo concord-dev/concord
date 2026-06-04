@@ -5,7 +5,6 @@ package auth
 import (
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -80,7 +79,7 @@ func (h *Handlers) goAsync(fn func()) {
 // parse so an exhausted attacker can't make the server burn cycles on
 // decoding.
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
-	if !allow(w, h.limits.LoginIP, clientIP(r)) {
+	if !allow(w, h.limits.LoginIP, httpx.ClientIP(r)) {
 		return
 	}
 	var body struct {
@@ -127,7 +126,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	if enrolled {
 		_, challengeToken, err := h.store.CreateMFAChallenge(
-			r.Context(), user.ID, clientIP(r), r.UserAgent(), mfaChallengeTTL)
+			r.Context(), user.ID, httpx.ClientIP(r), r.UserAgent(), mfaChallengeTTL)
 		if err != nil {
 			httpx.Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -149,7 +148,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess, plain, err := h.store.CreateSession(r.Context(), user.ID, h.sessionTTL,
-		clientIP(r), r.UserAgent())
+		httpx.ClientIP(r), r.UserAgent())
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -232,7 +231,7 @@ func allow(w http.ResponseWriter, b *limiter.Bucket, key string) bool {
 // logs failures and never returns them.
 func (h *Handlers) audit(r *http.Request, p store.RecordAuditParams) {
 	if p.IP == "" {
-		p.IP = clientIP(r)
+		p.IP = httpx.ClientIP(r)
 	}
 	if p.UserAgent == "" {
 		p.UserAgent = r.UserAgent()
@@ -243,19 +242,3 @@ func (h *Handlers) audit(r *http.Request, p store.RecordAuditParams) {
 	h.store.RecordAudit(r.Context(), p)
 }
 
-// clientIP picks the leftmost X-Forwarded-For entry, falling back to
-// RemoteAddr's host portion. Uses net.SplitHostPort so IPv6 literals
-// (`[::1]:8080`) lose their brackets — Postgres `inet` rejects bracketed
-// addresses and we store this column unconditionally.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.Index(xff, ","); i > 0 {
-			return strings.TrimSpace(xff[:i])
-		}
-		return strings.TrimSpace(xff)
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
-}

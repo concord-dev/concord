@@ -281,7 +281,7 @@ func (h *Handlers) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Reques
 // one-time recovery code. On success it mints a normal session, the same
 // shape /v1/auth/login returns when MFA is not enrolled.
 func (h *Handlers) LoginMFA(w http.ResponseWriter, r *http.Request) {
-	if !allow(w, h.limits.MFASubmitIP, clientIP(r)) {
+	if !allow(w, h.limits.MFASubmitIP, httpx.ClientIP(r)) {
 		return
 	}
 	var body struct {
@@ -365,7 +365,7 @@ func (h *Handlers) LoginMFA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess, plain, err := h.store.CreateSession(r.Context(), userID, h.sessionTTL,
-		clientIP(r), r.UserAgent())
+		httpx.ClientIP(r), r.UserAgent())
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return

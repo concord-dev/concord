@@ -4,7 +4,6 @@
 package org
 
 import (
-	"net"
 	"net/http"
 	"strings"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/concord-dev/concord/internal/server/authctx"
 	"github.com/concord-dev/concord/internal/server/bg"
 	"github.com/concord-dev/concord/internal/server/bus"
+	"github.com/concord-dev/concord/internal/server/httpx"
 	"github.com/concord-dev/concord/internal/store"
 )
 
@@ -93,7 +93,7 @@ func (h *Handlers) audit(r *http.Request, p store.RecordAuditParams) {
 		}
 	}
 	if p.IP == "" {
-		p.IP = clientIP(r)
+		p.IP = httpx.ClientIP(r)
 	}
 	if p.UserAgent == "" {
 		p.UserAgent = r.UserAgent()
@@ -102,21 +102,6 @@ func (h *Handlers) audit(r *http.Request, p store.RecordAuditParams) {
 		p.RequestID = logx.RequestID(r.Context())
 	}
 	h.store.RecordAudit(r.Context(), p)
-}
-
-// clientIP mirrors the auth/operator helpers (same shape; kept local to
-// avoid a shared util package that handler subpackages would all import).
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.Index(xff, ","); i > 0 {
-			return strings.TrimSpace(xff[:i])
-		}
-		return strings.TrimSpace(xff)
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
 }
 
 // controlExists is a cheap membership check against the loaded controls library.

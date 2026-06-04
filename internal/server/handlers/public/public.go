@@ -55,7 +55,7 @@ func New(version string, ctrls []controls.Loaded, s *store.Store, limits Limits)
 // post-accept invitation in others where the user is freshly attached).
 func (h *Handlers) audit(r *http.Request, p store.RecordAuditParams) {
 	if p.IP == "" {
-		p.IP = clientIP(r)
+		p.IP = httpx.ClientIP(r)
 	}
 	if p.UserAgent == "" {
 		p.UserAgent = r.UserAgent()

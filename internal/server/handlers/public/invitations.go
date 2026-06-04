@@ -3,7 +3,6 @@ package public
 import (
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -74,7 +73,7 @@ func (h *Handlers) PreviewInvitation(w http.ResponseWriter, r *http.Request) {
 // For existing accounts first/last/password are ignored (they keep their
 // credentials; this accept just gains them org membership).
 func (h *Handlers) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
-	if !allow(w, h.limits.InviteAcceptIP, clientIP(r)) {
+	if !allow(w, h.limits.InviteAcceptIP, httpx.ClientIP(r)) {
 		return
 	}
 	var body struct {
@@ -121,7 +120,7 @@ func (h *Handlers) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	// don't have any other credential they can authenticate with yet — this
 	// is the only way they'll see the dashboard after clicking the link.
 	sess, plain, err := h.store.CreateSession(r.Context(), res.User.ID, SessionTTL,
-		clientIP(r), r.UserAgent())
+		httpx.ClientIP(r), r.UserAgent())
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -157,22 +156,3 @@ func (h *Handlers) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// clientIP picks the leftmost X-Forwarded-For entry when behind a proxy,
-// falling back to RemoteAddr's host portion. Uses net.SplitHostPort so IPv6
-// literals (`[::1]:8080`) lose their brackets — Postgres `inet` rejects
-// bracketed addresses and we store this column unconditionally.
-//
-// Duplicated from handlers/auth/auth.go to keep the public subpackage free of
-// an internal auth-package dependency.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.Index(xff, ","); i > 0 {
-			return strings.TrimSpace(xff[:i])
-		}
-		return strings.TrimSpace(xff)
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
-}

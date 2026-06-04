@@ -26,7 +26,7 @@ import (
 //
 // Body: { "email": "..." }
 func (h *Handlers) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
-	if !allow(w, h.limits.PWResetIP, clientIP(r)) {
+	if !allow(w, h.limits.PWResetIP, httpx.ClientIP(r)) {
 		return
 	}
 	var body struct {
@@ -62,7 +62,7 @@ func (h *Handlers) RequestPasswordReset(w http.ResponseWriter, r *http.Request) 
 
 	_, token, err := h.store.CreatePasswordReset(r.Context(), store.CreatePasswordResetParams{
 		UserID:      user.ID,
-		RequesterIP: clientIP(r),
+		RequesterIP: httpx.ClientIP(r),
 		RequesterUA: r.UserAgent(),
 	})
 	if err != nil {
@@ -131,7 +131,7 @@ func sendPasswordResetEmail(mailer mail.Mailer, to, confirmURL string) {
 // active session for the user is revoked, and a fresh session is minted so
 // the caller is immediately logged in.
 func (h *Handlers) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
-	if !allow(w, h.limits.PWConfirmIP, clientIP(r)) {
+	if !allow(w, h.limits.PWConfirmIP, httpx.ClientIP(r)) {
 		return
 	}
 	var body struct {
@@ -165,7 +165,7 @@ func (h *Handlers) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) 
 	}
 
 	sess, plain, err := h.store.CreateSession(r.Context(), user.ID, h.sessionTTL,
-		clientIP(r), r.UserAgent())
+		httpx.ClientIP(r), r.UserAgent())
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return

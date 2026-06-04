@@ -6,9 +6,7 @@ package operator
 
 import (
 	"errors"
-	"net"
 	"net/http"
-	"strings"
 
 	"github.com/google/uuid"
 
@@ -32,7 +30,7 @@ func New(s *store.Store) *Handlers { return &Handlers{store: s} }
 func (h *Handlers) audit(r *http.Request, p store.RecordAuditParams) {
 	p.ActorKind = store.AuditActorOperator
 	if p.IP == "" {
-		p.IP = clientIP(r)
+		p.IP = httpx.ClientIP(r)
 	}
 	if p.UserAgent == "" {
 		p.UserAgent = r.UserAgent()
@@ -43,20 +41,6 @@ func (h *Handlers) audit(r *http.Request, p store.RecordAuditParams) {
 	h.store.RecordAudit(r.Context(), p)
 }
 
-// clientIP mirrors the auth-package helper (same shape, separate copy to
-// keep the operator subpackage free of cross-handler imports).
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.Index(xff, ","); i > 0 {
-			return strings.TrimSpace(xff[:i])
-		}
-		return strings.TrimSpace(xff)
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
-}
 
 // lookupOrgBySlug resolves an org by slug and writes 404/500 on failure.
 func (h *Handlers) lookupOrgBySlug(w http.ResponseWriter, r *http.Request, slug string) (store.Organization, bool) {
