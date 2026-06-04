@@ -31,7 +31,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -61,14 +60,13 @@ type Concord struct {
 	SessionTTL         time.Duration
 	CORSAllowedOrigins []string // exact-match list; empty disables CORS
 
-	bus         *bus.Bus
-	metrics     *metrics.Metrics
-	mailer      mail.Mailer
-	bg          *bg.Runner
-	tracing     *otelx.Provider
-	authLimits  auth.Limits
-	pubLimits   public.Limits
-	mu          sync.Mutex
+	bus        *bus.Bus
+	metrics    *metrics.Metrics
+	mailer     mail.Mailer
+	bg         *bg.Runner
+	tracing    *otelx.Provider
+	authLimits auth.Limits
+	pubLimits  public.Limits
 }
 
 // Options is the construction surface for cmd/server.
@@ -96,7 +94,7 @@ type Options struct {
 // No background goroutines — runs arrive from agents over HTTP.
 func NewConcord(opts Options) (*Concord, error) {
 	if opts.Store == nil {
-		return nil, errors.New("Store is required")
+		return nil, errors.New("store is required")
 	}
 	applyDefaults(&opts)
 

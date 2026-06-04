@@ -11,7 +11,7 @@
 #     --build-arg VERSION=$(git rev-parse --short HEAD) \
 #     -t concord-server:$(git rev-parse --short HEAD) .
 
-ARG GO_VERSION=1.25-alpine
+ARG GO_VERSION=1.25.11-alpine
 ARG RUNTIME_VERSION=3.20
 
 FROM golang:${GO_VERSION} AS build

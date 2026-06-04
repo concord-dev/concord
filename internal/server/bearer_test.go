@@ -31,5 +31,5 @@ func TestNewConcord_RequiresStore(t *testing.T) {
 		ConfigPath:  filepath.Join(t.TempDir(), "x.yaml"),
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Store is required")
+	assert.Contains(t, err.Error(), "store is required")
 }

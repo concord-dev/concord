@@ -58,7 +58,7 @@ func RendererFor(format string, opts Opts) (Renderer, error) {
 	case "markdown", "md":
 		return MarkdownRenderer{}, nil
 	case "trust-portal":
-		return TrustPortalRenderer{OrgName: opts.OrgName}, nil
+		return TrustPortalRenderer(opts), nil
 	default:
 		return nil, fmt.Errorf("unknown format %q (want one of text|json|oscal|markdown|trust-portal)", format)
 	}
