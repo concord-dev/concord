@@ -30,20 +30,6 @@ func (s *Store) AssignRole(ctx context.Context, userID, orgID, roleID uuid.UUID)
 	return err
 }
 
-// RevokeRole removes one specific role grant.
-func (s *Store) RevokeRole(ctx context.Context, userID, orgID, roleID uuid.UUID) error {
-	tag, err := s.pool.Exec(ctx,
-		`DELETE FROM user_org_role WHERE user_id = $1 AND org_id = $2 AND role_id = $3`,
-		userID, orgID, roleID)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
 // RemoveUserFromOrg drops every role grant for (userID, orgID).
 func (s *Store) RemoveUserFromOrg(ctx context.Context, userID, orgID uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx,

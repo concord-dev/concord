@@ -130,29 +130,6 @@ func (s *Store) VerifyUserPassword(ctx context.Context, email, plaintext string)
 	return u, nil
 }
 
-// UpdateUserPassword replaces the user's password_hash. Used by the password
-// reset confirmation flow. The caller is responsible for revoking sessions —
-// this method only changes the credential.
-func (s *Store) UpdateUserPassword(ctx context.Context, userID uuid.UUID, plaintext string) error {
-	if plaintext == "" {
-		return errors.New("password is required")
-	}
-	hash, err := auth.HashPassword(plaintext)
-	if err != nil {
-		return err
-	}
-	ct, err := s.pool.Exec(ctx,
-		`UPDATE "user" SET password_hash = $1, updated_at = now() WHERE id = $2`,
-		hash, userID)
-	if err != nil {
-		return err
-	}
-	if ct.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
 // ListUsers returns every user.
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.pool.Query(ctx,

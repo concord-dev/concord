@@ -135,11 +135,6 @@ func NewConcord(opts Options) (*Concord, error) {
 	}, nil
 }
 
-// Mailer exposes the configured mail.Mailer so router-wired handlers can
-// inject it. Returns the LogMailer fallback when SMTP is unconfigured —
-// callers never need to nil-check.
-func (c *Concord) Mailer() mail.Mailer { return c.mailer }
-
 // defaultAuthLimits is the production rate-limit policy for /v1/auth/*. The
 // burst sizes are chosen to be lenient enough for a legit user fumbling a
 // password a few times, but tight enough to stop credential-stuffing and
@@ -202,8 +197,3 @@ func (c *Concord) Shutdown(ctx context.Context) error {
 
 // Bus exposes the event bus to callers (the SSE handler).
 func (c *Concord) Bus() *bus.Bus { return c.bus }
-
-// Metrics exposes the Prometheus instrumentation. The router pulls .Handler()
-// off this for /metrics; domain code uses it via the recorder methods on
-// metrics.Metrics.
-func (c *Concord) Metrics() *metrics.Metrics { return c.metrics }
