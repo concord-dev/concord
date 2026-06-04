@@ -1,15 +1,69 @@
-FROM golang:1.25-alpine AS build
+# syntax=docker/dockerfile:1.7
+#
+# concord-server production image. Multi-stage, non-root, statically-
+# linked binary copied into a minimal base. The base is a real distro
+# (alpine) rather than scratch/distroless so an operator landing in the
+# container with `kubectl exec` has wget for poking /healthz; the
+# trade-off (a few MB) is worth the diagnosability.
+#
+# Build it with the version embedded:
+#   docker build -f Dockerfile.server \
+#     --build-arg VERSION=$(git rev-parse --short HEAD) \
+#     -t concord-server:$(git rev-parse --short HEAD) .
+
+ARG GO_VERSION=1.25-alpine
+ARG RUNTIME_VERSION=3.20
+
+FROM golang:${GO_VERSION} AS build
+ARG VERSION=dev
 WORKDIR /src
+
+# Cache dependency downloads in their own layer so source-only changes
+# don't bust the module cache. The leading copy of just go.mod/go.sum
+# is the standard Go-build optimization.
 COPY go.mod go.sum ./
 RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -buildvcs=false -ldflags="-s -w" -o /out/concord-server ./cmd/server
 
-FROM alpine:3.20
-RUN adduser -D -u 10001 concord
-COPY --from=build /out/concord-server /usr/local/bin/concord-server
-COPY --from=build /src/controls /controls
+COPY . .
+
+# Strip symbols + DWARF (-s -w) and disable CGO so the binary lands as a
+# pure static ELF that runs on any libc. Embed the version via -X so
+# /version and the User-Agent header carry the build SHA without an env
+# var at runtime.
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=$(go env GOARCH) \
+    go build -trimpath -buildvcs=false \
+      -ldflags="-s -w -X main.version=${VERSION}" \
+      -o /out/concord-server ./cmd/server
+
+FROM alpine:${RUNTIME_VERSION}
+ARG VERSION=dev
+
+# OCI metadata so registries display the right human info. Skipping
+# revision/source URLs here because they change per fork — callers can
+# pass --label at build time when they want them.
+LABEL org.opencontainers.image.title="concord-server" \
+      org.opencontainers.image.description="Concord multi-tenant compliance API server" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
+# wget gives kubectl-exec'd operators a way to poke /healthz + /readyz
+# without bind-mounting a tools image. ca-certificates is required for
+# outbound HTTPS (webhook delivery, SMTP STARTTLS).
+RUN apk add --no-cache ca-certificates wget && \
+    adduser -D -u 10001 -h /home/concord concord
+
+COPY --from=build --chown=concord:concord /out/concord-server /usr/local/bin/concord-server
+COPY --from=build --chown=concord:concord /src/controls /controls
+
 USER concord
+WORKDIR /home/concord
 EXPOSE 8080
+
+# Container-level health check — k8s readiness probes still apply at
+# the pod level; this is for `docker ps`/`docker compose` ergonomics.
+# Uses --spider so wget returns 0 only on 2xx without writing a body.
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
+    CMD wget --quiet --spider http://127.0.0.1:8080/healthz || exit 1
+
 ENTRYPOINT ["/usr/local/bin/concord-server"]
 CMD ["--controls=/controls"]

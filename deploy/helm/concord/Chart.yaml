@@ -1,0 +1,22 @@
+apiVersion: v2
+name: concord
+description: |
+  Concord — multi-tenant compliance-as-code server. Deploys the
+  HTTP API + worker as a single Deployment, plus a ServiceAccount,
+  Service, and optional Ingress. Postgres is expected to be
+  provisioned externally (managed RDS / Cloud SQL / your existing
+  operator); the chart wires Concord at it via a Secret.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/concord-dev/concord
+sources:
+  - https://github.com/concord-dev/concord
+keywords:
+  - compliance
+  - soc2
+  - iso27001
+  - audit
+  - rego
+maintainers:
+  - name: Concord maintainers

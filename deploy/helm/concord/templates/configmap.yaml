@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "concord.fullname" . }}
+  labels:
+    {{- include "concord.labels" . | nindent 4 }}
+data:
+  # Boring, non-secret tuning lives here so a `kubectl rollout restart`
+  # is the only ceremony for changing it (vs. baking into the Pod spec
+  # which forces a full Deployment edit). Secrets (DATABASE_URL,
+  # operator token, SMTP creds) stay in real Secrets — never here.
+  LISTEN_ADDR: {{ .Values.config.listenAddr | quote }}
+  CONCORD_LOG_FORMAT: {{ .Values.config.log.format | quote }}
+  CONCORD_LOG_LEVEL: {{ .Values.config.log.level | quote }}
+  CONCORD_SHUTDOWN_TIMEOUT: {{ .Values.config.shutdownTimeout | quote }}
+  {{- with .Values.config.corsAllowedOrigins }}
+  CONCORD_CORS_ALLOWED_ORIGINS: {{ join "," . | quote }}
+  {{- end }}
+  {{- if .Values.smtp.host }}
+  CONCORD_SMTP_HOST: {{ .Values.smtp.host | quote }}
+  CONCORD_SMTP_PORT: {{ .Values.smtp.port | quote }}
+  CONCORD_SMTP_FROM: {{ .Values.smtp.from | quote }}
+  CONCORD_SMTP_TLS: {{ .Values.smtp.tls | quote }}
+  {{- end }}

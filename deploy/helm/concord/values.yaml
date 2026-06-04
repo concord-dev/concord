@@ -1,0 +1,181 @@
+# Default values for the concord chart.
+#
+# These are tuned for a production-shaped deploy: 2 replicas behind a
+# Service, requests + limits set, NetworkPolicy off by default (operators
+# typically have a cluster-wide policy stack), Ingress off by default
+# (the chart isn't opinionated about ingress controllers).
+#
+# Override only what you need. The full surface is documented inline.
+
+image:
+  repository: ghcr.io/concord-dev/concord-server
+  # Use Chart.appVersion when tag is empty so a chart upgrade pulls a
+  # matching image without an extra --set. Override to pin a digest in
+  # production: `image.digest: sha256:...` (or pin via tag).
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# Concord process configuration. Everything else flows from these.
+config:
+  # listenAddr is what concord-server binds. Match `service.port`
+  # below or override both consistently.
+  listenAddr: ":8080"
+
+  # Log format and minimum level. Production should be json.
+  log:
+    format: json
+    level: info
+
+  # Total graceful drain budget on SIGTERM: HTTP first, then bg
+  # goroutines (webhook delivery, transactional email). Default 30s
+  # lines up with the chart's terminationGracePeriodSeconds (35s)
+  # leaving 5s of headroom for kubelet to send SIGKILL after.
+  shutdownTimeout: "30s"
+
+  # CORS allowlist for browser-driven dashboards. Empty disables CORS
+  # entirely (server-to-server callers ignore it). Pass a list of
+  # exact origins; wildcards are intentionally not supported.
+  corsAllowedOrigins: []
+
+  # Operator token (CONCORD_OPERATOR_TOKEN). Required for
+  # /operator/v1/* — the SaaS-operator back-door used for tenant
+  # provisioning. Leave empty to disable those endpoints entirely
+  # (a public deploy that doesn't need provisioning).
+  operatorTokenSecretName: ""   # name of an existing Secret; key=token
+  operatorTokenSecretKey: "token"
+
+# External Postgres. The chart does NOT provision the database — point
+# `databaseUrlSecret.name` at a Secret holding the DSN under
+# `databaseUrlSecret.key`. Managed RDS / Cloud SQL / a CrunchyData
+# cluster all fit cleanly.
+database:
+  databaseUrlSecret:
+    name: ""           # required: name of a Secret with the DSN
+    key: "DATABASE_URL"
+
+# Transactional email via SMTP. Empty `host` disables real delivery
+# (the LogMailer prints message bodies to slog — fine for non-prod).
+smtp:
+  host: ""
+  port: 587
+  from: ""             # e.g. "Concord <noreply@example.com>"
+  tls: "auto"          # auto|none|starttls|implicit
+  # Credentials live in an existing Secret. Both keys are optional;
+  # leave the Secret unset to disable PLAIN auth.
+  credentialsSecretName: ""
+  credentialsSecretUsernameKey: "username"
+  credentialsSecretPasswordKey: "password"
+
+replicaCount: 2
+
+# Pod-level controls. Set requests/limits to whatever the scrape-and-
+# log volume of your tenants needs; the defaults are sized for ~50
+# orgs / 5 RPS sustained.
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# K8s probes. liveness hits /healthz (cheap, process-up only); readiness
+# hits /readyz (drains the pod from the Service when Postgres is
+# unreachable, without restarting it — that's the whole point of
+# splitting the two probes in the API).
+probes:
+  liveness:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 6
+  readiness:
+    initialDelaySeconds: 2
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+    successThreshold: 1
+
+# Pod security context. Aligned with PodSecurityStandard "restricted":
+# non-root, no privilege escalation, drop ALL capabilities. The image
+# already runs as uid 10001; this enforces it at the pod level too so
+# a future image regression doesn't silently relax security.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# kubelet sends SIGTERM, waits this many seconds, then SIGKILL. Must be
+# >= config.shutdownTimeout so the in-flight webhook drain can finish.
+terminationGracePeriodSeconds: 35
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+# Optional Ingress. Off by default — chart is unopinionated about which
+# ingress controller you run. Enable + set className + hosts to use.
+ingress:
+  enabled: false
+  className: ""        # e.g. nginx, traefik
+  annotations: {}
+  hosts:
+    - host: concord.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  # tls:
+  #   - secretName: concord-tls
+  #     hosts:
+  #       - concord.example.com
+
+# Horizontal autoscaling. Off by default; enable for production
+# deployments handling user-driven traffic.
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+# Prometheus scrape annotations. Enables `prometheus.io/scrape: "true"`
+# on the Pod so the typical kube-prometheus stack discovers /metrics
+# without a ServiceMonitor. Set to false if you use ServiceMonitor and
+# add one externally.
+metrics:
+  podAnnotations: true
+
+serviceAccount:
+  create: true
+  name: ""             # autogenerated when empty
+  annotations: {}
+
+# Pod placement.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Extra environment passed to the container — covers anything the chart
+# doesn't already model. Each entry is appended verbatim to the Pod's
+# env list, so a Secret-backed value follows the standard k8s shape:
+#   extraEnv:
+#     - name: CUSTOM_FOO
+#       valueFrom: { secretKeyRef: { name: foo, key: bar } }
+extraEnv: []
+
+# Extra volumes + mounts for things like a custom controls bundle.
+extraVolumes: []
+extraVolumeMounts: []
