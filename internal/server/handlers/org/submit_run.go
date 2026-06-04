@@ -10,6 +10,10 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
 	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/report"
 	"github.com/concord-dev/concord/internal/server/authctx"
@@ -19,6 +23,11 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
+
+// tracer is the package-level Tracer used for custom spans inside the
+// org handlers. Resolves to a no-op when tracing is disabled, so the
+// `tr.Start(...)` calls below are zero-cost in that configuration.
+var tracer = otel.Tracer("github.com/concord-dev/concord/internal/server/handlers/org")
 
 // maxSubmissionBytes caps the request body so a misbehaving (or malicious)
 // agent can't DoS the server with a 5GB findings array. 25MB comfortably
@@ -121,12 +130,28 @@ func (h *Handlers) SubmitRun(w http.ResponseWriter, r *http.Request) {
 // compare to) and logs but swallows every infrastructure error: a single
 // failure here must NEVER reject a legit submission.
 func (h *Handlers) detectAndPersistDrift(ctx context.Context, run store.Run, currentFindings []apiv1.Finding) []bus.Transition {
+	ctx, span := tracer.Start(ctx, "drift.detect_and_persist",
+		// org_id + run_id are stable, low-cardinality enough for span
+		// attrs (one tag per request is fine) and let an investigator
+		// pivot from a drift event back to the originating run.
+		// findings_count helps explain unusually long detection times.
+	)
+	span.SetAttributes(
+		attribute.String("concord.org_id", run.OrgID.String()),
+		attribute.String("concord.run_id", run.ID.String()),
+		attribute.Int("concord.findings_count", len(currentFindings)),
+	)
+	defer span.End()
+
 	log := logx.FromContext(ctx)
 	priorFindingsRaw, priorRunID, err := h.store.GetPreviousRunFindings(ctx, run.OrgID, run.ID)
 	if errors.Is(err, store.ErrNotFound) {
+		span.SetAttributes(attribute.Bool("concord.first_run", true))
 		return nil // first run for this org — no prior to compare to
 	}
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "load prior run")
 		log.Error("drift: load prior run failed",
 			slog.String("org_id", run.OrgID.String()),
 			slog.String("err", err.Error()))
@@ -143,6 +168,7 @@ func (h *Handlers) detectAndPersistDrift(ctx context.Context, run store.Run, cur
 	}
 
 	transitions := drift.Detect(prior, currentFindings)
+	span.SetAttributes(attribute.Int("concord.transitions", len(transitions)))
 	if len(transitions) == 0 {
 		return nil
 	}

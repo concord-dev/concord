@@ -55,6 +55,20 @@ database:
     name: ""           # required: name of a Secret with the DSN
     key: "DATABASE_URL"
 
+# Distributed tracing via OpenTelemetry. Empty `endpoint` installs a
+# no-op TracerProvider — zero CPU cost when an operator hasn't run
+# an OTel collector. Set endpoint + protocol to wire a real exporter.
+#
+# Common shapes:
+#   endpoint: otel-collector.observability.svc:4318  # http
+#   endpoint: otel-collector.observability.svc:4317  # grpc
+otel:
+  endpoint: ""
+  protocol: "http"     # http|grpc
+  insecure: true       # safe in-cluster; set false for cross-cluster TLS
+  sampleRatio: 1.0     # 0.0..1.0 head sampler ratio
+  serviceName: ""      # defaults to "concord-server" when empty
+
 # Transactional email via SMTP. Empty `host` disables real delivery
 # (the LogMailer prints message bodies to slog — fine for non-prod).
 smtp:

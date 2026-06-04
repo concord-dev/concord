@@ -13,14 +13,23 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/store"
 )
 
 // webhookHTTPClient is the single client every outbound delivery uses. A
 // short total timeout protects the server: one slow receiver must never
-// stall the request that triggered the broadcast.
-var webhookHTTPClient = &http.Client{Timeout: 10 * time.Second}
+// stall the request that triggered the broadcast. The transport is
+// wrapped with otelhttp so each outbound POST emits a client-side span
+// + propagates the W3C traceparent header — receivers that participate
+// in the trace can correlate webhook deliveries to the run that fired
+// them.
+var webhookHTTPClient = &http.Client{
+	Timeout:   10 * time.Second,
+	Transport: otelhttp.NewTransport(http.DefaultTransport),
+}
 
 // signPayload returns the value for the X-Concord-Signature header. The
 // "sha256=" prefix matches the GitHub / Stripe convention so receivers can

@@ -26,6 +26,7 @@ import (
 
 	"github.com/concord-dev/concord/internal/logx"
 	"github.com/concord-dev/concord/internal/notify/mail"
+	"github.com/concord-dev/concord/internal/otelx"
 	"github.com/concord-dev/concord/internal/server"
 	"github.com/concord-dev/concord/internal/store"
 )
@@ -103,6 +104,23 @@ func runServe(args []string) error {
 	var shutdownTimeoutStr string
 	fs.StringVar(&shutdownTimeoutStr, "shutdown-timeout", envOr("CONCORD_SHUTDOWN_TIMEOUT", "30s"),
 		"Maximum time to drain HTTP + webhook + email backlog on SIGTERM before forcing exit")
+	// OpenTelemetry tracing — disabled when --otel-endpoint is empty.
+	// Env names mirror the OTEL_* conventions so a generic operator stack
+	// can hand the chart its OTLP endpoint without per-app translation.
+	var (
+		otelEndpoint    string
+		otelProtocol    string
+		otelInsecure    bool
+		otelSampleRatio float64
+	)
+	fs.StringVar(&otelEndpoint, "otel-endpoint", envOr("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+		"OTLP collector endpoint (host:port). Empty disables tracing.")
+	fs.StringVar(&otelProtocol, "otel-protocol", envOr("OTEL_EXPORTER_OTLP_PROTOCOL", "http"),
+		"OTLP wire format: http (port 4318) or grpc (port 4317)")
+	fs.BoolVar(&otelInsecure, "otel-insecure", envOr("OTEL_EXPORTER_OTLP_INSECURE", "true") == "true",
+		"Skip TLS on the OTLP collector connection (safe for in-cluster sidecar deploys)")
+	fs.Float64Var(&otelSampleRatio, "otel-sample-ratio", parseFloatEnvOr("OTEL_TRACES_SAMPLER_ARG", 1.0),
+		"Head-sampling ratio in [0.0, 1.0]")
 	// SMTP — leave Host empty for the dev-mode LogMailer (no real
 	// delivery, body printed to slog so the developer can still click the
 	// reset / invite URL out of the terminal).
@@ -161,6 +179,27 @@ func runServe(args []string) error {
 	if err != nil {
 		return fmt.Errorf("--smtp-port must be an integer: %w", err)
 	}
+
+	// OTel init goes here so the provider exists before NewConcord wires
+	// it into the org-handler tracer. A failure to reach the collector
+	// must not crash the process — slog the error and fall through with
+	// a no-op provider so tracing is best-effort.
+	otelCtx, otelCancel := context.WithTimeout(ctx, 5*time.Second)
+	tracing, otelErr := otelx.Init(otelCtx, otelx.Config{
+		Endpoint:       otelEndpoint,
+		Protocol:       otelProtocol,
+		Insecure:       otelInsecure,
+		SampleRatio:    otelSampleRatio,
+		ServiceName:    envOr("OTEL_SERVICE_NAME", "concord-server"),
+		ServiceVersion: version,
+	})
+	otelCancel()
+	if otelErr != nil {
+		slog.Error("otel init failed; continuing without tracing",
+			slog.String("err", otelErr.Error()))
+		tracing, _ = otelx.Init(ctx, otelx.Config{}) // safe no-op fallback
+	}
+
 	c, err := server.NewConcord(server.Options{
 		ControlsDir:        controlsDir,
 		ConfigPath:         configPath,
@@ -176,6 +215,7 @@ func runServe(args []string) error {
 			From:     smtpFrom,
 			TLS:      mail.TLSMode(smtpTLS),
 		},
+		Tracing: tracing,
 	})
 	if err != nil {
 		return err
@@ -247,6 +287,15 @@ func runServe(args []string) error {
 				slog.Duration("http_drain", httpDrain),
 				slog.Duration("total", totalDrain))
 		}
+		// OTel last so the "shutdown complete" + any final spans actually
+		// reach the collector. Best-effort; an unreachable collector at
+		// shutdown is not worth blocking exit on.
+		if tracing != nil {
+			if err := tracing.Shutdown(shutdownCtx); err != nil {
+				slog.Warn("otel shutdown failed (some spans may have been dropped)",
+					slog.String("err", err.Error()))
+			}
+		}
 		return bgErr
 	}
 }
@@ -256,6 +305,21 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// parseFloatEnvOr reads a float64 from the named env var, falling back
+// to fallback when unset or malformed. Used for OTEL_TRACES_SAMPLER_ARG
+// which OTel publishes as a string; we need to bind it to a float64 flag.
+func parseFloatEnvOr(key string, fallback float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 // splitCSV trims and de-empties a comma-separated origin list. We don't use

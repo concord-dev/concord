@@ -22,3 +22,14 @@ data:
   CONCORD_SMTP_FROM: {{ .Values.smtp.from | quote }}
   CONCORD_SMTP_TLS: {{ .Values.smtp.tls | quote }}
   {{- end }}
+  {{- if .Values.otel.endpoint }}
+  # Distributed tracing — env names mirror the OTEL_* spec so generic
+  # collector setups (vendor docs, kubectl debug recipes) work as-is.
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.otel.endpoint | quote }}
+  OTEL_EXPORTER_OTLP_PROTOCOL: {{ .Values.otel.protocol | quote }}
+  OTEL_EXPORTER_OTLP_INSECURE: {{ .Values.otel.insecure | quote }}
+  OTEL_TRACES_SAMPLER_ARG: {{ .Values.otel.sampleRatio | quote }}
+  {{- if .Values.otel.serviceName }}
+  OTEL_SERVICE_NAME: {{ .Values.otel.serviceName | quote }}
+  {{- end }}
+  {{- end }}

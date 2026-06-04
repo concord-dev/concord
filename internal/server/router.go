@@ -3,6 +3,9 @@ package server
 import (
 	"net/http"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/concord-dev/concord/internal/server/cors"
 	"github.com/concord-dev/concord/internal/server/handlers/auth"
 	"github.com/concord-dev/concord/internal/server/handlers/operator"
@@ -55,10 +58,46 @@ func (c *Concord) Router() http.Handler {
 	// middleware's short-circuit.
 	corsMW := cors.New(cors.Config{AllowedOrigins: c.CORSAllowedOrigins})
 	secHdr := middleware.SecurityHeaders(middleware.SecurityHeadersConfig{})
-	return middleware.RequestID(
+
+	// Wrap the entire stack in otelhttp so every request gets a server
+	// span. otelhttp creates the span BEFORE the mux has matched, so we
+	// can't compute the canonical span name (`POST /v1/orgs/{slug}/runs`)
+	// from r.Pattern at creation time.
+	//
+	// renameSpanFromPattern fixes this AFTER the mux dispatches. It must
+	// sit INSIDE every middleware that does `r.WithContext(...)`
+	// (RequestID is the only one in our stack), because each WithContext
+	// creates a NEW *http.Request struct and the mux's r.Pattern
+	// mutation is only visible to whichever wrapper holds the
+	// final-most reference. Placing the renamer immediately around the
+	// mux means it shares *http.Request with the mux's dispatch.
+	core := middleware.RequestID(
 		httpx.Logging(
 			c.metrics.Middleware(
-				secHdr(corsMW(mux)))))
+				secHdr(corsMW(renameSpanFromPattern(mux))))))
+	return otelhttp.NewHandler(core, "concord.http")
+}
+
+// renameSpanFromPattern updates the otelhttp server span's name to the
+// matched route pattern AFTER the mux dispatches, so traces show
+// "POST /v1/orgs/{slug}/runs" instead of the generic "concord.http"
+// fallback. Bounded cardinality — same approach as the metrics labels.
+//
+// We rewrite the name AFTER next.ServeHTTP returns so r.Pattern is set
+// (Go's ServeMux fills it during dispatch). The span is still active in
+// the response goroutine — otelhttp ends it after our handler returns.
+func renameSpanFromPattern(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+		// Go's ServeMux patterns are "METHOD /path", so r.Pattern is
+		// already the canonical span name we want — don't double-
+		// prepend the method.
+		if r.Pattern != "" {
+			if span := trace.SpanFromContext(r.Context()); span.IsRecording() {
+				span.SetName(r.Pattern)
+			}
+		}
+	})
 }
 
 func mountPublic(mux *http.ServeMux, h *public.Handlers) {

@@ -41,6 +41,7 @@ import (
 	"github.com/concord-dev/concord/internal/config"
 	"github.com/concord-dev/concord/internal/controls"
 	"github.com/concord-dev/concord/internal/notify/mail"
+	"github.com/concord-dev/concord/internal/otelx"
 	"github.com/concord-dev/concord/internal/server/bg"
 	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/server/handlers/auth"
@@ -64,6 +65,7 @@ type Concord struct {
 	metrics     *metrics.Metrics
 	mailer      mail.Mailer
 	bg          *bg.Runner
+	tracing     *otelx.Provider
 	authLimits  auth.Limits
 	pubLimits   public.Limits
 	mu          sync.Mutex
@@ -82,6 +84,12 @@ type Options struct {
 	// just prints the message body — fine for local dev, never reaches a
 	// real inbox. Set Host (and From) to wire a real relay.
 	SMTP mail.Config
+
+	// Tracing, when non-nil, is the OpenTelemetry provider the server
+	// uses for distributed tracing. Wire via otelx.Init from cmd/server.
+	// Leave nil to disable tracing entirely (handlers still compile —
+	// the global otel.Tracer fallback is a no-op).
+	Tracing *otelx.Provider
 }
 
 // NewConcord loads controls + config and wires the Store and event bus.
@@ -121,6 +129,7 @@ func NewConcord(opts Options) (*Concord, error) {
 		metrics:            m,
 		mailer:             mail.New(opts.SMTP),
 		bg:                 bg.New(),
+		tracing:            opts.Tracing,
 		authLimits:         defaultAuthLimits(),
 		pubLimits:          defaultPublicLimits(),
 	}, nil
