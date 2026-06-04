@@ -85,19 +85,6 @@ func TestMiddleware_UnmatchedRoutesShareOnePatternLabel(t *testing.T) {
 		"all unmatched routes must collapse into a single series")
 }
 
-func TestRecordWebhookDelivery_PartitionsByOutcome(t *testing.T) {
-	m := metrics.New()
-	m.RecordWebhookDelivery("success")
-	m.RecordWebhookDelivery("success")
-	m.RecordWebhookDelivery("non_2xx")
-	m.RecordWebhookDelivery("network_error")
-
-	body := scrape(t, m)
-	assert.Contains(t, body, `concord_webhook_deliveries_total{outcome="success"} 2`)
-	assert.Contains(t, body, `concord_webhook_deliveries_total{outcome="non_2xx"} 1`)
-	assert.Contains(t, body, `concord_webhook_deliveries_total{outcome="network_error"} 1`)
-}
-
 func TestRecordBusDrop_PartitionsByKind(t *testing.T) {
 	m := metrics.New()
 	m.RecordBusDrop("run.completed")

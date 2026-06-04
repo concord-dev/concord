@@ -1,11 +1,11 @@
 package server_test
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -74,96 +74,47 @@ func TestWebhooks_RejectsNonHTTPURL(t *testing.T) {
 	assert.Contains(t, string(body), "http://")
 }
 
-// TestWebhooks_FireOnRunDeliversSignedPayload is the integration test:
-// register a webhook, run a check, prove the receiver got an HMAC-signed
-// `run.completed` event whose signature verifies against the secret.
-func TestWebhooks_FireOnRunDeliversSignedPayload(t *testing.T) {
-	h := newHarness(t)
+// TestWebhooks_SignatureRoundTrip verifies that VerifyWebhookSignature
+// agrees with the worker-side signer (worker/executor.go::sign). This
+// is the contract receivers depend on — both sides compute the same
+// "sha256=hex(hmac)" value, so a webhook implementer can paste the
+// helper into their stack.
+func TestWebhooks_SignatureRoundTrip(t *testing.T) {
+	body := []byte(`{"version":1,"kind":"run.completed"}`)
+	secret := "whsec_test_round_trip"
 
-	type captured struct {
-		Event string
-		Sig   string
-		Body  []byte
-	}
-	got := make(chan captured, 8)
-	mockSink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		got <- captured{
-			Event: r.Header.Get("X-Concord-Event"),
-			Sig:   r.Header.Get("X-Concord-Signature"),
-			Body:  body,
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(mockSink.Close)
+	// Sign the way the worker does (the helper is unexported there, so
+	// we replicate its tiny body here). The shape is documented as
+	// public contract: "sha256=" + hex(hmac-sha256(secret, body)).
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
-	// Register the webhook.
-	respC, rawC := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/webhooks",
-		fmt.Sprintf(`{"url":%q,"event_kinds":["run.completed"]}`, mockSink.URL),
-		h.apiToken)
-	require.Equal(t, http.StatusCreated, respC.StatusCode, string(rawC))
-	var created struct {
-		Webhook webhookViewT `json:"webhook"`
-		Secret  string       `json:"secret"`
-	}
-	require.NoError(t, json.Unmarshal(rawC, &created))
-
-	// Push a run — the server broadcasts run.completed which fires the webhook.
-	h.submitTestRun(t, h.apiToken, "[]")
-
-	// Wait for the delivery — only run.completed should arrive (run.started
-	// is filtered out by event_kinds).
-	var c captured
-	select {
-	case c = <-got:
-	case <-time.After(15 * time.Second):
-		t.Fatal("webhook receiver never got an event")
-	}
-	assert.Equal(t, "run.completed", c.Event)
-	assert.True(t, strings.HasPrefix(c.Sig, "sha256="),
-		"X-Concord-Signature must use the sha256= prefix")
-
-	// Verify the signature against the receiver-side helper.
-	ok := server.VerifyWebhookSignature(created.Secret, c.Body, c.Sig)
-	assert.True(t, ok, "signature must validate with the disclosed secret")
-
-	// Confirm the row's last_status got recorded as 200 by the server.
-	require.Eventually(t, func() bool {
-		respG, raw := h.do(t, "GET",
-			"/v1/orgs/"+h.org.Slug+"/webhooks/"+created.Webhook.ID.String(),
-			"", h.apiToken)
-		if respG.StatusCode != http.StatusOK {
-			return false
-		}
-		var v webhookViewT
-		_ = json.Unmarshal(raw, &v)
-		return v.LastStatus != nil && *v.LastStatus == http.StatusOK
-	}, 5*time.Second, 50*time.Millisecond,
-		"webhook row should reflect a 200 last_status after successful delivery")
+	assert.True(t, server.VerifyWebhookSignature(secret, body, sig),
+		"server-side Verify must accept a worker-side signature")
+	assert.False(t, server.VerifyWebhookSignature(secret+"x", body, sig),
+		"wrong secret must fail validation")
+	assert.False(t, server.VerifyWebhookSignature(secret, append(body, 'x'), sig),
+		"tampered body must fail validation")
 }
 
-func TestWebhooks_EventKindFilterSkipsUnsubscribedKinds(t *testing.T) {
+// TestSubmitRun_EnqueuesOutboxEvent verifies the Phase 2 outbox
+// hand-off: submitting a run must result in an event_outbox row with
+// kind='run.completed' for the originating org. Webhook delivery
+// itself lives in cmd/concord-worker; the server's only durable
+// post-condition is that an outbox row exists.
+func TestSubmitRun_EnqueuesOutboxEvent(t *testing.T) {
 	h := newHarness(t)
-
-	got := make(chan string, 8)
-	mockSink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got <- r.Header.Get("X-Concord-Event")
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(mockSink.Close)
-
-	// Subscribe ONLY to run.failed — run.completed must NOT reach the receiver.
-	_, _ = h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/webhooks",
-		fmt.Sprintf(`{"url":%q,"event_kinds":["run.failed"]}`, mockSink.URL),
-		h.apiToken)
 	h.submitTestRun(t, h.apiToken, "[]")
 
-	select {
-	case kind := <-got:
-		t.Fatalf("receiver subscribed only to run.failed should not see %q", kind)
-	case <-time.After(2 * time.Second):
-		// expected — no delivery
-	}
+	require.Eventually(t, func() bool {
+		var count int
+		_ = h.c.Store.Pool().QueryRow(t.Context(),
+			`SELECT count(*) FROM event_outbox WHERE org_id = $1 AND kind = 'run.completed'`,
+			h.org.ID).Scan(&count)
+		return count == 1
+	}, 5*time.Second, 50*time.Millisecond,
+		"SubmitRun must enqueue exactly one run.completed event in the outbox")
 }
 
 // webhookViewT is the test-side shadow of server.webhookView (unexported).

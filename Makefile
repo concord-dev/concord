@@ -9,7 +9,7 @@ LISTEN_ADDR ?= :8080
 # Analyzer binaries — installed into $(go env GOPATH)/bin by `make tools`.
 GOPATH_BIN := $(shell go env GOPATH)/bin
 
-.PHONY: tidy build server test test-race lint vet staticcheck deadcode vuln tools check clean run dev pg pg-down pg-logs psql air-install help
+.PHONY: tidy build server worker test test-race lint vet staticcheck deadcode vuln tools check clean run dev pg pg-down pg-logs psql air-install help
 
 help:
 	@echo "Common targets:"
@@ -18,6 +18,7 @@ help:
 	@echo "  make dev         — live-reload concord-server (needs air + pg)"
 	@echo "  make build       — build the concord CLI"
 	@echo "  make server      — build cmd/server (concord-server)"
+	@echo "  make worker      — build cmd/concord-worker"
 	@echo "  make test        — full test sweep"
 	@echo "  make test-race   — full test sweep with the race detector"
 	@echo "  make lint        — vet + staticcheck + deadcode (all must pass)"
@@ -35,6 +36,10 @@ build:
 server:
 	@mkdir -p bin
 	go build -buildvcs=false -o bin/concord-server ./cmd/server
+
+worker:
+	@mkdir -p bin
+	go build -buildvcs=false -o bin/concord-worker ./cmd/concord-worker
 
 test:
 	go test -buildvcs=false ./... -count=1

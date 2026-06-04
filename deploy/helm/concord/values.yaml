@@ -142,6 +142,68 @@ outbox:
   batchSize: 50
   maxAttempts: 20
 
+# concord-worker — the consumer-side binary that reads concord.events,
+# dedupes via Redis, and drives outbound webhook delivery with retries.
+# Same container image as the server; different command. Disable the
+# worker (replicaCount: 0) only in deploys that don't use webhooks; the
+# in-process delivery path was removed in Phase 3, so without the worker
+# no webhooks fire.
+worker:
+  enabled: true
+  replicaCount: 2
+  # Image tag inherits from .Values.image.tag unless explicitly set.
+  image:
+    tag: ""
+    digest: ""
+  consumerGroup: "concord-worker"
+  # Per-row retry budget. 5 attempts × jittered 1s..60s backoff covers
+  # the vast majority of receiver flakes; anything still failing after
+  # this is left for the operator (status='dead').
+  maxAttempts: 5
+  backoff:
+    base: "1s"
+    max:  "60s"
+  retrier:
+    pollInterval: "1s"
+    batchSize:    25
+  # Optional Redis dedupe (skip event_ids the consumer has seen in
+  # the last `ttl`). When unset, the DB-side UNIQUE constraint still
+  # prevents double-delivery; Redis just makes the fast-path cheaper.
+  dedupe:
+    enabled: true        # set to false to fall back to DB-only dedupe
+    ttl: "24h"
+    # Defaults to .Values.redis.* — override here if dedupe should hit a
+    # different Redis from the rate limiter.
+    redisAddr: ""
+    sentinelMaster: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 300m
+      memory: 384Mi
+  # Liveness only — readiness flips to 503 when DB or Kafka becomes
+  # unreachable, removing the pod from any future service discovery.
+  probes:
+    liveness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 2
+      failureThreshold: 6
+    readiness:
+      initialDelaySeconds: 3
+      periodSeconds: 5
+      timeoutSeconds: 2
+      failureThreshold: 3
+      successThreshold: 1
+  podDisruptionBudget:
+    minAvailable: 1
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
 # Transactional email via SMTP. Empty `host` disables real delivery
 # (the LogMailer prints message bodies to slog — fine for non-prod).
 smtp:

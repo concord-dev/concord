@@ -169,6 +169,9 @@ jobs:
       - name: build server
         run: go build -buildvcs=false -o /tmp/concord-server ./cmd/server
 
+      - name: build worker
+        run: go build -buildvcs=false -o /tmp/concord-worker ./cmd/concord-worker
+
       - name: smoke (controls library loads + check runs)
         run: /tmp/concord check --fixtures --quiet --controls ./controls
 

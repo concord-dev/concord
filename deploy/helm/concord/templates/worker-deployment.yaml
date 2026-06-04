@@ -1,0 +1,179 @@
+{{- if .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "concord.fullname" . }}-worker
+  labels:
+    {{- include "concord.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "concord.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  # Worker is stateless w.r.t. HTTP; safe to rolling-update without the
+  # zero-downtime strictness the API enforces. Kafka consumer-group
+  # rebalances absorb the brief partition reassignment when a pod restarts.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "concord.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.metrics.podAnnotations }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: /metrics
+        {{- end }}
+        {{- with .Values.worker.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "concord.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: concord-worker
+          image: {{ include "concord.imageRef" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Worker runs the same image but a different entrypoint binary.
+          # Dockerfile.server installs both; the chart picks via command.
+          command: ["/usr/local/bin/concord-worker"]
+          args: ["serve"]
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 9090
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "concord.fullname" . }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.databaseUrlSecret.name }}
+                  key: {{ .Values.database.databaseUrlSecret.key }}
+            - name: LISTEN_ADDR
+              value: ":9090"
+            - name: CONCORD_KAFKA_GROUP
+              value: {{ .Values.worker.consumerGroup | quote }}
+            - name: CONCORD_WORKER_MAX_ATTEMPTS
+              value: {{ .Values.worker.maxAttempts | quote }}
+            - name: CONCORD_WORKER_BACKOFF_BASE
+              value: {{ .Values.worker.backoff.base | quote }}
+            - name: CONCORD_WORKER_BACKOFF_MAX
+              value: {{ .Values.worker.backoff.max | quote }}
+            - name: CONCORD_WORKER_RETRIER_POLL
+              value: {{ .Values.worker.retrier.pollInterval | quote }}
+            - name: CONCORD_WORKER_RETRIER_BATCH
+              value: {{ .Values.worker.retrier.batchSize | quote }}
+            {{- if .Values.worker.dedupe.enabled }}
+            - name: CONCORD_DEDUPE_REDIS
+              value: "redis"
+            - name: CONCORD_DEDUPE_TTL
+              value: {{ .Values.worker.dedupe.ttl | quote }}
+            - name: CONCORD_DEDUPE_REDIS_ADDR
+              value: {{ default .Values.redis.addr .Values.worker.dedupe.redisAddr | quote }}
+            {{- $sm := default .Values.redis.sentinelMaster .Values.worker.dedupe.sentinelMaster -}}
+            {{- if $sm }}
+            - name: CONCORD_DEDUPE_REDIS_MODE
+              value: "sentinel"
+            - name: CONCORD_DEDUPE_REDIS_SENTINEL_MASTER
+              value: {{ $sm | quote }}
+            {{- end }}
+            {{- if .Values.redis.credentialsSecretName }}
+            - name: CONCORD_DEDUPE_REDIS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.redis.credentialsSecretName }}
+                  key: {{ .Values.redis.credentialsSecretUsernameKey }}
+                  optional: true
+            - name: CONCORD_DEDUPE_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.redis.credentialsSecretName }}
+                  key: {{ .Values.redis.credentialsSecretPasswordKey }}
+                  optional: true
+            {{- end }}
+            {{- end }}
+            {{- if and .Values.kafka.brokers .Values.kafka.sasl.mechanism .Values.kafka.sasl.credentialsSecretName }}
+            - name: CONCORD_KAFKA_SASL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kafka.sasl.credentialsSecretName }}
+                  key: {{ .Values.kafka.sasl.credentialsSecretUsernameKey }}
+            - name: CONCORD_KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kafka.sasl.credentialsSecretName }}
+                  key: {{ .Values.kafka.sasl.credentialsSecretPasswordKey }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: {{ .Values.worker.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.worker.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.worker.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.worker.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: {{ .Values.worker.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.worker.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.worker.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.worker.probes.readiness.failureThreshold }}
+            successThreshold: {{ .Values.worker.probes.readiness.successThreshold }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- if and .Values.worker.enabled .Values.worker.podDisruptionBudget }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "concord.fullname" . }}-worker
+  labels:
+    {{- include "concord.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  selector:
+    matchLabels:
+      {{- include "concord.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  minAvailable: {{ .Values.worker.podDisruptionBudget.minAvailable }}
+{{- end }}
+{{- end }}

@@ -28,8 +28,7 @@ type Metrics struct {
 	HTTPRequestDuration *prometheus.HistogramVec
 	HTTPInflight        prometheus.Gauge
 
-	WebhookDeliveriesTotal *prometheus.CounterVec
-	BusEventsDroppedTotal  *prometheus.CounterVec
+	BusEventsDroppedTotal *prometheus.CounterVec
 
 	// LimiterPrimaryErrorsTotal counts how often a Redis-backed rate
 	// limiter failed its primary call and had to fall through to the
@@ -80,13 +79,6 @@ func New() *Metrics {
 				Name: "concord_http_inflight_requests",
 				Help: "HTTP requests currently being served.",
 			},
-		),
-		WebhookDeliveriesTotal: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "concord_webhook_deliveries_total",
-				Help: "Outbound webhook deliveries, partitioned by outcome (success | non_2xx | network_error).",
-			},
-			[]string{"outcome"},
 		),
 		BusEventsDroppedTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -161,7 +153,6 @@ func New() *Metrics {
 		m.HTTPRequestsTotal,
 		m.HTTPRequestDuration,
 		m.HTTPInflight,
-		m.WebhookDeliveriesTotal,
 		m.BusEventsDroppedTotal,
 		m.LimiterPrimaryErrorsTotal,
 		m.OutboxEnqueuedTotal,
@@ -188,12 +179,6 @@ func (m *Metrics) RegisterDBPool(pool *pgxpool.Pool) {
 // Handler returns the /metrics HTTP handler bound to this private registry.
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.reg, promhttp.HandlerOpts{Registry: m.reg})
-}
-
-// RecordWebhookDelivery is the thin call sites use to bump the outcome counter
-// without depending on prometheus internals.
-func (m *Metrics) RecordWebhookDelivery(outcome string) {
-	m.WebhookDeliveriesTotal.WithLabelValues(outcome).Inc()
 }
 
 // RecordBusDrop bumps the dropped-event counter for the named bus kind.

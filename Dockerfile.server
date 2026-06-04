@@ -33,7 +33,11 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=$(go env GOARCH) \
     go build -trimpath -buildvcs=false \
       -ldflags="-s -w -X main.version=${VERSION}" \
-      -o /out/concord-server ./cmd/server
+      -o /out/concord-server ./cmd/server && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=$(go env GOARCH) \
+    go build -trimpath -buildvcs=false \
+      -ldflags="-s -w -X main.version=${VERSION}" \
+      -o /out/concord-worker ./cmd/concord-worker
 
 FROM alpine:${RUNTIME_VERSION}
 ARG VERSION=dev
@@ -53,6 +57,7 @@ RUN apk add --no-cache ca-certificates wget && \
     adduser -D -u 10001 -h /home/concord concord
 
 COPY --from=build --chown=concord:concord /out/concord-server /usr/local/bin/concord-server
+COPY --from=build --chown=concord:concord /out/concord-worker /usr/local/bin/concord-worker
 COPY --from=build --chown=concord:concord /src/controls /controls
 
 USER concord

@@ -1,4 +1,4 @@
-# Concord — architecture (as of Phase 0 cleanup, pre-Kafka/Redis)
+# Concord — architecture
 
 This document captures the **current** shape of the codebase so contributors
 have a single map of the major pieces, why they exist, and where the seams
@@ -13,18 +13,18 @@ cloud credentials; it evaluates Rego-based controls against collected
 evidence and **pushes** finalized run results to the SaaS server. The
 server never holds customer cloud credentials.
 
-Two binaries today:
+Three binaries today:
 
-- `cmd/concord-server` — the multi-tenant HTTP API
+- `cmd/server` — the multi-tenant HTTP API (concord-server)
 - `cmd/concord` — the agent CLI (controls library, runners, push, login)
-
-A third (`cmd/concord-worker`) is planned in Phase 3.
+- `cmd/concord-worker` — Kafka consumer + outbound webhook delivery
 
 ## Repository layout
 
 ```
 cmd/
   concord/         CLI: check, watch, push, login, orgs, ...
+  concord-worker/  Kafka consumer + webhook delivery (Phase 3)
   server/          concord-server entry point + subcommands (seed-tenant, migrate-down)
 controls/          Rego control library + fixtures
 deploy/
@@ -43,6 +43,7 @@ internal/
   eventbus/        durable Outbox + Dispatcher; ships event_outbox rows to Kafka
   kafkax/          segmentio/kafka-go writer factory (TLS + SASL + compression)
   redisx/          go-redis client factory (single + Sentinel modes)
+  worker/          concord-worker domain: Executor + Consumer + Retrier
   policy/          OPA/Rego evaluator
   report/          renderers (text, json, oscal, markdown, trust-portal)
   runner/          orchestrates evidence × policy per control
@@ -187,6 +188,59 @@ Wire shape on the topic:
 - Body: `{version, event_id, org_id, kind, occurred_at, data}` JSON
 - Headers: `event-id`, `event-kind`, `org-id`, `traceparent`
 
+## Webhook delivery (Phase 3)
+
+`cmd/concord-worker` is the consumer-side counterpart to the Phase 2
+outbox dispatcher. It reads `concord.events` via a Kafka consumer
+group, dedupes incoming `event_id`s through Redis SETNX (24h TTL), and
+drives the first delivery attempt for every matching webhook. A
+sibling `Retrier` goroutine polls `webhook_delivery` for failed rows
+whose backoff has elapsed and re-runs the same `Executor`.
+
+```
+Kafka topic concord.events
+        │
+        ▼  (kafka-go ConsumerGroup, partition key = org_id)
+Consumer.processOne
+        │
+        ├─ dedupe (Redis SETNX event_id, TTL 24h)
+        │     (DB-side UNIQUE (webhook_id, event_id) is the second line)
+        │
+        ├─ parse envelope → resolve enabled webhooks for org
+        │
+        └─ for each webhook:
+              UpsertDelivery (status='delivering')
+              Executor.Attempt → POST + HMAC sign + status update
+              commit Kafka offset only AFTER every row is persisted
+
+Retrier.tick (every PollInterval)
+        │
+        ├─ ClaimPendingDeliveries (FOR UPDATE SKIP LOCKED, batch ≤ N)
+        │
+        └─ for each row:
+              Executor.Attempt (retry=true)
+              MarkSucceeded | MarkFailed (+ backoff) | MarkDead
+```
+
+- **Idempotency**: two layers — Redis SETNX fast-path + DB-level UNIQUE
+  `(webhook_id, event_id)`. A re-delivered Kafka message becomes a
+  no-op UPSERT on the existing row.
+- **At-least-once**: Kafka offsets commit only AFTER each row is
+  persisted. A crash mid-batch re-delivers; dedupe makes it safe.
+- **Bounded retries**: 5 attempts × jittered exponential backoff
+  (1s → 60s capped). After max attempts, the row is `status='dead'` and
+  stops being claimed; Phase 4 surfaces an operator endpoint.
+- **Per-tenant ordering**: partition key = `org_id`, so all of an
+  org's events land on one partition and one consumer processes them
+  in order.
+- **Horizontal scale**: Kafka rebalances partitions across worker
+  pods; SKIP LOCKED shards the retrier across replicas.
+
+The server-side `Concord.Broadcast` / `BroadcastDrift` keep publishing
+on the in-process bus (for SSE) and enqueue an outbox row — webhook
+fan-out happens **only** in the worker now. Deploying the worker is a
+prerequisite for any webhook to fire.
+
 ## Background work
 
 The current model is in-process via `internal/server/bg.Runner`:
@@ -302,7 +356,7 @@ Run locally with `make lint && make test-race && make vuln`.
 |---|---|
 | 1     | Redis-backed rate limiter (interface + impl + fallback) — DONE |
 | 2     | Transactional outbox + Kafka producer for `concord.events` — DONE |
-| 3     | `cmd/concord-worker` binary + Kafka consumer + per-attempt webhook delivery table |
+| 3     | `cmd/concord-worker` binary + Kafka consumer + `webhook_delivery` table — DONE |
 | 4     | DLQ inspection + replay endpoints |
 | 5     | Idempotency-Key for POST mutations, circuit breakers, audit partitioning, PII redaction |
 | 6     | Operator runbook + Grafana dashboards + Prometheus alerts |

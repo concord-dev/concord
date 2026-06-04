@@ -82,5 +82,31 @@ services:
     ports:
       - "8080:8080"
 
+  worker:
+    profiles: ["server"]
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: concord-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    command: ["/usr/local/bin/concord-worker", "serve"]
+    environment:
+      DATABASE_URL: postgres://concord:concord-dev@postgres:5432/concord?sslmode=disable
+      LISTEN_ADDR: ":9090"
+      CONCORD_KAFKA_BROKERS: "redpanda:9092"
+      CONCORD_KAFKA_TOPIC: "concord.events"
+      CONCORD_KAFKA_GROUP: "concord-worker"
+      CONCORD_DEDUPE_REDIS: "redis"
+      CONCORD_DEDUPE_REDIS_ADDR: "redis:6379"
+    ports:
+      - "9090:9090"
+
 volumes:
   concord-pgdata:
