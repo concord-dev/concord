@@ -8,11 +8,19 @@ import (
 )
 
 type Config struct {
-	APIVersion string         `json:"apiVersion,omitempty"`
-	Kind       string         `json:"kind,omitempty"`
-	Metadata   Metadata       `json:"metadata,omitempty"`
-	Controls   ControlsCfg    `json:"controls,omitempty"`
-	Frameworks []FrameworkRef `json:"frameworks,omitempty" yaml:"frameworks,omitempty"`
+	APIVersion string                  `json:"apiVersion,omitempty"`
+	Kind       string                  `json:"kind,omitempty"`
+	Metadata   Metadata                `json:"metadata,omitempty"`
+	Controls   ControlsCfg             `json:"controls,omitempty"`
+	Frameworks []FrameworkRef          `json:"frameworks,omitempty"  yaml:"frameworks,omitempty"`
+	Sources    map[string]SourceConfig `json:"sources,omitempty"     yaml:"sources,omitempty"`
+}
+
+// SourceConfig overrides per-source behaviour. Today the only knob is
+// Interval — used by `concord watch` to refresh each source on its own
+// cadence instead of one global ticker.
+type SourceConfig struct {
+	Interval string `json:"interval,omitempty" yaml:"interval,omitempty"`
 }
 
 // FrameworkRef is one workspace-level framework dependency.

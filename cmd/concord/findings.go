@@ -83,7 +83,7 @@ func resolveFindingsServer(serverURL, orgSlug, token string) (findingsServer, er
 func newFindingsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "findings",
-		Short: "List and manage persistent finding state (suppress, accept, resolve)",
+		Short: "List and manage persistent finding state (suppress, accept, assign, resolve)",
 	}
 	cmd.AddCommand(newFindingsListCmd())
 	cmd.AddCommand(newFindingsShowCmd())
@@ -92,6 +92,89 @@ func newFindingsCmd() *cobra.Command {
 	cmd.AddCommand(newFindingsDeferCmd())
 	cmd.AddCommand(newFindingsResolveCmd())
 	cmd.AddCommand(newFindingsFalsePositiveCmd())
+	cmd.AddCommand(newFindingsAssignCmd())
+	cmd.AddCommand(newFindingsUnassignCmd())
+	return cmd
+}
+
+func newFindingsAssignCmd() *cobra.Command {
+	var (
+		serverURL, orgSlug, token string
+		assigneeEmail, due, ticketURL, notes string
+		slaDays int
+	)
+	cmd := &cobra.Command{
+		Use:   "assign <finding-id>",
+		Short: "Assign a remediation task to someone with a due date and optional SLA",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fs, err := resolveFindingsServer(serverURL, orgSlug, token)
+			if err != nil {
+				return err
+			}
+			if assigneeEmail == "" {
+				return errors.New("--to <email> is required")
+			}
+			body := map[string]any{"assignee_email": assigneeEmail}
+			if due != "" {
+				t, err := parseUntil(due)
+				if err != nil {
+					return fmt.Errorf("--due: %w", err)
+				}
+				body["due_at"] = t.Format(time.RFC3339)
+			}
+			if slaDays > 0 {
+				body["sla_days"] = slaDays
+			}
+			if ticketURL != "" {
+				body["external_ticket_url"] = ticketURL
+			}
+			if notes != "" {
+				body["notes"] = notes
+			}
+			var rem map[string]any
+			if err := apiPut(cmd.Context(), fs, "/v1/orgs/"+fs.orgSlug+"/finding-state/"+args[0]+"/remediation", body, &rem); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stdout, "remediation assigned to %s", assigneeEmail)
+			if d, ok := rem["due_at"].(string); ok && d != "" {
+				fmt.Fprintf(os.Stdout, " (due %s)", d)
+			}
+			fmt.Fprintln(os.Stdout)
+			if url, ok := rem["external_ticket_url"].(string); ok && url != "" {
+				fmt.Fprintf(os.Stdout, "external ticket: %s\n", url)
+			}
+			return nil
+		},
+	}
+	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
+	cmd.Flags().StringVar(&assigneeEmail, "to", "", "Assignee email")
+	cmd.Flags().StringVar(&due, "due", "", "Due date (RFC3339 or duration like 30d / 8w / 6mo)")
+	cmd.Flags().IntVar(&slaDays, "sla", 0, "SLA days (advisory; pairs with --due for reporting)")
+	cmd.Flags().StringVar(&ticketURL, "ticket-url", "", "External issue tracker URL")
+	cmd.Flags().StringVar(&notes, "notes", "", "Free-form notes")
+	return cmd
+}
+
+func newFindingsUnassignCmd() *cobra.Command {
+	var serverURL, orgSlug, token string
+	cmd := &cobra.Command{
+		Use:   "unassign <finding-id>",
+		Short: "Remove the remediation task attached to a finding",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fs, err := resolveFindingsServer(serverURL, orgSlug, token)
+			if err != nil {
+				return err
+			}
+			if err := apiDelete(cmd.Context(), fs, "/v1/orgs/"+fs.orgSlug+"/finding-state/"+args[0]+"/remediation"); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stdout, "%s remediation removed\n", args[0])
+			return nil
+		},
+	}
+	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
 	return cmd
 }
 
@@ -245,17 +328,35 @@ func apiGet(ctx context.Context, fs findingsServer, path string, out any) error 
 }
 
 func apiPatch(ctx context.Context, fs findingsServer, path string, body, out any) error {
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return err
+	return apiSend(ctx, fs, http.MethodPatch, path, body, out)
+}
+
+func apiPut(ctx context.Context, fs findingsServer, path string, body, out any) error {
+	return apiSend(ctx, fs, http.MethodPut, path, body, out)
+}
+
+func apiDelete(ctx context.Context, fs findingsServer, path string) error {
+	return apiSend(ctx, fs, http.MethodDelete, path, nil, nil)
+}
+
+func apiSend(ctx context.Context, fs findingsServer, method, path string, body, out any) error {
+	var rdr io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		rdr = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPatch,
-		strings.TrimRight(fs.url, "/")+path, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, method,
+		strings.TrimRight(fs.url, "/")+path, rdr)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+fs.token)
-	req.Header.Set("Content-Type", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	return doJSON(req, out)
 }
 

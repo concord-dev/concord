@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -74,6 +75,9 @@ for an always-on agent.`,
 				return fmt.Errorf("filter excluded every control (%d loaded, 0 matched)", totalLoaded)
 			}
 			push.resolveFromCredentials()
+			if effective, applied := applySourceIntervals(interval, cfg.Sources, controls.NeededSources(loaded), os.Stderr); applied {
+				interval = effective
+			}
 			fmt.Fprintf(os.Stderr, "watching %d control(s) every %s; output → %s\n",
 				len(loaded), interval, outputDir)
 			if push.serverURL != "" {
@@ -136,4 +140,38 @@ for an always-on agent.`,
 	cmd.Flags().StringSliceVar(&controlIDs, "control-id", nil, "Only watch controls with these ids (repeatable)")
 	addPushFlags(cmd, &push)
 	return cmd
+}
+
+// applySourceIntervals reads per-source interval overrides from concord.yaml
+// (the `sources.<name>.interval` map) and returns the minimum across the
+// global --interval and every configured source that the loaded controls
+// actually use. Per-source caching is a follow-up (Φ-3.1); for now the
+// loop ticks at the fastest required rate and every tick still re-evaluates
+// every control. Wasteful for daily-cadence sources but never stale.
+func applySourceIntervals(globalInterval time.Duration, sources map[string]config.SourceConfig, needed []string, log io.Writer) (time.Duration, bool) {
+	if len(sources) == 0 {
+		return globalInterval, false
+	}
+	min := globalInterval
+	applied := false
+	for _, src := range needed {
+		cfg, ok := sources[src]
+		if !ok || cfg.Interval == "" {
+			continue
+		}
+		d, err := time.ParseDuration(cfg.Interval)
+		if err != nil {
+			fmt.Fprintf(log, "warn: ignoring sources.%s.interval=%q: %v\n", src, cfg.Interval, err)
+			continue
+		}
+		fmt.Fprintf(log, "source %s configured interval=%s\n", src, d)
+		applied = true
+		if d < min {
+			min = d
+		}
+	}
+	if applied && min != globalInterval {
+		fmt.Fprintf(log, "watch loop ticks at %s (min of configured per-source intervals + --interval)\n", min)
+	}
+	return min, applied
 }
