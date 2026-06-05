@@ -15,9 +15,6 @@ import (
 	"github.com/concord-dev/concord/internal/cli/credentials"
 )
 
-// loginResult mirrors the /v1/auth/login response body. When the user has
-// MFA enrolled, MFARequired is true + MFAToken is set and Token is empty.
-// Otherwise Token is the session plaintext and the rest is populated.
 type loginResult struct {
 	MFARequired bool   `json:"mfa_required"`
 	MFAToken    string `json:"mfa_token"`
@@ -88,8 +85,6 @@ local dev). The most recently used profile is the default.`,
 				return err
 			}
 
-			// MFA branch — prompt for TOTP or recovery code, complete the
-			// second leg, end up with a real session.
 			finalSession := first
 			if first.MFARequired {
 				code, err := promptLine(cmd.OutOrStdout(), cmd.InOrStdin(),
@@ -135,9 +130,6 @@ local dev). The most recently used profile is the default.`,
 			p.UserID = finalSession.User.ID
 			p.UserEmail = finalSession.User.Email
 			p.ExpiresAt = finalSession.ExpiresAt
-			// DefaultOrg deliberately left alone — `concord orgs use` is the
-			// way to pin it. login should not silently change which org a
-			// subsequent push targets.
 
 			if err := credentials.Save(file); err != nil {
 				return fmt.Errorf("saving credentials: %w", err)
@@ -165,7 +157,6 @@ local dev). The most recently used profile is the default.`,
 	return cmd
 }
 
-// promptLine writes prompt to w and reads a single \n-terminated line from r.
 func promptLine(w io.Writer, r io.Reader, prompt string) (string, error) {
 	fmt.Fprint(w, prompt)
 	br := bufio.NewReader(r)
@@ -176,13 +167,6 @@ func promptLine(w io.Writer, r io.Reader, prompt string) (string, error) {
 	return strings.TrimRight(line, "\r\n"), nil
 }
 
-// readPassword prefers a terminal echo-off prompt; falls back to reading a
-// line from the supplied reader when --password-stdin is set OR when stdin
-// isn't a TTY (CI / scripted runs). The two modes are explicit: we don't
-// want to silently fall back from TTY-prompt to stdin-read and accept a
-// half-typed password as the whole password. `in` is plumbed through from
-// cobra (cmd.InOrStdin) so tests can inject a string reader; production
-// callers transparently get os.Stdin.
 func readPassword(w io.Writer, in io.Reader, passwordStdin bool) (string, error) {
 	if passwordStdin {
 		br := bufio.NewReader(in)

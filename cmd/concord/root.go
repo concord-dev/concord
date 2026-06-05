@@ -22,7 +22,6 @@ Audits become continuous instead of episodic.`,
 	cmd.AddCommand(newUpgradeCmd())
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newPushCmd())
-	// Session-credentials family. login/logout/whoami/orgs.
 	cmd.AddCommand(newLoginCmd())
 	cmd.AddCommand(newLogoutCmd())
 	cmd.AddCommand(newWhoamiCmd())

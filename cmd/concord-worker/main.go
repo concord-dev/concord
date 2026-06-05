@@ -1,28 +1,3 @@
-// concord-worker consumes the durable concord.events topic and drives
-// outbound webhook delivery with retries and per-attempt forensics in
-// webhook_delivery. It is the consumer-side counterpart to
-// concord-server's outbox Dispatcher (Phase 2).
-//
-// Two long-running goroutines per pod:
-//
-//   - Consumer reads the Kafka topic via a consumer group, dedupes
-//     event_ids via Redis (24h TTL), and drives the first delivery
-//     attempt for every matching webhook.
-//
-//   - Retrier polls webhook_delivery for status='failed' rows whose
-//     backoff has elapsed and re-runs the Executor. SELECT FOR UPDATE
-//     SKIP LOCKED lets multiple worker replicas cooperate.
-//
-// Crash safety: the consumer commits Kafka offsets only AFTER all
-// delivery rows for a message are persisted. A crash mid-batch
-// reprocesses the message; the dedupe + UNIQUE (webhook_id, event_id)
-// guarantees idempotency.
-//
-// Subcommands:
-//
-//	concord-worker            start the worker (default)
-//	concord-worker version    print build version
-//	concord-worker help       show usage
 package main
 
 import (
@@ -54,7 +29,6 @@ import (
 	"github.com/concord-dev/concord/internal/worker"
 )
 
-// version is set at build time via -ldflags "-X main.version=<sha>".
 var version = "dev"
 
 func main() {
@@ -125,8 +99,6 @@ func runServe(args []string) error {
 	fs.StringVar(&topic, "kafka-topic", envOr("CONCORD_KAFKA_TOPIC", "concord.events"),
 		"Topic to consume from.")
 
-	// Kafka transport config — mirrors cmd/server flags so a deploy
-	// passes the same env vars to both binaries.
 	var (
 		kafkaBrokersCSV    string
 		kafkaClientID      string
@@ -155,8 +127,6 @@ func runServe(args []string) error {
 	fs.StringVar(&kafkaMaxWaitStr, "kafka-max-wait", envOr("CONCORD_KAFKA_MAX_WAIT", "1s"),
 		"How long the consumer blocks waiting for new messages (Go duration).")
 
-	// Redis dedupe — optional. When unset the worker falls back to
-	// DB-side dedupe via the UNIQUE constraint.
 	var (
 		dedupeRedis        string
 		dedupeRedisMode    string
@@ -179,7 +149,6 @@ func runServe(args []string) error {
 	fs.StringVar(&dedupeTTLStr, "dedupe-ttl", envOr("CONCORD_DEDUPE_TTL", "24h"),
 		"Lifetime of the dedupe Redis key.")
 
-	// Executor / Retrier knobs.
 	var (
 		maxAttempts     int
 		backoffBaseStr  string
@@ -207,8 +176,6 @@ func runServe(args []string) error {
 	fs.StringVar(&breakerOpenStr, "breaker-open-timeout", envOr("CONCORD_WORKER_BREAKER_OPEN_TIMEOUT", "30s"),
 		"How long a tripped breaker stays open before allowing a half-open probe.")
 
-	// OpenTelemetry — same toggles as cmd/server so an OTel collector
-	// sees both binaries' spans.
 	var (
 		otelEndpoint string
 		otelProtocol string
@@ -237,8 +204,6 @@ func runServe(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Store — shared by Consumer (UpsertDelivery, ListEnabledWebhooks)
-	// and Retrier (ClaimPendingDeliveries).
 	st, err := store.Open(ctx, databaseURL, store.PoolOptions{
 		MaxConns:        16,
 		MinConns:        2,
@@ -250,9 +215,6 @@ func runServe(args []string) error {
 	}
 	defer st.Close()
 
-	// OTel — fails open. If the collector is unreachable at startup we
-	// log + continue with a no-op provider so a missing OTel doesn't
-	// keep the worker from processing events.
 	otelCtx, otelCancel := context.WithTimeout(ctx, 5*time.Second)
 	tracing, otelErr := otelx.Init(otelCtx, otelx.Config{
 		Endpoint:       otelEndpoint,
@@ -268,14 +230,8 @@ func runServe(args []string) error {
 		tracing, _ = otelx.Init(ctx, otelx.Config{})
 	}
 
-	// Redis dedupe — optional. Fail-fast on unreachable Redis at
-	// startup so misconfiguration surfaces immediately.
 	var rdb *redis.Client
 	if dedupeRedis == "redis" {
-		// One CSV flag covers both topologies: a single "host:port" is
-		// single-mode; a comma-separated list with a SentinelMaster is
-		// sentinel-mode. Branch on the master being set so the address
-		// list goes to the right Config field.
 		cfg := redisx.Config{
 			Mode:               redisx.Mode(dedupeRedisMode),
 			Username:           dedupeRedisUser,
@@ -305,7 +261,6 @@ func runServe(args []string) error {
 		slog.Info("dedupe redis enabled", slog.String("mode", dedupeRedisMode))
 	}
 
-	// Metrics — private registry + /metrics HTTP handler.
 	m := newMetrics()
 	executor, err := worker.NewExecutor(st, worker.ExecutorConfig{
 		MaxAttempts: maxAttempts,
@@ -316,10 +271,6 @@ func runServe(args []string) error {
 	if err != nil {
 		return err
 	}
-	// Wire per-host circuit breakers in front of every outbound POST.
-	// Trips after 5 consecutive failures, 30s open, then 1 half-open
-	// probe. State is per-pod in-memory — load-shedding, not a
-	// correctness guarantee.
 	executor.SetBreakers(worker.NewBreakers(worker.BreakerConfig{
 		MaxConsecutiveFails: uint32(breakerMaxFails),
 		OpenTimeout:         mustDuration(breakerOpenStr, "breaker-open-timeout"),
@@ -346,8 +297,6 @@ func runServe(args []string) error {
 		return err
 	}
 
-	// Verify Kafka reachability before starting the consumer; same
-	// fail-fast philosophy as cmd/server.
 	pingCtx, pingCancel := context.WithTimeout(ctx, 5*time.Second)
 	if err := kafkax.Ping(pingCtx, kafkax.Config{
 		Brokers:            kafkax.ParseBrokers(kafkaBrokersCSV),
@@ -365,9 +314,6 @@ func runServe(args []string) error {
 	}
 	pingCancel()
 
-	// HTTP surface for /healthz + /readyz + /metrics. The worker
-	// doesn't terminate user-facing HTTP, but liveness/readiness probes
-	// + metrics scraping make it a first-class k8s citizen.
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", m.handler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -375,9 +321,6 @@ func runServe(args []string) error {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		// Ready iff DB + Kafka reachable. Both checks short-timeout
-		// so the readiness probe doesn't pile up goroutines on a
-		// failing dep.
 		dbCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 		if err := st.Pool().Ping(dbCtx); err != nil {
@@ -410,8 +353,6 @@ func runServe(args []string) error {
 		}
 	}()
 
-	// Worker goroutines. Run on the parent ctx so SIGTERM cancels both
-	// at once.
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); consumer.Run(ctx) }()
@@ -431,8 +372,6 @@ func runServe(args []string) error {
 	defer cancel()
 	slog.Info("concord-worker: shutting down", slog.Duration("timeout", shutdownTimeout))
 
-	// Stop accepting new HTTP first so readiness flips to NotReady;
-	// then wait for the consumer + retrier goroutines.
 	_ = httpSrv.Shutdown(shutdownCtx)
 
 	done := make(chan struct{})
@@ -489,14 +428,9 @@ func mustDuration(s, flag string) time.Duration {
 	return d
 }
 
-// metrics is the worker's private Prometheus registry + collectors.
-// Kept inside cmd/concord-worker (rather than internal/server/metrics)
-// because the worker is a separate binary; sharing collectors would
-// force one process to import the other's metric definitions.
 type metrics struct {
 	reg *prometheus.Registry
 
-	// Consumer
 	consumed    *prometheus.CounterVec
 	dedupeHits  *prometheus.CounterVec
 	badMessages *prometheus.CounterVec
@@ -504,18 +438,15 @@ type metrics struct {
 	fanoutSize  *prometheus.HistogramVec
 	commitErrs  prometheus.Counter
 
-	// Executor
 	attemptStarted  *prometheus.CounterVec
 	attemptOutcome  *prometheus.CounterVec
 	attemptDuration prometheus.Histogram
 	dead            *prometheus.CounterVec
 
-	// Retrier
 	retrierTicks      prometheus.Counter
 	retrierClaimed    prometheus.Counter
 	retrierTickErrors prometheus.Counter
 
-	// Breaker
 	breakerStateChanges *prometheus.CounterVec
 }
 
@@ -625,10 +556,6 @@ func (m *metrics) retrierMetrics() worker.RetrierMetrics {
 	}
 }
 
-// onBreakerStateChange is what the Executor's breaker pool calls on
-// every transition. Label cardinality is bounded at 3 (closed | open |
-// half-open) — host is logged in slog but kept out of metrics so a
-// fleet with thousands of webhook hosts doesn't explode the series.
 func (m *metrics) onBreakerStateChange(_ string, _, to gobreaker.State) {
 	m.breakerStateChanges.WithLabelValues(to.String()).Inc()
 }

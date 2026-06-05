@@ -45,9 +45,6 @@ expired token) does NOT block the local cleanup. The user's intent is
 				return fmt.Errorf("profile %q not found", target)
 			}
 
-			// Best-effort server revoke. We DON'T fail the command on a
-			// network/auth error here because the user wants to be locally
-			// logged out regardless — preventing that would be hostile.
 			err = callAPI(cmd.Context(), "POST", p.Server+"/v1/auth/logout", p.Token, nil, nil)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warning: server revoke failed (continuing with local logout): %v\n", err)
@@ -64,8 +61,6 @@ expired token) does NOT block the local cleanup. The user's intent is
 				fmt.Fprintf(cmd.OutOrStdout(), "✓ logged out of profile %q (file kept)\n", target)
 				return nil
 			}
-			// Default: if this was the only profile, blow the file away.
-			// Otherwise just delete the named profile and re-save.
 			if len(file.Profiles) <= 1 {
 				if err := credentials.Delete(); err != nil {
 					return err

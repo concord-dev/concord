@@ -67,9 +67,6 @@ func loadFindings(path string) ([]apiv1.Finding, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Accept two shapes:
-	//   1. raw findings array — produced by `concord watch` (last-run.json)
-	//   2. JSONReport envelope — produced by `concord check --format=json`
 	var direct []apiv1.Finding
 	if err := json.Unmarshal(raw, &direct); err == nil && direct != nil {
 		return direct, nil
@@ -152,8 +149,6 @@ func renderEventTable(w io.Writer, heading string, events []watcher.Event, withF
 	fmt.Fprintln(w)
 }
 
-// mdEscape neutralizes pipes and backticks so a control title with `|` or
-// inline code doesn't break the table render.
 func mdEscape(s string) string {
 	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {

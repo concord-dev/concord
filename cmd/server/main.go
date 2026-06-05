@@ -1,14 +1,3 @@
-// concord-server is the multi-tenant HTTP API for Concord. Customers'
-// agents (the `concord` CLI) run scans on their own infrastructure with
-// their own credentials and POST completed findings to this server.
-// concord-server never holds customer cloud credentials.
-//
-// Subcommands:
-//
-//	concord-server                   start the HTTP server (default)
-//	concord-server seed-tenant [...] bootstrap first org + owner + API token
-//	concord-server version           print build version
-//	concord-server help              show usage
 package main
 
 import (
@@ -37,7 +26,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// version is set at build time via -ldflags "-X main.version=<sha>".
 var version = "dev"
 
 func main() {
@@ -110,9 +98,6 @@ func runServe(args []string) error {
 	var shutdownTimeoutStr string
 	fs.StringVar(&shutdownTimeoutStr, "shutdown-timeout", envOr("CONCORD_SHUTDOWN_TIMEOUT", "30s"),
 		"Maximum time to drain HTTP + webhook + email backlog on SIGTERM before forcing exit")
-	// OpenTelemetry tracing — disabled when --otel-endpoint is empty.
-	// Env names mirror the OTEL_* conventions so a generic operator stack
-	// can hand the chart its OTLP endpoint without per-app translation.
 	var (
 		otelEndpoint    string
 		otelProtocol    string
@@ -127,9 +112,6 @@ func runServe(args []string) error {
 		"Skip TLS on the OTLP collector connection (safe for in-cluster sidecar deploys)")
 	fs.Float64Var(&otelSampleRatio, "otel-sample-ratio", parseFloatEnvOr("OTEL_TRACES_SAMPLER_ARG", 1.0),
 		"Head-sampling ratio in [0.0, 1.0]")
-	// SMTP — leave Host empty for the dev-mode LogMailer (no real
-	// delivery, body printed to slog so the developer can still click the
-	// reset / invite URL out of the terminal).
 	var (
 		smtpHost     string
 		smtpPortStr  string
@@ -150,12 +132,6 @@ func runServe(args []string) error {
 		"From: address used on outbound mail (or CONCORD_SMTP_FROM). e.g. 'Concord <noreply@acme.test>'.")
 	fs.StringVar(&smtpTLS, "smtp-tls", envOr("CONCORD_SMTP_TLS", "auto"),
 		"SMTP transport encryption: auto|none|starttls|implicit (or CONCORD_SMTP_TLS).")
-	// Rate limiter — leave --rate-limiter empty (or "memory") for the
-	// in-memory per-pod buckets; set "redis" with --redis-addr (or
-	// --redis-sentinel-addrs + --redis-sentinel-master) to share buckets
-	// across the fleet. The Lua-scripted Redis impl atomically refills +
-	// spends a token per call; on Redis error the FailoverBucket drops to
-	// a tightened in-memory bucket so auth keeps responding.
 	var (
 		rateLimiter           string
 		redisMode             string
@@ -202,10 +178,6 @@ func runServe(args []string) error {
 		"Redis write timeout per command.")
 	fs.Float64Var(&limiterFallbackRatio, "limiter-fallback-ratio", parseFloatEnvOr("CONCORD_LIMITER_FALLBACK_RATIO", 0.33),
 		"Per-pod fallback budget as a fraction of the shared Redis budget. 0.33 keeps the fleet-wide ceiling near the configured rate for the canonical 3-replica deploy.")
-	// Kafka producer for the durable event pipe (concord.events). When
-	// brokers are empty, the outbox still accrues rows durably; a no-op
-	// publisher marks them shipped so the queue drains. Wire real
-	// brokers to forward to a Phase 3 worker / downstream consumer.
 	var (
 		kafkaBrokersCSV    string
 		kafkaTopic         string
@@ -289,10 +261,6 @@ func runServe(args []string) error {
 		return fmt.Errorf("--smtp-port must be an integer: %w", err)
 	}
 
-	// OTel init goes here so the provider exists before NewConcord wires
-	// it into the org-handler tracer. A failure to reach the collector
-	// must not crash the process — slog the error and fall through with
-	// a no-op provider so tracing is best-effort.
 	otelCtx, otelCancel := context.WithTimeout(ctx, 5*time.Second)
 	tracing, otelErr := otelx.Init(otelCtx, otelx.Config{
 		Endpoint:       otelEndpoint,
@@ -309,10 +277,6 @@ func runServe(args []string) error {
 		tracing, _ = otelx.Init(ctx, otelx.Config{}) // safe no-op fallback
 	}
 
-	// Redis rate limiter — only built when --rate-limiter=redis. We
-	// intentionally fail fast on misconfiguration (unparseable timeouts,
-	// missing Sentinel master) so the operator sees the error at startup
-	// instead of as a runtime 500 the first time a login arrives.
 	rdb, err := openLimiterRedis(ctx, rateLimiter, redisx.Config{
 		Mode:               redisx.Mode(redisMode),
 		Addr:               redisAddr,
@@ -335,10 +299,6 @@ func runServe(args []string) error {
 		defer rdb.Close()
 	}
 
-	// Kafka writer for the outbox dispatcher. Empty brokers → nil
-	// writer → NewConcord wires the no-op publisher. Anything else
-	// fails-fast at startup so misconfiguration is caught before the
-	// first event tries to publish.
 	kafkaCfg := kafkax.Config{
 		Brokers:            kafkax.ParseBrokers(kafkaBrokersCSV),
 		Topic:              kafkaTopic,
@@ -437,15 +397,6 @@ func runServe(args []string) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		// Drain order:
-		//   1. srv.Shutdown — stop accepting new connections, let
-		//      in-flight HTTP requests finish.
-		//   2. c.Shutdown   — wait for tracked background goroutines
-		//      (webhook deliveries, transactional emails) to finish.
-		// Both share the same overall budget; if HTTP drain takes the
-		// whole window, the background drain returns DeadlineExceeded
-		// instantly. That's intentional — a deploy waiting on us is a
-		// stronger signal than "give every webhook one more retry".
 		slog.Info("shutting down",
 			slog.String("timeout", shutdownTimeout.String()))
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
@@ -468,9 +419,6 @@ func runServe(args []string) error {
 				slog.Duration("http_drain", httpDrain),
 				slog.Duration("total", totalDrain))
 		}
-		// OTel last so the "shutdown complete" + any final spans actually
-		// reach the collector. Best-effort; an unreachable collector at
-		// shutdown is not worth blocking exit on.
 		if tracing != nil {
 			if err := tracing.Shutdown(shutdownCtx); err != nil {
 				slog.Warn("otel shutdown failed (some spans may have been dropped)",
@@ -488,9 +436,6 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// parseFloatEnvOr reads a float64 from the named env var, falling back
-// to fallback when unset or malformed. Used for OTEL_TRACES_SAMPLER_ARG
-// which OTel publishes as a string; we need to bind it to a float64 flag.
 func parseFloatEnvOr(key string, fallback float64) float64 {
 	v := os.Getenv(key)
 	if v == "" {
@@ -503,8 +448,6 @@ func parseFloatEnvOr(key string, fallback float64) float64 {
 	return parsed
 }
 
-// parseIntEnvOr is the int sibling of parseFloatEnvOr — for env-driven
-// numeric flags whose default depends on the deployment shape.
 func parseIntEnvOr(key string, fallback int) int {
 	v := os.Getenv(key)
 	if v == "" {
@@ -517,11 +460,6 @@ func parseIntEnvOr(key string, fallback int) int {
 	return parsed
 }
 
-// openLimiterRedis builds the rate-limiter Redis client when --rate-limiter
-// is "redis", or returns (nil, nil) when it's anything else. A non-nil
-// client is verified with a short Ping before NewConcord wires it; an
-// unreachable Redis at startup is treated as a configuration error so the
-// pod restarts via k8s instead of silently running on per-pod limits.
 func openLimiterRedis(ctx context.Context, mode string, cfg redisx.Config) (*redis.Client, error) {
 	switch mode {
 	case "", "memory":
@@ -546,10 +484,6 @@ func openLimiterRedis(ctx context.Context, mode string, cfg redisx.Config) (*red
 	}
 }
 
-// mustDuration parses a Go duration string, panicking with a flag-named
-// message on failure. Used for the Redis timeout flags where a bad value
-// is a deploy-time configuration mistake — better to crash loudly at
-// startup than ship a server that silently uses the zero default.
 func mustDuration(s, flag string) time.Duration {
 	d, err := time.ParseDuration(s)
 	if err != nil {
@@ -558,10 +492,6 @@ func mustDuration(s, flag string) time.Duration {
 	return d
 }
 
-// splitCSV trims and de-empties a comma-separated origin list. We don't use
-// strings.Split alone because " ,, foo , " is a likely operator typo and a
-// silently-included empty origin would match the special "no Origin header"
-// case in some servers, which we want to avoid here.
 func splitCSV(s string) []string {
 	if s == "" {
 		return nil

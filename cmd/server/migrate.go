@@ -11,15 +11,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// runMigrateDown rolls back the most-recently-applied migration(s). Wraps
-// store.MigrateDown with CLI ergonomics: a flag for `steps`, a confirmation
-// prompt (skippable with --yes) so a fat-fingered invocation can't silently
-// nuke a dev DB, and a final report of which versions came off.
-//
-// DEV USE ONLY — see the docstring on store.MigrateDown for the
-// expand-contract rationale. The subcommand exits non-zero with a clear
-// message when an envisioned production caller tries to use it without
-// understanding the data-loss semantics.
 func runMigrateDown(args []string) error {
 	var (
 		databaseURL string
@@ -63,9 +54,6 @@ func runMigrateDown(args []string) error {
 	}
 	defer st.Close()
 
-	// Report what we're about to roll back so the operator can sanity-check
-	// before committing. With one consolidated migration in the tree this
-	// is mostly cosmetic; the value grows as 0002+ start landing.
 	applied, err := st.AppliedMigrationVersions(ctx)
 	if err != nil {
 		return fmt.Errorf("listing applied migrations: %w", err)

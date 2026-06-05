@@ -9,9 +9,6 @@ import (
 	"github.com/concord-dev/concord/internal/cli/credentials"
 )
 
-// newOrgsCmd hosts the `concord orgs ...` family. Today: `list` (read what
-// the server says I belong to) and `use` (pin a default slug for
-// push/check/watch). Future: `create`, `invite`, etc.
 func newOrgsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "orgs",
@@ -94,9 +91,6 @@ func newOrgsUseCmd() *cobra.Command {
 			if !ok || p == nil {
 				return fmt.Errorf("profile %q not found", target)
 			}
-			// Validate the slug actually exists on this session before
-			// pinning. Catches typos and prevents a silently-broken push
-			// run later. 404 surfaces as a clear "no such org for you".
 			err = callAPI(cmd.Context(), "GET",
 				p.Server+"/v1/orgs/"+slug+"/me", p.Token, nil, nil)
 			if err != nil {
@@ -120,8 +114,6 @@ func newOrgsUseCmd() *cobra.Command {
 	return cmd
 }
 
-// requireProfile loads credentials and returns the named (or current)
-// profile, or a helpful error pointing the user at `concord login`.
 func requireProfile(name string) (*credentials.Profile, error) {
 	file, err := credentials.Load()
 	if errors.Is(err, credentials.ErrNoCredentials) {

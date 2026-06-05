@@ -44,9 +44,6 @@ A typical flow before any real work:
 				return fmt.Errorf("profile %q not found", profileName)
 			}
 
-			// Resolve the live user + orgs against the server. We don't
-			// just trust the cached UserEmail because the session may have
-			// been revoked / the user renamed / etc. since login.
 			var me struct {
 				ID    string `json:"id"`
 				Email string `json:"email"`
@@ -57,10 +54,6 @@ A typical flow before any real work:
 				}
 				return err
 			}
-			// /v1/me/orgs returns []store.UserOrg with shape
-			//   { "organization": {slug, name, ...}, "roles": [{name}, ...] }
-			// We flatten to a CLI-friendly view ({slug, name, roles:[]string})
-			// at the boundary so downstream rendering stays simple.
 			var orgsRaw []struct {
 				Organization struct {
 					Slug string `json:"slug"`

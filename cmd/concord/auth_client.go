@@ -12,14 +12,8 @@ import (
 	"time"
 )
 
-// authHTTPClient is the single transport every auth-flow command shares. The
-// timeout is deliberately short — login/logout/whoami either complete fast
-// or something is wrong worth bailing on.
 var authHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
-// httpStatusError is returned by callAPI when the server replies with a
-// non-2xx. Carrying the status code lets callers branch (404 vs 401 vs 500)
-// without re-parsing the message.
 type httpStatusError struct {
 	Status int
 	Body   string
@@ -29,12 +23,6 @@ func (e *httpStatusError) Error() string {
 	return fmt.Sprintf("server returned %d: %s", e.Status, e.Body)
 }
 
-// callAPI is the workhorse: marshal in, POST/GET, parse JSON out. `bearer`
-// may be empty for unauthenticated calls (login). `into` is the response
-// destination; pass nil to discard. Errors:
-//
-//   - *httpStatusError on non-2xx
-//   - wrapped network / parse errors otherwise
 func callAPI(ctx context.Context, method, url, bearer string, in, into any) error {
 	var body io.Reader
 	if in != nil {
@@ -64,8 +52,6 @@ func callAPI(ctx context.Context, method, url, bearer string, in, into any) erro
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		// Best-effort: try to decode the standard `{"error":"..."}` shape
-		// so the message we surface is the server's, not the raw bytes.
 		var env struct {
 			Error string `json:"error"`
 		}
@@ -84,7 +70,6 @@ func callAPI(ctx context.Context, method, url, bearer string, in, into any) erro
 	return nil
 }
 
-// isStatus is a small helper for `errors.As` callers.
 func isStatus(err error, code int) bool {
 	var se *httpStatusError
 	if errors.As(err, &se) {

@@ -21,7 +21,6 @@ import (
 	"github.com/concord-dev/concord/internal/evidence/wiring"
 )
 
-// prober is the minimal probe contract every live collector implements.
 type prober interface {
 	Probe(ctx context.Context) (string, error)
 }
@@ -149,7 +148,6 @@ func (d *doctor) runControls(dir string) {
 func (d *doctor) runCollectors() {
 	d.section("Collectors")
 
-	// GitHub
 	if tok := wiring.GitHubToken(); tok != "" {
 		c := ghev.New(tok)
 		d.probe("github", c, "set CONCORD_GITHUB_TOKEN or GITHUB_TOKEN")
@@ -157,7 +155,6 @@ func (d *doctor) runCollectors() {
 		d.warn("github", "no token in CONCORD_GITHUB_TOKEN or GITHUB_TOKEN — controls using source=github will fall back to fixtures")
 	}
 
-	// AWS
 	if wiring.HasAWSCredentials() {
 		c, err := awsev.New(d.ctx, os.Getenv("AWS_REGION"))
 		if err != nil {
@@ -169,7 +166,6 @@ func (d *doctor) runCollectors() {
 		d.warn("aws", "no AWS credentials detected (env, profile, or ~/.aws/credentials) — controls using source=aws will fall back to fixtures")
 	}
 
-	// MLflow
 	if uri := os.Getenv("MLFLOW_TRACKING_URI"); uri != "" {
 		c := mlflowev.New(uri, os.Getenv("MLFLOW_TRACKING_TOKEN"))
 		d.probe("mlflow", c, "verify MLFLOW_TRACKING_URI and (optional) MLFLOW_TRACKING_TOKEN")
@@ -177,7 +173,6 @@ func (d *doctor) runCollectors() {
 		d.warn("mlflow", "MLFLOW_TRACKING_URI not set — controls using source=mlflow will fall back to fixtures")
 	}
 
-	// Okta
 	org, otok := os.Getenv("OKTA_ORG_URL"), os.Getenv("OKTA_API_TOKEN")
 	switch {
 	case org != "" && otok != "":
@@ -189,7 +184,6 @@ func (d *doctor) runCollectors() {
 		d.warn("okta", "OKTA_ORG_URL and OKTA_API_TOKEN not set — controls using source=okta will fall back to fixtures")
 	}
 
-	// Snyk
 	if tok := os.Getenv("SNYK_TOKEN"); tok != "" {
 		c := snykev.New(tok)
 		d.probe("snyk", c, "verify SNYK_TOKEN is valid for your org")
@@ -197,7 +191,6 @@ func (d *doctor) runCollectors() {
 		d.warn("snyk", "SNYK_TOKEN not set — controls using source=snyk will fall back to fixtures")
 	}
 
-	// Weights & Biases
 	if key := os.Getenv("WANDB_API_KEY"); key != "" {
 		c := wandbev.New(os.Getenv("WANDB_BASE_URL"), key)
 		d.probe("wandb", c, "verify WANDB_API_KEY at wandb.me/authorize")
@@ -205,8 +198,6 @@ func (d *doctor) runCollectors() {
 		d.warn("wandb", "WANDB_API_KEY not set — controls using source=wandb will fall back to fixtures")
 	}
 
-	// HuggingFace Hub — only probe when explicitly configured to avoid
-	// firing a public-network request on every doctor run.
 	if tok := os.Getenv("HUGGINGFACE_TOKEN"); tok != "" {
 		c := hfev.New(os.Getenv("HUGGINGFACE_BASE_URL"), tok)
 		d.probe("huggingface", c, "verify HUGGINGFACE_TOKEN at huggingface.co/settings/tokens")
@@ -253,7 +244,6 @@ func summarizeFrameworks(m map[string]int) string {
 	for k := range m {
 		keys = append(keys, k)
 	}
-	// stable ordering
 	for i := 1; i < len(keys); i++ {
 		for j := i; j > 0 && keys[j-1] > keys[j]; j-- {
 			keys[j-1], keys[j] = keys[j], keys[j-1]

@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Overridden at build time via -ldflags '-X main.version=... -X main.commit=... -X main.date=...'.
 var (
 	version = "0.1.0-dev"
 	commit  = "none"

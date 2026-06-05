@@ -58,11 +58,6 @@ for an always-on agent.`,
 			if len(loaded) == 0 {
 				return fmt.Errorf("no controls found in %s", controlsDir)
 			}
-			// Resolve push opts from credentials before the banner so the
-			// "agent mode" line accurately reflects what we'll do each
-			// tick. Without this, a credentials-only user would see no
-			// agent-mode banner even though pushFindings would later kick
-			// in from inside the loop.
 			push.resolveFromCredentials()
 			fmt.Fprintf(os.Stderr, "watching %d control(s) every %s; output → %s\n",
 				len(loaded), interval, outputDir)
@@ -78,8 +73,6 @@ for an always-on agent.`,
 				findings := r.RunAll(ctx, loaded)
 				completed := time.Now().UTC()
 
-				// Best-effort push: a transient server outage shouldn't stop
-				// the watcher from continuing to scan and persist locally.
 				if push.serverURL != "" {
 					if err := pushFindings(ctx, push, findings, started, completed); err != nil {
 						fmt.Fprintln(os.Stderr, "push failed (continuing):", err)

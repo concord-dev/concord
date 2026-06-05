@@ -19,9 +19,6 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// pushOpts is the agent-push surface shared by `concord push` and the
-// --to flag on `check` / `watch`. Kept in one place so a future change
-// (retry policy, alternate transport, etc.) only edits one struct.
 type pushOpts struct {
 	serverURL  string
 	orgSlug    string
@@ -64,8 +61,6 @@ agent stops working.`,
 	return cmd
 }
 
-// addPushFlags wires the --to / --org-slug / --token / --agent-label flags
-// onto cmd. Reused by `push`, `check --to`, and `watch --to`.
 func addPushFlags(cmd *cobra.Command, opts *pushOpts) {
 	cmd.Flags().StringVar(&opts.serverURL, "to", os.Getenv("CONCORD_SERVER_URL"), "Concord server base URL (or CONCORD_SERVER_URL)")
 	cmd.Flags().StringVar(&opts.orgSlug, "org-slug", os.Getenv("CONCORD_ORG_SLUG"), "Organization slug (or CONCORD_ORG_SLUG)")
@@ -73,9 +68,6 @@ func addPushFlags(cmd *cobra.Command, opts *pushOpts) {
 	cmd.Flags().StringVar(&opts.agentLabel, "agent-label", "", "Optional agent identifier recorded on the run (e.g. CI job name)")
 }
 
-// pushFindings POSTs a complete agent submission. summary is recomputed
-// server-side from findings; we send it for fidelity in case the policy
-// engine ever introduces non-summable fields.
 func pushFindings(ctx context.Context, opts pushOpts, findings []apiv1.Finding, startedAt, completedAt time.Time) error {
 	opts.resolveFromCredentials()
 	if err := opts.validate(); err != nil {
@@ -131,11 +123,6 @@ func pushFindings(ctx context.Context, opts pushOpts, findings []apiv1.Finding, 
 	return nil
 }
 
-// resolveFromCredentials fills empty fields on pushOpts from the stored
-// credentials file. Flag/env wins; credentials are the last-resort fallback
-// so a `concord login` user can drop their --to/--org-slug/--token flags
-// entirely. Missing credentials file is NOT an error here — the caller's
-// validate() will give a flag-oriented message if a slot ends up empty.
 func (o *pushOpts) resolveFromCredentials() {
 	if o.serverURL != "" && o.orgSlug != "" && o.token != "" {
 		return // nothing to do — the flags/envs were fully populated
@@ -155,9 +142,6 @@ func (o *pushOpts) resolveFromCredentials() {
 		o.orgSlug = p.DefaultOrg
 	}
 	if o.token == "" {
-		// Session tokens are usable as Bearer credentials against the
-		// org-scoped API the same way API tokens are — the server-side
-		// middleware accepts both shapes on /v1/orgs/{slug}/runs.
 		o.token = p.Token
 	}
 }
@@ -175,8 +159,6 @@ func (o pushOpts) validate() error {
 	return nil
 }
 
-// agentVersion encodes the CLI version + an optional user-supplied label.
-// "1.2.3" or "1.2.3/ci-prod" — the / separator is a stable parse boundary.
 func agentVersion(label string) string {
 	v := versionString()
 	if label != "" {
@@ -185,8 +167,6 @@ func agentVersion(label string) string {
 	return v
 }
 
-// versionString is the agent version reported on every push. Wired to the
-// same `version` global the version.go subcommand prints.
 func versionString() string {
 	if version != "" {
 		return version

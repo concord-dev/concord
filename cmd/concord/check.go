@@ -73,11 +73,6 @@ func newCheckCmd() *cobra.Command {
 				return fmt.Errorf("rendering: %w", err)
 			}
 
-			// Optional push to a Concord server. We let pushOpts fall back
-			// to the credentials file so `concord login`-only users still
-			// trigger a push when --to wasn't supplied. Errors are loud
-			// but don't override the non-zero exit below — CI should still
-			// fail on a failing audit even when the push itself succeeded.
 			push.resolveFromCredentials()
 			if push.serverURL != "" {
 				if err := pushFindings(cmd.Context(), push, findings, started, completed); err != nil {

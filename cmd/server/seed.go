@@ -14,16 +14,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// runSeedTenant bootstraps one tenant on a fresh install: one organization,
-// one owner-role user, one API token. The "tenant" framing is deliberate —
-// this is NOT the SaaS-operator admin (that's CONCORD_OPERATOR_TOKEN).
-// Subsequent invocations conflict on the email or slug — by design.
-//
-// Example:
-//
-//	concord-server seed-tenant \
-//	  --email founder@acme.test --password hunter2 \
-//	  --org-name "Acme Inc" --org-slug acme
 func runSeedTenant(args []string) error {
 	var (
 		databaseURL   string
@@ -135,10 +125,6 @@ func runSeedTenant(args []string) error {
 	return nil
 }
 
-// readPasswordFromStdin reads exactly one line from r and returns it trimmed of
-// the trailing newline. Empty input → empty string; caller decides if that's an
-// error. Avoids golang.org/x/term so the binary stays terminal-agnostic
-// (CI/scripts will pipe via stdin, not type interactively).
 func readPasswordFromStdin(r io.Reader) (string, error) {
 	br := bufio.NewReader(r)
 	line, err := br.ReadString('\n')
