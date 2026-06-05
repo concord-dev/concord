@@ -56,7 +56,7 @@ func newAuditPacketCmd() *cobra.Command {
 				}
 				q.Set("until", t.Format(time.RFC3339))
 			}
-			path := "/v1/orgs/" + fs.orgSlug + "/audit-package"
+			path :=  fs.projectBase() + "/audit-package"
 			if len(q) > 0 {
 				path += "?" + q.Encode()
 			}

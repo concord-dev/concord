@@ -11,6 +11,9 @@ type Config struct {
 	APIVersion string                  `json:"apiVersion,omitempty"`
 	Kind       string                  `json:"kind,omitempty"`
 	Metadata   Metadata                `json:"metadata,omitempty"`
+	// Project is the slug `concord push` targets when --project / env / profile
+	// are all unset. Defaults to "default".
+	Project    string                  `json:"project,omitempty"      yaml:"project,omitempty"`
 	Controls   ControlsCfg             `json:"controls,omitempty"`
 	Frameworks []FrameworkRef          `json:"frameworks,omitempty"  yaml:"frameworks,omitempty"`
 	Sources    map[string]SourceConfig `json:"sources,omitempty"     yaml:"sources,omitempty"`

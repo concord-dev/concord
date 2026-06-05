@@ -57,7 +57,7 @@ func newRunsListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path := "/v1/orgs/" + fs.orgSlug + "/runs"
+			path :=  fs.projectBase() + "/runs"
 			var rows []runListEntry
 			if err := apiGet(cmd.Context(), fs, path, &rows); err != nil {
 				return err
@@ -96,9 +96,9 @@ func newRunsShowCmd() *cobra.Command {
 			path := ""
 			switch {
 			case latest:
-				path = "/v1/orgs/" + fs.orgSlug + "/runs/latest"
+				path =  fs.projectBase() + "/runs/latest"
 			case len(args) == 1:
-				path = "/v1/orgs/" + fs.orgSlug + "/runs/" + url.PathEscape(args[0])
+				path =  fs.projectBase() + "/runs/" + url.PathEscape(args[0])
 			default:
 				return fmt.Errorf("provide a run id or pass --latest")
 			}

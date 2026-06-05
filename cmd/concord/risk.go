@@ -74,7 +74,7 @@ func newRiskAddCmd() *cobra.Command {
 			}
 			var r riskDTO
 			if err := apiSend(cmd.Context(), fs, "POST",
-				"/v1/orgs/"+fs.orgSlug+"/risks", body, &r); err != nil {
+				fs.projectBase()+"/risks", body, &r); err != nil {
 				return err
 			}
 			return printOneRisk(os.Stdout, r, format)
@@ -112,7 +112,7 @@ func newRiskListCmd() *cobra.Command {
 			for _, s := range statusFilter {
 				q.Add("status", s)
 			}
-			path := "/v1/orgs/" + fs.orgSlug + "/risks"
+			path :=  fs.projectBase() + "/risks"
 			if len(q) > 0 {
 				path += "?" + q.Encode()
 			}
@@ -145,7 +145,7 @@ func newRiskShowCmd() *cobra.Command {
 			}
 			var r riskDTO
 			if err := apiGet(cmd.Context(), fs,
-				"/v1/orgs/"+fs.orgSlug+"/risks/"+args[0], &r); err != nil {
+				fs.projectBase()+"/risks/"+args[0], &r); err != nil {
 				return err
 			}
 			return printOneRisk(os.Stdout, r, format)
@@ -210,7 +210,7 @@ func newRiskUpdateCmd() *cobra.Command {
 			}
 			var r riskDTO
 			if err := apiSend(cmd.Context(), fs, "PATCH",
-				"/v1/orgs/"+fs.orgSlug+"/risks/"+args[0], body, &r); err != nil {
+				fs.projectBase()+"/risks/"+args[0], body, &r); err != nil {
 				return err
 			}
 			return printOneRisk(os.Stdout, r, "text")
@@ -242,7 +242,7 @@ func newRiskLinkCmd() *cobra.Command {
 				return err
 			}
 			if err := apiSend(cmd.Context(), fs, "POST",
-				"/v1/orgs/"+fs.orgSlug+"/risks/"+args[0]+"/links",
+				fs.projectBase()+"/risks/"+args[0]+"/links",
 				map[string]any{"finding_id": args[1]}, nil); err != nil {
 				return err
 			}
@@ -266,7 +266,7 @@ func newRiskUnlinkCmd() *cobra.Command {
 				return err
 			}
 			if err := apiDelete(cmd.Context(), fs,
-				"/v1/orgs/"+fs.orgSlug+"/risks/"+args[0]+"/links/"+args[1]); err != nil {
+				fs.projectBase()+"/risks/"+args[0]+"/links/"+args[1]); err != nil {
 				return err
 			}
 			fmt.Fprintf(os.Stdout, "%s ⊘ %s\n", args[0], args[1])

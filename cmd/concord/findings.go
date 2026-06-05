@@ -45,15 +45,29 @@ type findingEventDTO struct {
 }
 
 type findingsServer struct {
-	url     string
-	orgSlug string
-	token   string
+	url         string
+	orgSlug     string
+	projectSlug string
+	token       string
+}
+
+// projectBase returns "/v1/orgs/<orgSlug>/projects/<project>" for nested routes.
+func (fs findingsServer) projectBase() string {
+	return "/v1/orgs/" + fs.orgSlug + "/projects/" + fs.projectSlug
 }
 
 func resolveFindingsServer(serverURL, orgSlug, token string) (findingsServer, error) {
-	fs := findingsServer{url: serverURL, orgSlug: orgSlug, token: token}
-	if fs.url != "" && fs.orgSlug != "" && fs.token != "" {
-		return fs, nil
+	return resolveServer(serverURL, orgSlug, "", token)
+}
+
+// resolveServer resolves connection settings from flags, falling back to the
+// active `concord login` profile. projectSlug may be empty when the caller is
+// targeting an org-scoped route; callers that need a project must check
+// fs.projectSlug != "" themselves.
+func resolveServer(serverURL, orgSlug, projectSlug, token string) (findingsServer, error) {
+	fs := findingsServer{url: serverURL, orgSlug: orgSlug, projectSlug: projectSlug, token: token}
+	if fs.url != "" && fs.orgSlug != "" && fs.token != "" && (fs.projectSlug != "" || projectSlug == "") {
+		// Fall through; we still want to fill missing fields from the profile below.
 	}
 	file, err := credentials.Load()
 	if err == nil {
@@ -64,10 +78,16 @@ func resolveFindingsServer(serverURL, orgSlug, token string) (findingsServer, er
 			if fs.orgSlug == "" {
 				fs.orgSlug = p.DefaultOrg
 			}
+			if fs.projectSlug == "" {
+				fs.projectSlug = p.DefaultProject
+			}
 			if fs.token == "" {
 				fs.token = p.Token
 			}
 		}
+	}
+	if fs.projectSlug == "" {
+		fs.projectSlug = "default"
 	}
 	switch {
 	case fs.url == "":
@@ -133,7 +153,7 @@ func newFindingsAssignCmd() *cobra.Command {
 				body["notes"] = notes
 			}
 			var rem map[string]any
-			if err := apiPut(cmd.Context(), fs, "/v1/orgs/"+fs.orgSlug+"/findings/"+args[0]+"/remediation", body, &rem); err != nil {
+			if err := apiPut(cmd.Context(), fs, fs.projectBase()+"/findings/"+args[0]+"/remediation", body, &rem); err != nil {
 				return err
 			}
 			fmt.Fprintf(os.Stdout, "remediation assigned to %s", assigneeEmail)
@@ -167,7 +187,7 @@ func newFindingsUnassignCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := apiDelete(cmd.Context(), fs, "/v1/orgs/"+fs.orgSlug+"/findings/"+args[0]+"/remediation"); err != nil {
+			if err := apiDelete(cmd.Context(), fs, fs.projectBase()+"/findings/"+args[0]+"/remediation"); err != nil {
 				return err
 			}
 			fmt.Fprintf(os.Stdout, "%s remediation removed\n", args[0])
@@ -228,13 +248,13 @@ func newFindingsShowCmd() *cobra.Command {
 				return err
 			}
 			var f findingDTO
-			if err := apiGet(cmd.Context(), fs, "/v1/orgs/"+fs.orgSlug+"/findings/"+args[0], &f); err != nil {
+			if err := apiGet(cmd.Context(), fs, fs.projectBase()+"/findings/"+args[0], &f); err != nil {
 				return err
 			}
 			printOneFinding(os.Stdout, f)
 			if showEvents {
 				var events []findingEventDTO
-				if err := apiGet(cmd.Context(), fs, "/v1/orgs/"+fs.orgSlug+"/findings/"+args[0]+"/events", &events); err != nil {
+				if err := apiGet(cmd.Context(), fs, fs.projectBase()+"/findings/"+args[0]+"/events", &events); err != nil {
 					return err
 				}
 				printEvents(os.Stdout, events)
@@ -282,7 +302,7 @@ func newFindingsTransitionCmd(name, status, short string, wantsExpiry bool) *cob
 				body["suppressed_until"] = t.Format(time.RFC3339)
 			}
 			var updated findingDTO
-			if err := apiPatch(cmd.Context(), fs, "/v1/orgs/"+fs.orgSlug+"/findings/"+args[0], body, &updated); err != nil {
+			if err := apiPatch(cmd.Context(), fs, fs.projectBase()+"/findings/"+args[0], body, &updated); err != nil {
 				return err
 			}
 			fmt.Fprintf(os.Stdout, "%s → %s\n", updated.ID, updated.Status)
@@ -306,8 +326,15 @@ func addFindingsServerFlags(cmd *cobra.Command, serverURL, orgSlug, token *strin
 	cmd.Flags().StringVar(token, "token", "", "API token (default: from `concord login` profile)")
 }
 
+// addProjectFlag registers a --project flag for project-scoped subcommands.
+// Empty means "use the profile's default_project, or 'default' if unset".
+func addProjectFlag(cmd *cobra.Command, projectSlug *string) {
+	cmd.Flags().StringVar(projectSlug, "project", "",
+		"Project slug (default: from `concord login` profile, then 'default')")
+}
+
 func getFindings(ctx context.Context, fs findingsServer, q url.Values) ([]findingDTO, error) {
-	path := "/v1/orgs/" + fs.orgSlug + "/findings"
+	path := fs.projectBase() + "/findings"
 	if len(q) > 0 {
 		path += "?" + q.Encode()
 	}

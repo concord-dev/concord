@@ -29,7 +29,8 @@ type Profile struct {
 	UserID    string `json:"user_id,omitempty"`
 	UserEmail string `json:"user_email,omitempty"`
 
-	DefaultOrg string `json:"default_org,omitempty"`
+	DefaultOrg     string `json:"default_org,omitempty"`
+	DefaultProject string `json:"default_project,omitempty"`
 
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
 }

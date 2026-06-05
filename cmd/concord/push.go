@@ -20,10 +20,11 @@ import (
 )
 
 type pushOpts struct {
-	serverURL  string
-	orgSlug    string
-	token      string
-	agentLabel string // free-form, lands in agent_version
+	serverURL   string
+	orgSlug     string
+	projectSlug string
+	token       string
+	agentLabel  string // free-form, lands in agent_version
 }
 
 func newPushCmd() *cobra.Command {
@@ -64,6 +65,7 @@ agent stops working.`,
 func addPushFlags(cmd *cobra.Command, opts *pushOpts) {
 	cmd.Flags().StringVar(&opts.serverURL, "to", os.Getenv("CONCORD_SERVER_URL"), "Concord server base URL (or CONCORD_SERVER_URL)")
 	cmd.Flags().StringVar(&opts.orgSlug, "org-slug", os.Getenv("CONCORD_ORG_SLUG"), "Organization slug (or CONCORD_ORG_SLUG)")
+	cmd.Flags().StringVar(&opts.projectSlug, "project", os.Getenv("CONCORD_PROJECT_SLUG"), "Project slug (or CONCORD_PROJECT_SLUG; defaults to the profile's default_project or 'default')")
 	cmd.Flags().StringVar(&opts.token, "token", os.Getenv("CONCORD_API_TOKEN"), "API token (or CONCORD_API_TOKEN)")
 	cmd.Flags().StringVar(&opts.agentLabel, "agent-label", "", "Optional agent identifier recorded on the run (e.g. CI job name)")
 }
@@ -91,7 +93,8 @@ func pushFindings(ctx context.Context, opts pushOpts, findings []apiv1.Finding, 
 		return fmt.Errorf("encoding submission: %w", err)
 	}
 
-	url := strings.TrimRight(opts.serverURL, "/") + "/v1/orgs/" + opts.orgSlug + "/runs"
+	url := strings.TrimRight(opts.serverURL, "/") + "/v1/orgs/" + opts.orgSlug +
+		"/projects/" + opts.projectSlug + "/runs"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -124,25 +127,25 @@ func pushFindings(ctx context.Context, opts pushOpts, findings []apiv1.Finding, 
 }
 
 func (o *pushOpts) resolveFromCredentials() {
-	if o.serverURL != "" && o.orgSlug != "" && o.token != "" {
-		return // nothing to do — the flags/envs were fully populated
-	}
 	file, err := credentials.Load()
-	if err != nil {
-		return // ErrNoCredentials or unreadable → fall through to validate()
+	if err == nil {
+		if p, perr := file.CurrentProfile(); perr == nil {
+			if o.serverURL == "" {
+				o.serverURL = p.Server
+			}
+			if o.orgSlug == "" {
+				o.orgSlug = p.DefaultOrg
+			}
+			if o.projectSlug == "" {
+				o.projectSlug = p.DefaultProject
+			}
+			if o.token == "" {
+				o.token = p.Token
+			}
+		}
 	}
-	p, err := file.CurrentProfile()
-	if err != nil {
-		return
-	}
-	if o.serverURL == "" {
-		o.serverURL = p.Server
-	}
-	if o.orgSlug == "" {
-		o.orgSlug = p.DefaultOrg
-	}
-	if o.token == "" {
-		o.token = p.Token
+	if o.projectSlug == "" {
+		o.projectSlug = "default"
 	}
 }
 

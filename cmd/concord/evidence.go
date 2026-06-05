@@ -113,7 +113,7 @@ func newEvidenceFreshnessCmd() *cobra.Command {
 				return err
 			}
 			var rows []evidenceCollectionDTO
-			if err := apiGet(cmd.Context(), fs, "/v1/orgs/"+fs.orgSlug+"/evidence-collections", &rows); err != nil {
+			if err := apiGet(cmd.Context(), fs, fs.projectBase()+"/evidence-collections", &rows); err != nil {
 				return err
 			}
 			return renderFreshness(os.Stdout, rows, format)

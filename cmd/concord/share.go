@@ -62,7 +62,7 @@ func newShareCreateCmd() *cobra.Command {
 			}
 			var room shareRoomDTO
 			if err := apiSend(cmd.Context(), fs, "POST",
-				"/v1/orgs/"+fs.orgSlug+"/share-rooms", body, &room); err != nil {
+				fs.projectBase()+"/share-rooms", body, &room); err != nil {
 				return err
 			}
 			if format == "json" {
@@ -100,7 +100,7 @@ func newShareListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path := "/v1/orgs/" + fs.orgSlug + "/share-rooms"
+			path :=  fs.projectBase() + "/share-rooms"
 			if includeRevoked {
 				path += "?include_revoked=true"
 			}
@@ -129,7 +129,7 @@ func newShareRevokeCmd() *cobra.Command {
 				return err
 			}
 			if err := apiDelete(cmd.Context(), fs,
-				"/v1/orgs/"+fs.orgSlug+"/share-rooms/"+args[0]); err != nil {
+				fs.projectBase()+"/share-rooms/"+args[0]); err != nil {
 				return err
 			}
 			fmt.Fprintf(os.Stdout, "%s revoked\n", args[0])
