@@ -31,6 +31,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,6 +46,7 @@ import (
 	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/server/handlers/auth"
 	"github.com/concord-dev/concord/internal/server/handlers/public"
+	"github.com/concord-dev/concord/internal/server/idempotency"
 	"github.com/concord-dev/concord/internal/server/limiter"
 	"github.com/concord-dev/concord/internal/server/metrics"
 	"github.com/concord-dev/concord/internal/store"
@@ -76,6 +78,11 @@ type Concord struct {
 	outbox     *eventbus.Outbox
 	dispatcher *eventbus.Dispatcher
 	dispCancel context.CancelFunc // stops the dispatcher loop in Shutdown
+
+	// idempotency is the Redis-backed dedupe middleware (Phase 5). nil
+	// when no Redis client was wired, in which case the middleware is
+	// a no-op pass-through.
+	idempotency func(http.Handler) http.Handler
 }
 
 // Options is the construction surface for cmd/server.
@@ -178,6 +185,8 @@ func NewConcord(opts Options) (*Concord, error) {
 	dispCtx, dispCancel := context.WithCancel(context.Background())
 	go dispatcher.Run(dispCtx)
 
+	idem := buildIdempotency(opts.RedisLimiter, m)
+
 	return &Concord{
 		Controls:           loaded,
 		Config:             cfg,
@@ -196,7 +205,30 @@ func NewConcord(opts Options) (*Concord, error) {
 		outbox:             outbox,
 		dispatcher:         dispatcher,
 		dispCancel:         dispCancel,
+		idempotency:        idem,
 	}, nil
+}
+
+// buildIdempotency constructs the Idempotency-Key middleware. When no
+// Redis client is wired the middleware degrades to a pass-through —
+// Phase 5 leaves the local-dev path unaffected. The org slug is
+// extracted from r.PathValue("slug") because the mux fills it before
+// the middleware runs (we mount idempotency INSIDE the per-route
+// permission gate).
+func buildIdempotency(rdb *redis.Client, m *metrics.Metrics) func(http.Handler) http.Handler {
+	return idempotency.Middleware(idempotency.Config{
+		Redis: rdb,
+		OrgIDFn: func(r *http.Request) (string, bool) {
+			if slug := r.PathValue("slug"); slug != "" {
+				return slug, true
+			}
+			return "", false
+		},
+		OnRedisError: func(error) { m.IdempotencyRedisErrorsTotal.Inc() },
+		OnHit:        func() { m.IdempotencyHitsTotal.Inc() },
+		OnMismatch:   func() { m.IdempotencyMismatchTotal.Inc() },
+		OnPending:    func() { m.IdempotencyPendingTotal.Inc() },
+	})
 }
 
 // gateConfig pairs a gate name (used in metric labels + Redis key prefix)

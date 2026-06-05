@@ -53,12 +53,17 @@ type ExecutorConfig struct {
 // Executor is the shared "POST + record" primitive. Construct once per
 // process and pass to both Consumer and Retrier.
 type Executor struct {
-	store   *store.Store
-	cfg     ExecutorConfig
-	metrics ExecutorMetrics
-	rnd     *rand.Rand
-	rndMu   sync.Mutex
+	store    *store.Store
+	cfg      ExecutorConfig
+	metrics  ExecutorMetrics
+	rnd      *rand.Rand
+	rndMu    sync.Mutex
+	breakers *Breakers // nil = breakers disabled (Executor degrades to plain HTTP)
 }
+
+// SetBreakers attaches a circuit-breaker pool to the Executor. Pass
+// nil to disable breakers. Wire from cmd/concord-worker once at boot.
+func (e *Executor) SetBreakers(b *Breakers) { e.breakers = b }
 
 // ExecutorMetrics is the set of bumps the Executor pushes through. Each
 // field is optional; cmd/concord-worker wires real Prometheus
@@ -203,34 +208,53 @@ func (e *Executor) Attempt(ctx context.Context, tx pgx.Tx, deliveryID uuid.UUID,
 
 // doRequest performs the POST + signing + body capture. Returns the
 // final (httpStatus, errMsg). httpStatus is 0 on transport errors.
+//
+// The whole HTTP exchange runs inside a per-host circuit breaker (when
+// one is wired). When the breaker is open the function returns
+// (0, "circuit_open: ...") without ever opening a connection — the
+// retrier picks this up as a network_error outcome and backs off,
+// giving the receiver time to heal.
 func (e *Executor) doRequest(ctx context.Context, url, secret, kind string, body []byte) (int, string) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return 0, "build request: " + err.Error()
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", e.cfg.UserAgent)
-	req.Header.Set("X-Concord-Event", kind)
-	req.Header.Set("X-Concord-Signature", sign(secret, body))
+	var (
+		status int
+		errMsg string
+	)
+	bErr := e.breakers.Execute(url, func() error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			errMsg = "build request: " + err.Error()
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", e.cfg.UserAgent)
+		req.Header.Set("X-Concord-Event", kind)
+		req.Header.Set("X-Concord-Signature", sign(secret, body))
 
-	resp, err := e.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return 0, "network: " + err.Error()
-	}
-	defer resp.Body.Close()
-	// Always drain the body so the connection can return to the pool.
-	// We capture a bounded prefix for last_error on non-2xx; success
-	// drops the body entirely.
-	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+		resp, err := e.cfg.HTTPClient.Do(req)
+		if err != nil {
+			errMsg = "network: " + err.Error()
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			status = resp.StatusCode
+			return nil
+		}
+		buf := bytes.NewBuffer(make([]byte, 0, e.cfg.MaxBodyBytes))
+		_, _ = io.Copy(buf, io.LimitReader(resp.Body, e.cfg.MaxBodyBytes))
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return resp.StatusCode, ""
+		status = resp.StatusCode
+		errMsg = fmt.Sprintf("non-2xx response %d: %s", resp.StatusCode, buf.String())
+		// A non-2xx counts as a failure for breaker bookkeeping so a
+		// receiver returning 500 for everything trips the breaker after
+		// MaxConsecutiveFails attempts.
+		return errors.New("non-2xx")
+	})
+	if errors.Is(bErr, ErrCircuitOpen) {
+		return 0, "circuit_open: receiver is in cooldown after consecutive failures"
 	}
-	buf := bytes.NewBuffer(make([]byte, 0, e.cfg.MaxBodyBytes))
-	_, _ = io.Copy(buf, io.LimitReader(resp.Body, e.cfg.MaxBodyBytes))
-	// Drain anything beyond the limit so the connection pool stays
-	// healthy on chatty receivers.
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode, fmt.Sprintf("non-2xx response %d: %s", resp.StatusCode, buf.String())
+	return status, errMsg
 }
 
 // classify reduces (status, err) to a metric label outcome. We split

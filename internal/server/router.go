@@ -42,7 +42,7 @@ func (c *Concord) Router() http.Handler {
 	mountAuth(mux, au, mw)
 	mountOperator(mux, op, mw)
 	mountSession(mux, au, mw)
-	mountOrgAPI(mux, og, mw)
+	mountOrgAPI(mux, og, mw, c.idempotency)
 
 	// Stack order:
 	//   RequestID(Logging(Metrics(SecurityHeaders(CORS(mux)))))
@@ -184,7 +184,12 @@ func mountSession(mux *http.ServeMux, h *auth.Handlers, mw *middleware.Middlewar
 		mw.RequireSession(http.HandlerFunc(h.RegenerateRecoveryCodes)))
 }
 
-func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware) {
+func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware, idem func(http.Handler) http.Handler) {
+	// idem may be nil in tests that construct a Concord without
+	// wiring Redis. Make it a pass-through so the routes still work.
+	if idem == nil {
+		idem = func(next http.Handler) http.Handler { return next }
+	}
 	read := mw.RequireOrgPerm("controls:read")
 	runRead := mw.RequireOrgPerm("runs:read")
 	runCreate := mw.RequireOrgPerm("runs:create")
@@ -205,7 +210,12 @@ func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware)
 	mux.Handle("GET /v1/orgs/{slug}/controls/{id}", read(http.HandlerFunc(h.Control)))
 
 	// Runs — single entry point: agents POST completed runs here.
-	mux.Handle("POST /v1/orgs/{slug}/runs", runCreate(http.HandlerFunc(h.SubmitRun)))
+	// Idempotency-Key gates the POST so a network-retrying agent can
+	// re-submit the same run without creating two rows. Mounted INSIDE
+	// the perm gate so the dedupe slot is only claimed for callers
+	// that pass authorization (otherwise an unauthenticated client
+	// could exhaust the Redis keyspace).
+	mux.Handle("POST /v1/orgs/{slug}/runs", runCreate(idem(http.HandlerFunc(h.SubmitRun))))
 	mux.Handle("GET /v1/orgs/{slug}/findings", runRead(http.HandlerFunc(h.Findings)))
 	mux.Handle("GET /v1/orgs/{slug}/runs", runRead(http.HandlerFunc(h.ListRuns)))
 	mux.Handle("GET /v1/orgs/{slug}/runs/{id}", runRead(http.HandlerFunc(h.GetRun)))
@@ -223,7 +233,7 @@ func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware)
 
 	// Invitations: org admins invite teammates by email. The accept flow
 	// lives under /v1/invitations/accept (public) — see mountPublic.
-	mux.Handle("POST /v1/orgs/{slug}/invitations", memInvite(http.HandlerFunc(h.CreateInvitation)))
+	mux.Handle("POST /v1/orgs/{slug}/invitations", memInvite(idem(http.HandlerFunc(h.CreateInvitation))))
 	mux.Handle("GET /v1/orgs/{slug}/invitations", memInvite(http.HandlerFunc(h.ListInvitations)))
 	mux.Handle("DELETE /v1/orgs/{slug}/invitations/{id}", memInvite(http.HandlerFunc(h.RevokeInvitation)))
 
@@ -240,7 +250,7 @@ func mountOrgAPI(mux *http.ServeMux, h *org.Handlers, mw *middleware.Middleware)
 
 	// Outbound webhooks (server fires these when agents submit runs).
 	mux.Handle("GET /v1/orgs/{slug}/webhooks", whRead(http.HandlerFunc(h.ListWebhooks)))
-	mux.Handle("POST /v1/orgs/{slug}/webhooks", whCreate(http.HandlerFunc(h.CreateWebhook)))
+	mux.Handle("POST /v1/orgs/{slug}/webhooks", whCreate(idem(http.HandlerFunc(h.CreateWebhook))))
 	mux.Handle("GET /v1/orgs/{slug}/webhooks/{id}", whRead(http.HandlerFunc(h.GetWebhook)))
 	mux.Handle("PUT /v1/orgs/{slug}/webhooks/{id}", whCreate(http.HandlerFunc(h.UpdateWebhook)))
 	mux.Handle("DELETE /v1/orgs/{slug}/webhooks/{id}", whDelete(http.HandlerFunc(h.DeleteWebhook)))

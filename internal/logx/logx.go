@@ -32,6 +32,10 @@ func Init(format, level string) *slog.Logger {
 	} else {
 		h = slog.NewJSONHandler(os.Stderr, opts)
 	}
+	// Wrap the format handler in the PII redactor so EVERY slog call
+	// in the process — including third-party libraries — has sensitive
+	// attribute values stripped before they hit stderr.
+	h = NewRedactingHandler(h, nil)
 	logger := slog.New(h)
 	slog.SetDefault(logger)
 	return logger

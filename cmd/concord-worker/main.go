@@ -44,6 +44,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
+	"github.com/sony/gobreaker"
 
 	"github.com/concord-dev/concord/internal/kafkax"
 	"github.com/concord-dev/concord/internal/logx"
@@ -185,6 +186,9 @@ func runServe(args []string) error {
 		backoffMaxStr   string
 		retrierPollStr  string
 		retrierBatch    int
+		breakerMaxFails int
+		breakerHalfOpen int
+		breakerOpenStr  string
 	)
 	fs.IntVar(&maxAttempts, "max-attempts", parseIntEnvOr("CONCORD_WORKER_MAX_ATTEMPTS", 5),
 		"Per-row retry cap before status='dead'.")
@@ -196,6 +200,12 @@ func runServe(args []string) error {
 		"How often the retrier polls when previously idle.")
 	fs.IntVar(&retrierBatch, "retrier-batch-size", parseIntEnvOr("CONCORD_WORKER_RETRIER_BATCH", 25),
 		"Maximum rows the retrier claims per tick.")
+	fs.IntVar(&breakerMaxFails, "breaker-max-fails", parseIntEnvOr("CONCORD_WORKER_BREAKER_MAX_FAILS", 5),
+		"Consecutive failures per receiver-host before its circuit breaker opens.")
+	fs.IntVar(&breakerHalfOpen, "breaker-half-open-max", parseIntEnvOr("CONCORD_WORKER_BREAKER_HALF_OPEN_MAX", 1),
+		"In-flight half-open probes allowed when a breaker tests recovery.")
+	fs.StringVar(&breakerOpenStr, "breaker-open-timeout", envOr("CONCORD_WORKER_BREAKER_OPEN_TIMEOUT", "30s"),
+		"How long a tripped breaker stays open before allowing a half-open probe.")
 
 	// OpenTelemetry — same toggles as cmd/server so an OTel collector
 	// sees both binaries' spans.
@@ -306,6 +316,16 @@ func runServe(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Wire per-host circuit breakers in front of every outbound POST.
+	// Trips after 5 consecutive failures, 30s open, then 1 half-open
+	// probe. State is per-pod in-memory — load-shedding, not a
+	// correctness guarantee.
+	executor.SetBreakers(worker.NewBreakers(worker.BreakerConfig{
+		MaxConsecutiveFails: uint32(breakerMaxFails),
+		OpenTimeout:         mustDuration(breakerOpenStr, "breaker-open-timeout"),
+		HalfOpenMaxRequests: uint32(breakerHalfOpen),
+		OnStateChange:       m.onBreakerStateChange,
+	}))
 
 	consumer, err := worker.NewConsumer(st, rdb, executor, worker.ConsumerConfig{
 		Brokers:   kafkax.ParseBrokers(kafkaBrokersCSV),
@@ -494,6 +514,9 @@ type metrics struct {
 	retrierTicks      prometheus.Counter
 	retrierClaimed    prometheus.Counter
 	retrierTickErrors prometheus.Counter
+
+	// Breaker
+	breakerStateChanges *prometheus.CounterVec
 }
 
 func newMetrics() *metrics {
@@ -554,11 +577,16 @@ func newMetrics() *metrics {
 			Name: "concord_worker_retrier_tick_errors_total",
 			Help: "Retrier ticks that errored (DB or executor).",
 		}),
+		breakerStateChanges: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "concord_worker_breaker_state_changes_total",
+			Help: "Per-receiver-host circuit breaker transitions, partitioned by new state (closed|open|half-open).",
+		}, []string{"state"}),
 	}
 	reg.MustRegister(
 		m.consumed, m.dedupeHits, m.badMessages, m.noWebhooks, m.fanoutSize, m.commitErrs,
 		m.attemptStarted, m.attemptOutcome, m.attemptDuration, m.dead,
 		m.retrierTicks, m.retrierClaimed, m.retrierTickErrors,
+		m.breakerStateChanges,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
@@ -595,4 +623,12 @@ func (m *metrics) retrierMetrics() worker.RetrierMetrics {
 		Claimed:   func(n int) { m.retrierClaimed.Add(float64(n)) },
 		TickError: func(error) { m.retrierTickErrors.Inc() },
 	}
+}
+
+// onBreakerStateChange is what the Executor's breaker pool calls on
+// every transition. Label cardinality is bounded at 3 (closed | open |
+// half-open) — host is logged in slog but kept out of metrics so a
+// fleet with thousands of webhook hosts doesn't explode the series.
+func (m *metrics) onBreakerStateChange(_ string, _, to gobreaker.State) {
+	m.breakerStateChanges.WithLabelValues(to.String()).Inc()
 }

@@ -51,6 +51,13 @@ type Metrics struct {
 	OutboxLagSeconds       prometheus.Gauge         // age of oldest unpublished, non-dead row
 	OutboxCleanupDeletedTotal prometheus.Counter    // rows the periodic delete sweep removed
 	OutboxTickErrorsTotal  *prometheus.CounterVec   // labels: stage (tick|cleanup|lag)
+
+	// Idempotency-Key middleware (Phase 5). All four are bumped by the
+	// middleware via the OnX callbacks in idempotency.Config.
+	IdempotencyHitsTotal        prometheus.Counter
+	IdempotencyMismatchTotal    prometheus.Counter
+	IdempotencyPendingTotal     prometheus.Counter
+	IdempotencyRedisErrorsTotal prometheus.Counter
 }
 
 // New builds a Metrics with a private registry and registers every collector
@@ -148,6 +155,22 @@ func New() *Metrics {
 			},
 			[]string{"stage"},
 		),
+		IdempotencyHitsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "concord_idempotency_hits_total",
+			Help: "Idempotency-Key requests that returned a cached response (the happy-path dedupe outcome).",
+		}),
+		IdempotencyMismatchTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "concord_idempotency_mismatch_total",
+			Help: "Idempotency-Key reused with a different request fingerprint (responded 422). Caller-side bug.",
+		}),
+		IdempotencyPendingTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "concord_idempotency_pending_total",
+			Help: "Idempotency-Key reused while the original request is still in flight (responded 409).",
+		}),
+		IdempotencyRedisErrorsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "concord_idempotency_redis_errors_total",
+			Help: "Idempotency middleware Redis-call failures; the middleware degraded to pass-through on each.",
+		}),
 	}
 	reg.MustRegister(
 		m.HTTPRequestsTotal,
@@ -163,6 +186,10 @@ func New() *Metrics {
 		m.OutboxLagSeconds,
 		m.OutboxCleanupDeletedTotal,
 		m.OutboxTickErrorsTotal,
+		m.IdempotencyHitsTotal,
+		m.IdempotencyMismatchTotal,
+		m.IdempotencyPendingTotal,
+		m.IdempotencyRedisErrorsTotal,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)

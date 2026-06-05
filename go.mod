@@ -76,6 +76,7 @@ require (
 	github.com/redis/go-redis/v9 v9.7.0 // indirect
 	github.com/segmentio/kafka-go v0.4.47 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
+	github.com/sony/gobreaker v0.5.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/tchap/go-patricia/v2 v2.3.1 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect

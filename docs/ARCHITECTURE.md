@@ -241,6 +241,49 @@ on the in-process bus (for SSE) and enqueue an outbox row — webhook
 fan-out happens **only** in the worker now. Deploying the worker is a
 prerequisite for any webhook to fire.
 
+## Reliability hardening (Phase 5)
+
+Three production-grade upgrades shipped together:
+
+**Idempotency-Key.** `internal/server/idempotency` is a Redis-backed
+middleware mounted in front of the high-leverage POST routes
+(`/v1/orgs/{slug}/runs`, `/v1/orgs/{slug}/invitations`,
+`/v1/orgs/{slug}/webhooks`). Callers opt in via the
+`Idempotency-Key: <uuid>` header. SETNX claims a `idem:<scope>:<key>`
+slot with a 24h TTL; the handler's response is captured via a
+buffering ResponseWriter and stored under the same key. A re-send
+with the same key returns the cached body verbatim with
+`Idempotency-Replay: true`; a same-key-different-body returns 422; a
+same-key-while-pending returns 409. Cluster-safe via the shared Redis
+client. A Redis outage degrades the middleware to pass-through
+(strictly preferred over 503'ing every POST) with
+`concord_idempotency_redis_errors_total` bumped so the outage is
+visible.
+
+**Circuit breakers.** `internal/worker.Breakers` is a per-host pool of
+`sony/gobreaker` instances wrapping every outbound webhook POST.
+Default policy: 5 consecutive failures → open, 30s cooldown, 1
+half-open probe. A wedged receiver trips its breaker once and
+subsequent attempts fail fast with `ErrCircuitOpen` until the
+half-open probe succeeds. State is per-pod in-memory — load-shedding,
+not a correctness guarantee. The breaker treats non-2xx and network
+errors as failures uniformly, so a receiver returning 500 for
+everything trips the same way a DNS-failing host does.
+`concord_worker_breaker_state_changes_total{state}` counts
+transitions.
+
+**PII redaction.** `logx.RedactingHandler` wraps the JSON/text slog
+handler installed by `logx.Init`. Attribute names matching the
+curated sensitive set (`password`, `secret`, `token`, `authorization`,
+`api_key`, `session_token`, `recovery_code`, `x-concord-signature`, …
+substring + case-insensitive) have their values replaced with
+`***REDACTED***` before reaching stderr. `WithAttrs` / `WithGroup`
+propagate the redactor through pre-bound loggers, and the descent
+into `slog.Group` catches nested structures. Message text is
+deliberately not scanned — handlers must keep secrets out of the
+`slog.Info("...")` first argument; the redactor is a last line of
+defence, not a free pass.
+
 ## Dead-letter handling (Phase 4)
 
 Two dead-letter populations need operator attention:
@@ -390,5 +433,6 @@ Run locally with `make lint && make test-race && make vuln`.
 | 2     | Transactional outbox + Kafka producer for `concord.events` — DONE |
 | 3     | `cmd/concord-worker` binary + Kafka consumer + `webhook_delivery` table — DONE |
 | 4     | DLQ inspection + replay endpoints under `/operator/v1/dlq/*` — DONE |
+| 5     | Idempotency-Key, circuit breakers, PII redaction — DONE |
 | 5     | Idempotency-Key for POST mutations, circuit breakers, audit partitioning, PII redaction |
 | 6     | Operator runbook + Grafana dashboards + Prometheus alerts |
