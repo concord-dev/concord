@@ -7,9 +7,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// MemoryBucket is the per-pod, in-memory Bucket implementation. Use
-// NewMemoryBucket to construct; the zero value is not useful. Allow is
-// safe for concurrent use.
 type MemoryBucket struct {
 	cfg     Config
 	mu      sync.Mutex
@@ -23,8 +20,6 @@ type memEntry struct {
 	lastUsed time.Time
 }
 
-// NewMemoryBucket constructs a per-pod token-bucket limiter. A zero or
-// negative TTL is replaced with a sensible default so callers can omit it.
 func NewMemoryBucket(cfg Config) *MemoryBucket {
 	if cfg.TTL <= 0 {
 		cfg.TTL = 10 * time.Minute
@@ -36,9 +31,6 @@ func NewMemoryBucket(cfg Config) *MemoryBucket {
 	}
 }
 
-// Allow returns (true, 0) when the caller for `key` has a token to spend,
-// (false, retryAfter) when they don't. Empty keys are always allowed; see
-// the package doc for why.
 func (b *MemoryBucket) Allow(key string) (bool, time.Duration) {
 	if key == "" {
 		return true, 0
@@ -69,7 +61,6 @@ func (b *MemoryBucket) Allow(key string) (bool, time.Duration) {
 	return false, retryAfter(b.cfg.Rate, e.lim.TokensAt(now))
 }
 
-// Size returns the number of tracked keys. Test-only.
 func (b *MemoryBucket) Size() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()

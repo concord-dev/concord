@@ -9,19 +9,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// RedisBucket is a shared token bucket implemented atomically on Redis via
-// a Lua script. The whole fleet of replicas shares one budget per key, so
-// the configured Rate / Burst is the real fleet-wide limit regardless of
-// how many pods are running.
-//
-// The bucket is stored as a HASH per key with two fields: `t` (current
-// token count as a float string) and `ts` (last refill timestamp in
-// nanoseconds). The Lua script refills based on (now - ts) * rate, caps at
-// burst, then attempts a 1-token spend atomically.
-//
-// Every command runs against the configured Timeout context — a stuck or
-// failover-bouncing Redis returns context.DeadlineExceeded promptly so
-// FailoverBucket can route around it.
 type RedisBucket struct {
 	client  *redis.Client
 	script  *redis.Script
@@ -33,31 +20,14 @@ type RedisBucket struct {
 	now     func() time.Time
 }
 
-// RedisBucketOptions are the per-gate knobs RedisBucket exposes.
 type RedisBucketOptions struct {
 	Config
 
-	// Prefix is the key prefix in Redis. Required — different gates must
-	// not collide, and a stray empty prefix would cause silent cross-gate
-	// budget sharing.
 	Prefix string
 
-	// Timeout is the per-call deadline applied to each Eval. Defaults to
-	// 50ms — tight enough that a failover-bouncing Redis can't pin
-	// handler goroutines, loose enough that a healthy intra-AZ Redis
-	// always answers in time.
 	Timeout time.Duration
 }
 
-// luaTokenBucket is the atomic refill + spend script. KEYS[1] is the
-// per-caller key. ARGV: rate (tokens/sec), burst, now_ns (string),
-// ttl_seconds. Returns a 2-element table: {allowed (0|1), retry_after_ms}.
-//
-// We pass now from the caller (not redis TIME) so a test can inject a
-// fake clock without needing FAKETIME on the redis container. In prod
-// the difference between wall clocks across pods is bounded by NTP and
-// the resulting fairness error is below human perception for these
-// rate budgets.
 const luaTokenBucket = `
 local rate_per_sec = tonumber(ARGV[1])
 local burst        = tonumber(ARGV[2])
@@ -99,10 +69,6 @@ redis.call("EXPIRE", KEYS[1], ttl_sec)
 return {allowed, retry_after_ms}
 `
 
-// NewRedisBucket constructs a RedisBucket bound to client. Returns an
-// error if Prefix is empty or Rate is non-positive — those are
-// configuration mistakes the caller wants to catch at startup, not at
-// the first denied request.
 func NewRedisBucket(client *redis.Client, opts RedisBucketOptions) (*RedisBucket, error) {
 	if client == nil {
 		return nil, errors.New("limiter: RedisBucket needs a non-nil redis client")
@@ -136,32 +102,16 @@ func NewRedisBucket(client *redis.Client, opts RedisBucketOptions) (*RedisBucket
 	}, nil
 }
 
-// Allow returns (true, 0) on admit, (false, retryAfter) on deny. When
-// the Redis call errors or times out, Allow returns ErrUnavailable
-// wrapped in the duration return as 0. Use FailoverBucket if you want
-// graceful degradation instead of fail-closed.
-//
-// Empty keys always pass — see package doc.
 func (b *RedisBucket) Allow(key string) (bool, time.Duration) {
 	ok, ra, err := b.AllowE(key)
 	if err != nil {
-		// Fail-closed: a Redis error reports the call as denied with a
-		// 1s Retry-After. FailoverBucket inspects errors via AllowE so
-		// it can pick the fallback bucket instead of denying.
 		return false, time.Second
 	}
 	return ok, ra
 }
 
-// ErrUnavailable is returned by AllowE when the Redis call could not
-// be made (timeout, connection refused, NOSCRIPT failures, ...). It is
-// the signal FailoverBucket uses to switch to the fallback.
 var ErrUnavailable = errors.New("limiter: redis unavailable")
 
-// AllowE is the same as Allow but surfaces a non-nil error when the
-// underlying Redis call failed. Callers that want fail-closed behaviour
-// can ignore the error and treat any non-nil as deny; FailoverBucket
-// uses the error to escalate to a fallback bucket.
 func (b *RedisBucket) AllowE(key string) (bool, time.Duration, error) {
 	if key == "" {
 		return true, 0, nil

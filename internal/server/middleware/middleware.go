@@ -1,11 +1,3 @@
-// Package middleware holds the request-scoped auth gates used by the router.
-//
-// RequireOperator gates /operator/v1/* on a constant-time match against the
-// SaaS-operator token (the back-door used to provision tenants — distinct
-// from the per-org `admin` RBAC role). RequireSession resolves session tokens
-// and injects the user into the request context. RequireOrgPerm resolves
-// either a session or an API token for the org named by the {slug} path
-// variable and verifies the caller holds the named permission.
 package middleware
 
 import (
@@ -20,21 +12,15 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// Middleware bundles the auth gates around a Store and the operator token.
 type Middleware struct {
 	Store         *store.Store
 	OperatorToken string
 }
 
-// New constructs Middleware with the given dependencies.
 func New(s *store.Store, operatorToken string) *Middleware {
 	return &Middleware{Store: s, OperatorToken: operatorToken}
 }
 
-// RequireOperator returns 503 when OperatorToken is empty (operator endpoints
-// disabled). Otherwise it requires a Bearer token that constant-time matches
-// OperatorToken. This is the SaaS-operator back-door, not the per-org `admin`
-// RBAC role.
 func (m *Middleware) RequireOperator(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if m.OperatorToken == "" {
@@ -55,7 +41,6 @@ func (m *Middleware) RequireOperator(next http.Handler) http.Handler {
 	})
 }
 
-// RequireSession resolves a session token and injects the user into context.
 func (m *Middleware) RequireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tok, ok := BearerToken(r)
@@ -87,10 +72,6 @@ func (m *Middleware) RequireSession(next http.Handler) http.Handler {
 	})
 }
 
-// RequireOrgPerm requires either an API token or a session token authenticated
-// for the org named by the {slug} path variable, AND that the caller holds
-// the named permission. API tokens implicitly carry every permission of their
-// org; users must have a role that grants `perm`.
 func (m *Middleware) RequireOrgPerm(perm string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -162,8 +143,6 @@ func (m *Middleware) resolveOrgPrincipal(w http.ResponseWriter, r *http.Request,
 	return p, true
 }
 
-// BearerToken extracts the token from Authorization: Bearer <x>. Comparison is
-// case-insensitive to match RFC 6750.
 func BearerToken(r *http.Request) (string, bool) {
 	h := r.Header.Get("Authorization")
 	if len(h) < 7 || !strings.EqualFold(h[:7], "Bearer ") {

@@ -1,12 +1,3 @@
-// Package metrics owns the server's Prometheus instrumentation. A private
-// registry is used (rather than the global default) so each test can spin up
-// an isolated Metrics instance and tests don't pollute one another via the
-// process-wide default registry.
-//
-// Exposition is over /metrics on the main listener. If you don't want that
-// publicly reachable, gate it at your ingress — every other Go service on
-// the planet exposes /metrics on the same port and we don't want to be a
-// snowflake.
 package metrics
 
 import (
@@ -18,9 +9,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Metrics bundles every collector the server emits. Construct one per process
-// (or per test) via New; pass it to the router for the HTTP middleware and
-// to the Concord struct so domain code can record domain events.
 type Metrics struct {
 	reg *prometheus.Registry
 
@@ -30,19 +18,8 @@ type Metrics struct {
 
 	BusEventsDroppedTotal *prometheus.CounterVec
 
-	// LimiterPrimaryErrorsTotal counts how often a Redis-backed rate
-	// limiter failed its primary call and had to fall through to the
-	// per-pod fallback bucket. A non-zero rate here is the canary signal
-	// for "Redis is sick"; sustained high rate means the fleet is no
-	// longer honouring the shared limit.
 	LimiterPrimaryErrorsTotal *prometheus.CounterVec
 
-	// Outbox + Dispatcher instrumentation. The outbox is the canonical
-	// transactional pipe to Kafka — a stalled dispatcher or a stuck
-	// broker shows up here long before downstream consumers notice.
-	//
-	// OutboxEnqueuedTotal is bumped by handlers when they write to
-	// event_outbox; the rest are bumped by the Dispatcher.
 	OutboxEnqueuedTotal    *prometheus.CounterVec   // labels: kind
 	OutboxPublishedTotal   *prometheus.CounterVec   // labels: kind
 	OutboxFailedTotal      *prometheus.CounterVec   // labels: kind — publish failed, will retry
@@ -52,23 +29,16 @@ type Metrics struct {
 	OutboxCleanupDeletedTotal prometheus.Counter    // rows the periodic delete sweep removed
 	OutboxTickErrorsTotal  *prometheus.CounterVec   // labels: stage (tick|cleanup|lag)
 
-	// Idempotency-Key middleware (Phase 5). All four are bumped by the
-	// middleware via the OnX callbacks in idempotency.Config.
 	IdempotencyHitsTotal        prometheus.Counter
 	IdempotencyMismatchTotal    prometheus.Counter
 	IdempotencyPendingTotal     prometheus.Counter
 	IdempotencyRedisErrorsTotal prometheus.Counter
 
-	// Audit-partition rotator (Phase 6). Ticks counts every successful
-	// EnsureMonthsAhead invocation; Errors counts failed ticks; Created
-	// labels by partition name so an operator can spot the rollover.
 	AuditPartitionRotatorTicksTotal  prometheus.Counter
 	AuditPartitionRotatorErrorsTotal prometheus.Counter
 	AuditPartitionsCreatedTotal      *prometheus.CounterVec
 }
 
-// New builds a Metrics with a private registry and registers every collector
-// plus the standard Go runtime + process collectors.
 func New() *Metrics {
 	reg := prometheus.NewRegistry()
 	m := &Metrics{
@@ -218,32 +188,22 @@ func New() *Metrics {
 	return m
 }
 
-// RegisterDBPool wires a pgxpool.Stat-driven collector so concord_db_pool_*
-// metrics surface live pool stats on every scrape (instead of being sampled
-// on a fixed timer). Safe to call once during server construction.
 func (m *Metrics) RegisterDBPool(pool *pgxpool.Pool) {
 	m.reg.MustRegister(newPoolCollector(pool))
 }
 
-// Handler returns the /metrics HTTP handler bound to this private registry.
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.reg, promhttp.HandlerOpts{Registry: m.reg})
 }
 
-// RecordBusDrop bumps the dropped-event counter for the named bus kind.
 func (m *Metrics) RecordBusDrop(kind string) {
 	m.BusEventsDroppedTotal.WithLabelValues(kind).Inc()
 }
 
-// RecordLimiterPrimaryError bumps the rate-limiter outage counter for the
-// named gate (e.g. "login_ip", "invite_accept_ip"). Wired from FailoverBucket
-// in cmd/server's limiter factory.
 func (m *Metrics) RecordLimiterPrimaryError(gate string) {
 	m.LimiterPrimaryErrorsTotal.WithLabelValues(gate).Inc()
 }
 
-// RecordOutboxEnqueued bumps the enqueue counter for the named event kind.
-// Wired from handlers when they INSERT a row into event_outbox.
 func (m *Metrics) RecordOutboxEnqueued(kind string) {
 	m.OutboxEnqueuedTotal.WithLabelValues(kind).Inc()
 }

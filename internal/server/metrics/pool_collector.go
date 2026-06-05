@@ -5,10 +5,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// poolCollector exposes pgxpool stats as four gauges. Implemented as a
-// Collector (rather than four separate Gauges polled on a timer) so the
-// values are read at scrape time — guaranteed fresh, zero background
-// goroutines, no sampling skew.
 type poolCollector struct {
 	pool         *pgxpool.Pool
 	acquired     *prometheus.Desc
