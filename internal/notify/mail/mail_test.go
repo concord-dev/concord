@@ -17,7 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── LogMailer ─────────────────────────────────────────────────────────
 
 func TestNew_ReturnsLogMailerWhenHostEmpty(t *testing.T) {
 	m := New(Config{From: "noreply@example.com"})
@@ -34,7 +33,6 @@ func TestLogMailer_SendIsAlwaysSuccess(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// ─── buildRFC822 ───────────────────────────────────────────────────────
 
 func TestBuildRFC822_HasCanonicalHeadersAndCRLFLines(t *testing.T) {
 	body := buildRFC822("noreply@example.com", Message{
@@ -58,7 +56,6 @@ func TestBuildRFC822_DefaultsEmptySubject(t *testing.T) {
 	assert.Contains(t, body, "Subject: (no subject)\r\n")
 }
 
-// ─── SMTPMailer (fake session) ─────────────────────────────────────────
 
 // fakeSession records the verbs the mailer drives, plus the body bytes.
 // Per-call return-error knobs let us exercise failure paths.
@@ -162,7 +159,6 @@ func TestSMTPMailer_RejectsInvalidAddresses(t *testing.T) {
 	}
 }
 
-// ─── End-to-end against an in-process SMTP listener ────────────────────
 
 // startFakeSMTP is a minimal SMTP server that speaks just enough of the
 // protocol to accept HELO, MAIL FROM, RCPT TO, DATA, QUIT. Used for one

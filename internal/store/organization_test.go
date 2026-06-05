@@ -12,7 +12,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── Organizations ─────────────────────────────────────────────────────
 
 func TestCreateOrganization_RoundTrip(t *testing.T) {
 	s := openTestStore(t)

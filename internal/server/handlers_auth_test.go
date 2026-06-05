@@ -14,7 +14,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── Auth: login flow ──────────────────────────────────────────────────
 
 func TestLogin_HappyPath_ReturnsSessionToken(t *testing.T) {
 	h := newHarness(t)
@@ -68,7 +67,6 @@ func TestLogout_RevokesSession(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, respMe.StatusCode)
 }
 
-// ─── Session-scoped endpoints ─────────────────────────────────────────
 
 func TestSessionMe_ReturnsUser(t *testing.T) {
 	h := newHarness(t)

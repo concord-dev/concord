@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// ─── Public ────────────────────────────────────────────────────────────
 
 func TestHealth_NoAuth(t *testing.T) {
 	h := newHarness(t)

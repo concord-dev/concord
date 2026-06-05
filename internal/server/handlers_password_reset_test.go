@@ -16,7 +16,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── Request ──────────────────────────────────────────────────────────
 
 func TestPasswordReset_RequestAlways200_NoEnumeration(t *testing.T) {
 	h := newHarness(t)
@@ -42,7 +41,6 @@ func TestPasswordReset_RequestRejectsEmptyEmail(t *testing.T) {
 	assert.Contains(t, string(body), "email")
 }
 
-// ─── Confirm ──────────────────────────────────────────────────────────
 
 // Confirm tests need a real token. The token is logged out-of-band in
 // production; here we read the row directly from the store and reconstruct
@@ -164,7 +162,6 @@ func TestPasswordReset_ConfirmRequiresBothFields(t *testing.T) {
 	assert.Contains(t, string(body), "new_password")
 }
 
-// ─── Sanity: the token format is what we expect ──────────────────────
 
 func TestPasswordReset_TokenFormat(t *testing.T) {
 	h := newHarness(t)

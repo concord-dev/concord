@@ -17,7 +17,6 @@ import (
 	"github.com/concord-dev/concord/internal/server"
 )
 
-// ─── Webhooks ─────────────────────────────────────────────────────────
 
 func TestWebhooks_CreateGetListUpdateDelete(t *testing.T) {
 	h := newHarness(t)

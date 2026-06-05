@@ -236,7 +236,6 @@ func (h *Handlers) AbandonDLQDelivery(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ─── helpers ─────────────────────────────────────────────────────────
 
 type dlqFilters struct {
 	OrgID  *uuid.UUID

@@ -11,7 +11,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── Users ─────────────────────────────────────────────────────────────
 
 func TestCreateUser_WithPassword(t *testing.T) {
 	s := openTestStore(t)

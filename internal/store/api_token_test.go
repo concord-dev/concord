@@ -11,7 +11,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── API tokens ────────────────────────────────────────────────────────
 
 func TestCreateAPIToken_PlaintextPrefixedAndUnique(t *testing.T) {
 	s := openTestStore(t)

@@ -10,7 +10,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── RBAC (memberships + permissions) ──────────────────────────────────
 
 func TestAssignRole_IsIdempotent(t *testing.T) {
 	s := openTestStore(t)

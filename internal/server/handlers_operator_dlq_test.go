@@ -15,7 +15,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── shared fixtures ─────────────────────────────────────────────────
 
 // seedDeadOutboxRow enqueues an event_outbox row then forces it past the
 // dispatcher's max-attempts ceiling so it qualifies as dead. Returns the
@@ -60,7 +59,6 @@ func seedDeadDelivery(t *testing.T, h *harness, kind string) (uuid.UUID, uuid.UU
 	return id, wh.ID
 }
 
-// ─── /operator/v1/dlq/events ─────────────────────────────────────────
 
 func TestDLQEvents_RequiresOperatorToken(t *testing.T) {
 	h := newHarness(t)
@@ -226,7 +224,6 @@ func TestDLQEvents_ReplayClearsAbandonment(t *testing.T) {
 	assert.Nil(t, row.AbandonedAt, "replay must clear abandoned_at — letting operators undo abandon")
 }
 
-// ─── /operator/v1/dlq/deliveries ─────────────────────────────────────
 
 func TestDLQDeliveries_ListAndReplayAndAbandon(t *testing.T) {
 	h := newHarness(t)

@@ -13,7 +13,6 @@ import (
 	"github.com/concord-dev/concord/internal/auth"
 )
 
-// ─── Errors ────────────────────────────────────────────────────────────
 
 // ErrMFAAlreadyEnrolled is returned by EnrollUserTOTP when the user already
 // has a verified TOTP secret. Re-enrollment requires DisableUserMFA first
@@ -30,7 +29,6 @@ var ErrMFANotEnrolled = errors.New("mfa: user has no enrolled TOTP secret")
 // the challenge's TTL.
 var ErrMFAChallengeExpired = errors.New("mfa: challenge expired")
 
-// ─── Types ─────────────────────────────────────────────────────────────
 
 // UserTOTP is the read shape for the per-user TOTP enrollment row. The
 // `Secret` field is the base32-encoded TOTP shared secret — must NEVER be
@@ -53,7 +51,6 @@ type MFAChallenge struct {
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
-// ─── TOTP enrollment ───────────────────────────────────────────────────
 
 // BeginUserTOTPEnrollment stores a pending TOTP secret for the user.
 // Subsequent calls before VerifyUserTOTPEnrollment overwrite the pending
@@ -151,7 +148,6 @@ func (s *Store) DisableUserMFA(ctx context.Context, userID uuid.UUID) error {
 	return tx.Commit(ctx)
 }
 
-// ─── Recovery codes ────────────────────────────────────────────────────
 
 // ReplaceRecoveryCodes wipes the user's existing codes and inserts the new
 // argon2id-hashed batch. Returns the count inserted. Atomic — partial
@@ -242,7 +238,6 @@ func normalizeRecoveryCode(s string) string {
 	return strings.ToLower(r.Replace(s))
 }
 
-// ─── MFA challenge ─────────────────────────────────────────────────────
 
 // CreateMFAChallenge mints a short-lived challenge token bound to user +
 // client IP/UA. Returns the row and the plaintext (concord_mfa_…) — the

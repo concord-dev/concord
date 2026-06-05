@@ -11,7 +11,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── Control overrides ─────────────────────────────────────────────────
 
 func TestUpsertControlOverride_InsertsThenUpdates(t *testing.T) {
 	s := openTestStore(t)

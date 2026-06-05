@@ -12,7 +12,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── Operator (CONCORD_OPERATOR_TOKEN) ──────────────────────────────────────
 
 func TestOperator_RequiresOperatorToken(t *testing.T) {
 	h := newHarness(t)

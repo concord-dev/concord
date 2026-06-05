@@ -124,7 +124,6 @@ func (h *harness) do(t *testing.T, method, path, body, auth string) (*http.Respo
 	return resp, out
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────
 
 // login posts to /v1/auth/login with the harness credentials and returns
 // the freshly-minted session token plaintext.

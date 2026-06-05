@@ -14,7 +14,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── Org-scoped: API token path ───────────────────────────────────────
 
 func TestOrgAPI_WithAPIToken_PermitsRead(t *testing.T) {
 	h := newHarness(t)
@@ -36,7 +35,6 @@ func TestOrgAPI_UnknownOrgReturns404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
-// ─── Org-scoped: session path with RBAC ───────────────────────────────
 
 func TestOrgAPI_OwnerSessionCanSubmitRun(t *testing.T) {
 	h := newHarness(t)

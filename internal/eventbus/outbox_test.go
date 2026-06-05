@@ -23,7 +23,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── test harness ────────────────────────────────────────────────────
 
 const defaultTestDSN = "postgres://concord:concord-dev@localhost:5432/concord?sslmode=disable"
 
@@ -95,7 +94,6 @@ func seedOrg(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	return id
 }
 
-// ─── Outbox unit tests ───────────────────────────────────────────────
 
 func TestOutbox_EnqueuePersistsCanonicalRow(t *testing.T) {
 	pool := openIsolatedPool(t)
@@ -243,7 +241,6 @@ func TestOutbox_CleanupPublished(t *testing.T) {
 	assert.Equal(t, 1, still, "fresh published row must survive cleanup")
 }
 
-// ─── Dispatcher tests ────────────────────────────────────────────────
 
 // recorderPublisher captures every Publish call so tests can assert on
 // ordering, headers, and counts. The lock is necessary because the

@@ -13,7 +13,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── Per-org control overrides ────────────────────────────────────────
 
 func TestOverrides_PutGetListDelete(t *testing.T) {
 	h := newHarness(t)

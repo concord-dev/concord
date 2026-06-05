@@ -12,7 +12,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── User sessions ─────────────────────────────────────────────────────
 
 func TestCreateSession_AndResolve(t *testing.T) {
 	s := openTestStore(t)

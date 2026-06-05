@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── Migrations + seed ─────────────────────────────────────────────────
 
 func TestMigrate_IsIdempotent(t *testing.T) {
 	s := openTestStore(t)

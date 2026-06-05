@@ -26,7 +26,6 @@ import (
 	"github.com/concord-dev/concord/internal/worker"
 )
 
-// ─── harness ─────────────────────────────────────────────────────────
 
 const defaultTestDSN = "postgres://concord:concord-dev@localhost:5432/concord?sslmode=disable"
 
@@ -135,7 +134,6 @@ func newRecordingReceiver(respond func(seq int64) (int, string)) *recordingRecei
 func (r *recordingReceiver) Close() { r.srv.Close() }
 func (r *recordingReceiver) URL() string { return r.srv.URL }
 
-// ─── Executor tests ──────────────────────────────────────────────────
 
 func TestExecutor_2xxMarksSucceeded(t *testing.T) {
 	s := openIsolatedStore(t)

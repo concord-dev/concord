@@ -12,7 +12,6 @@ import (
 	"github.com/concord-dev/concord/internal/server"
 )
 
-// ─── Misc ────────────────────────────────────────────────────────────
 
 func TestBearer_CaseInsensitive(t *testing.T) {
 	h := newHarness(t)

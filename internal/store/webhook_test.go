@@ -11,7 +11,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── Webhooks ──────────────────────────────────────────────────────────
 
 func TestCreateWebhook_GeneratesSecretWhenAbsent(t *testing.T) {
 	s := openTestStore(t)

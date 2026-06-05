@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── Agent submissions ────────────────────────────────────────────────
 
 func TestSubmitRun_StoresAndShowsUpInFindings(t *testing.T) {
 	h := newHarness(t)
@@ -56,7 +55,6 @@ func TestSubmitRun_RejectsMissingTimestamps(t *testing.T) {
 	assert.Contains(t, string(raw), "started_at")
 }
 
-// ─── SSE ──────────────────────────────────────────────────────────────
 
 func TestEvents_StreamsRunCompletedOnSubmit(t *testing.T) {
 	h := newHarness(t)

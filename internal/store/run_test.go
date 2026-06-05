@@ -11,7 +11,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── Runs ──────────────────────────────────────────────────────────────
 
 func TestSubmitRun_LandsTerminalWithAgentSource(t *testing.T) {
 	s := openTestStore(t)

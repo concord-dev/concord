@@ -14,7 +14,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ─── Org-side invitation CRUD ─────────────────────────────────────────
 
 func TestInvitations_CreateReturnsTokenOnceAndIsListable(t *testing.T) {
 	h := newHarness(t)
@@ -108,7 +107,6 @@ func TestInvitations_UnknownRoleReturns400(t *testing.T) {
 	assert.Contains(t, string(body), "unknown role")
 }
 
-// ─── Public accept flow ───────────────────────────────────────────────
 
 func TestInvitations_AcceptFlowNewUser(t *testing.T) {
 	h := newHarness(t)

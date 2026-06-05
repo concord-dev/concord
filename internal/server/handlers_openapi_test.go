@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── OpenAPI ──────────────────────────────────────────────────────────
 
 func TestOpenAPI_ServedAsYAML(t *testing.T) {
 	h := newHarness(t)
