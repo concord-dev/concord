@@ -66,10 +66,16 @@ for an always-on agent.`,
 					push.serverURL, push.orgSlug)
 			}
 
+			built := wiring.BuildRegistry(cmd.Context(), wiring.Opts{
+				FixturesOnly:  fixturesOnly,
+				NeededSources: controls.NeededSources(loaded),
+				Warn:          os.Stderr,
+			})
+			defer built.Shutdown()
+
 			check := func(ctx context.Context) ([]apiv1.Finding, error) {
 				started := time.Now().UTC()
-				reg := wiring.BuildRegistry(ctx, fixturesOnly, os.Stderr)
-				r := runner.New(policy.New(), reg).SetParams(cfg.Controls.Params)
+				r := runner.New(policy.New(), built.Registry).SetParams(cfg.Controls.Params)
 				findings := r.RunAll(ctx, loaded)
 				completed := time.Now().UTC()
 

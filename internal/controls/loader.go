@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -55,6 +56,28 @@ func LoadFile(path string) (apiv1.Control, error) {
 		return c, err
 	}
 	return c, nil
+}
+
+// NeededSources returns the unique, sorted set of evidence.Source values
+// referenced by loaded. The "file" source is omitted because it is always
+// served in-process. Used by the plugin manager to lazy-spawn only what
+// the current run will touch.
+func NeededSources(loaded []Loaded) []string {
+	set := make(map[string]struct{})
+	for _, l := range loaded {
+		for _, e := range l.Control.Spec.Evidence {
+			if e.Source == "" || e.Source == "file" {
+				continue
+			}
+			set[e.Source] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for s := range set {
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func isControlFile(p string) bool {

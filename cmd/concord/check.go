@@ -51,7 +51,13 @@ func newCheckCmd() *cobra.Command {
 				return fmt.Errorf("no controls found in %s", controlsDir)
 			}
 
-			reg := wiring.BuildRegistry(context.Background(), fixturesOnly, os.Stderr)
+			built := wiring.BuildRegistry(context.Background(), wiring.Opts{
+				FixturesOnly:  fixturesOnly,
+				NeededSources: controls.NeededSources(loaded),
+				Warn:          os.Stderr,
+			})
+			defer built.Shutdown()
+			reg := built.Registry
 			if !quiet {
 				describeMode(os.Stderr, reg, fixturesOnly)
 				fmt.Fprintf(os.Stderr, "Checking %d control(s)...\n\n", len(loaded))

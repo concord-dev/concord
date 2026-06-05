@@ -30,6 +30,15 @@ func (r *Registry) SetFixturesOnly(b bool) {
 	r.fixturesOnly = b
 }
 
+// Has reports whether a non-file collector is registered for source.
+func (r *Registry) Has(source string) bool {
+	if source == "file" {
+		return false
+	}
+	_, ok := r.collectors[source]
+	return ok
+}
+
 func (r *Registry) Sources() []string {
 	out := make([]string, 0, len(r.collectors))
 	for s := range r.collectors {

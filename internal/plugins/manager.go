@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	hclog "github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
 
 	sdkplugin "github.com/concord-dev/concord/pkg/plugin"
@@ -203,6 +204,7 @@ func (m *Manager) spawn(e *entry) (*client, error) {
 		Cmd:              exec.Command(e.path),
 		AllowedProtocols: []goplugin.Protocol{goplugin.ProtocolGRPC},
 		Managed:          true,
+		Logger:           hclog.NewNullLogger(),
 	})
 	conn, err := gpc.Client()
 	if err != nil {
