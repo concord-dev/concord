@@ -206,6 +206,15 @@ func (m *Manager) spawn(e *entry) (*client, error) {
 	}, nil
 }
 
+// Capabilities returns source's self-declared capabilities, spawning the plugin if needed.
+func (m *Manager) Capabilities(ctx context.Context, source string) (Capabilities, error) {
+	pc, err := m.Get(ctx, source)
+	if err != nil {
+		return Capabilities{}, err
+	}
+	return pc.Capabilities(ctx)
+}
+
 // Shutdown terminates every running plugin. Safe to call repeatedly.
 func (m *Manager) Shutdown(_ context.Context) error {
 	m.mu.Lock()

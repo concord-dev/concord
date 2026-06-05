@@ -26,6 +26,26 @@ type PluginCollector struct {
 	timeout time.Duration
 }
 
+// Capabilities is the host-side projection of a plugin's CapabilitiesResponse.
+type Capabilities struct {
+	Source          string
+	Version         string
+	ProtocolVersion string
+	SDKVersion      string
+	SupportedTypes  []string
+	RequiredEnv     []string
+	OptionalEnv     []string
+	Permissions     Permissions
+	DocsURL         string
+}
+
+// Permissions advertises a plugin's runtime needs.
+type Permissions struct {
+	Network    []string
+	Filesystem string
+	Subprocess bool
+}
+
 // NewPluginCollector wraps a connected gRPC client.
 func NewPluginCollector(source string, client pluginv1.CollectorClient, timeout time.Duration) *PluginCollector {
 	if timeout <= 0 {
@@ -36,6 +56,32 @@ func NewPluginCollector(source string, client pluginv1.CollectorClient, timeout 
 
 // Source returns the source name this collector handles.
 func (p *PluginCollector) Source() string { return p.source }
+
+// Capabilities returns the plugin's self-declared capabilities.
+func (p *PluginCollector) Capabilities(ctx context.Context) (Capabilities, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	resp, err := p.client.Capabilities(ctx, &pluginv1.CapabilitiesRequest{})
+	if err != nil {
+		return Capabilities{}, mapGRPCError(err)
+	}
+	out := Capabilities{
+		Source:          resp.Source,
+		Version:         resp.Version,
+		ProtocolVersion: resp.ConcordProtocolVersion,
+		SDKVersion:      resp.SdkVersion,
+		SupportedTypes:  resp.SupportedTypes,
+		RequiredEnv:     resp.RequiredEnv,
+		OptionalEnv:     resp.OptionalEnv,
+		DocsURL:         resp.DocsUrl,
+	}
+	if resp.Permissions != nil {
+		out.Permissions.Network = resp.Permissions.Network
+		out.Permissions.Filesystem = resp.Permissions.Filesystem
+		out.Permissions.Subprocess = resp.Permissions.Subprocess
+	}
+	return out, nil
+}
 
 // Probe runs the plugin's health-check RPC.
 func (p *PluginCollector) Probe(ctx context.Context) (string, error) {

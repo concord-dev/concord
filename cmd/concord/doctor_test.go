@@ -31,7 +31,7 @@ metadata:
 	d := &doctor{w: &bytes.Buffer{}, ctx: context.Background()}
 	d.runConfig(cfgPath)
 	d.runControls("../../controls")
-	d.probe("github", stubProber{info: "authenticated as octocat"}, "")
+	d.runProbe("github", stubProber{info: "authenticated as octocat"}, "")
 
 	assert.GreaterOrEqual(t, d.passed, 3, "config + controls + github should all pass")
 	assert.Equal(t, 0, d.failed)
@@ -60,7 +60,7 @@ func TestDoctor_EmptyControlsDirWarns(t *testing.T) {
 
 func TestDoctor_ProbeFailureSurfacesAsFail(t *testing.T) {
 	d := &doctor{w: &bytes.Buffer{}, ctx: context.Background()}
-	d.probe("github", stubProber{err: errors.New("github /user returned 401")}, "set CONCORD_GITHUB_TOKEN")
+	d.runProbe("github", stubProber{err: errors.New("github /user returned 401")}, "set CONCORD_GITHUB_TOKEN")
 
 	assert.Equal(t, 1, d.failed)
 	assert.Equal(t, 0, d.passed)
