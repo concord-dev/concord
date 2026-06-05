@@ -22,6 +22,7 @@ func newControlpackCmd() *cobra.Command {
 	cmd.AddCommand(newControlpackListCmd())
 	cmd.AddCommand(newControlpackRemoveCmd())
 	cmd.AddCommand(newControlpackVerifyCmd())
+	cmd.AddCommand(newControlpackScaffoldCmd())
 	return cmd
 }
 
