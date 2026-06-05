@@ -334,9 +334,39 @@ For per-request fan-out (webhook delivery, async email), use
 
 ## 9. Testing
 
+### Test layout: alongside the code, partitioned by build tag
+Go convention puts `*_test.go` next to the source file it exercises.
+We stick with that — moving tests to a separate tree loses access to
+unexported identifiers (`package foo` white-box tests), breaks
+`go test ./...` ergonomics, and pulls every contributor away from the
+shape every other Go project uses.
+
+What we *do* use to keep `go test ./...` fast and the suite organised
+is **build tags**. Three tiers:
+
+| Tier | Build tag | Where it lives | What it touches |
+|---|---|---|---|
+| **unit** | none (default) | next to source | pure Go; no Postgres / Redis / Kafka / network / external binary |
+| **integration** | `//go:build integration` | next to source | one or more real backends; spawns child processes; hits the registry |
+| **e2e** | `//go:build e2e` | dedicated top-level `e2e/` module (own `go.mod`) | spans multiple Concord binaries (CLI → server → worker) and asserts on DB state |
+
+Commands:
+
+```
+go test ./...                         # unit only (every CI PR)
+go test -tags integration ./...       # unit + integration (CI integration job)
+go test -tags e2e ./e2e/...           # cross-binary scenarios (concord-platform only)
+go test -race -tags integration ./... # the race-detector gate
+```
+
+Why the `e2e/` module is separate: it builds the production binaries
+via `go build` and execs them, so it depends on real Postgres + the
+sibling concord checkout. Keeping it in its own `go.mod` keeps those
+heavy deps out of the platform's main module graph.
+
 ### Race detector by default
-`go test -race ./...` is the CI gate. Locally, use the same
-invocation. We have hit dozens of races during this project's
+`go test -race -tags integration ./...` is the CI gate. Locally, use
+the same invocation. We have hit dozens of races during this project's
 development — the detector is non-negotiable.
 
 ### Real backends, not mocks

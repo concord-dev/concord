@@ -9,22 +9,19 @@ LISTEN_ADDR ?= :8080
 # Analyzer binaries — installed into $(go env GOPATH)/bin by `make tools`.
 GOPATH_BIN := $(shell go env GOPATH)/bin
 
-.PHONY: tidy build server worker test test-race lint vet staticcheck deadcode vuln tools check clean run dev pg pg-down pg-logs psql air-install help
+.PHONY: tidy build test test-integration test-race lint vet staticcheck deadcode vuln tools check clean run help
 
 help:
 	@echo "Common targets:"
-	@echo "  make pg          — start Postgres in docker-compose"
-	@echo "  make pg-down     — stop Postgres"
-	@echo "  make dev         — live-reload concord-server (needs air + pg)"
-	@echo "  make build       — build the concord CLI"
-	@echo "  make server      — build cmd/server (concord-server)"
-	@echo "  make worker      — build cmd/concord-worker"
-	@echo "  make test        — full test sweep"
-	@echo "  make test-race   — full test sweep with the race detector"
-	@echo "  make lint        — vet + staticcheck + deadcode (all must pass)"
-	@echo "  make vuln        — govulncheck for stdlib + dependency CVEs"
-	@echo "  make tools       — install staticcheck/deadcode/govulncheck"
-	@echo "  make psql        — open psql against the dev DB"
+	@echo "  make build              — build the concord CLI"
+	@echo "  make test               — unit tests only (no backends needed)"
+	@echo "  make test-integration   — unit + integration (spawn plugins, hit ghcr)"
+	@echo "  make test-race          — full sweep with the race detector"
+	@echo "  make lint               — vet + staticcheck + deadcode"
+	@echo "  make vuln               — govulncheck for stdlib + dep CVEs"
+	@echo "  make tools              — install staticcheck/deadcode/govulncheck"
+	@echo ""
+	@echo "Server + worker have moved to concord-dev/concord-platform."
 
 tidy:
 	go mod tidy
@@ -33,19 +30,14 @@ build:
 	@mkdir -p bin
 	go build -buildvcs=false -o $(BIN) ./cmd/concord
 
-server:
-	@mkdir -p bin
-	go build -buildvcs=false -o bin/concord-server ./cmd/server
-
-worker:
-	@mkdir -p bin
-	go build -buildvcs=false -o bin/concord-worker ./cmd/concord-worker
-
 test:
 	go test -buildvcs=false ./... -count=1
 
+test-integration:
+	go test -buildvcs=false -tags integration ./... -count=1
+
 test-race:
-	go test -buildvcs=false -race ./... -count=1
+	go test -buildvcs=false -race -tags integration ./... -count=1
 
 # ── Analyzers ───────────────────────────────────────────────────────
 #
@@ -84,33 +76,3 @@ clean:
 
 run: build
 	./$(BIN) $(ARGS)
-
-# ── Dev workflow ────────────────────────────────────────────────────
-
-pg:
-	docker compose up -d postgres
-	@echo "Postgres up on localhost:5432 (db=concord user=concord)"
-
-pg-down:
-	docker compose down
-
-pg-logs:
-	docker compose logs -f postgres
-
-psql:
-	docker compose exec postgres psql -U concord -d concord
-
-# Live-reload concord-server. Picks up changes to *.go / *.yaml / *.sql / *.rego.
-# Press Ctrl-C to stop. Tail logs/<file>.log for the live-build errors.
-dev: air-install
-	@DATABASE_URL=$(DATABASE_URL) \
-	 CONCORD_OPERATOR_TOKEN=$(CONCORD_OPERATOR_TOKEN) \
-	 LISTEN_ADDR=$(LISTEN_ADDR) \
-	 air -c .air.toml
-
-# Idempotent: only installs air when the binary isn't already on PATH.
-air-install:
-	@command -v air >/dev/null 2>&1 || { \
-		echo "Installing air@latest into $$(go env GOPATH)/bin …"; \
-		go install github.com/air-verse/air@latest; \
-	}
