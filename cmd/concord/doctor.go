@@ -11,8 +11,8 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/concord-dev/concord/internal/config"
-	"github.com/concord-dev/concord/internal/controls"
+	"github.com/concord-dev/concord/pkg/config"
+	"github.com/concord-dev/concord/pkg/controls"
 	awsev "github.com/concord-dev/concord/internal/evidence/aws"
 	ghev "github.com/concord-dev/concord/internal/evidence/github"
 	hfev "github.com/concord-dev/concord/internal/evidence/huggingface"

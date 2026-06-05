@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/concord-dev/concord/internal/controls"
+	"github.com/concord-dev/concord/pkg/controls"
 	"github.com/concord-dev/concord/internal/evidence"
 	"github.com/concord-dev/concord/internal/policy"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"

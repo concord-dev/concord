@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/concord-dev/concord/internal/config"
+	"github.com/concord-dev/concord/pkg/config"
 )
 
 func TestLoad_MissingFileReturnsEmpty(t *testing.T) {

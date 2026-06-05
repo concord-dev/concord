@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/concord-dev/concord/internal/config"
+	"github.com/concord-dev/concord/pkg/config"
 	"github.com/concord-dev/concord/internal/framework"
 	"github.com/concord-dev/concord/internal/lockfile"
 )

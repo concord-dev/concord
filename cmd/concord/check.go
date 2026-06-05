@@ -10,13 +10,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/concord-dev/concord/internal/config"
+	"github.com/concord-dev/concord/pkg/config"
 	"github.com/concord-dev/concord/internal/controlpacks"
-	"github.com/concord-dev/concord/internal/controls"
+	"github.com/concord-dev/concord/pkg/controls"
 	"github.com/concord-dev/concord/internal/evidence"
 	"github.com/concord-dev/concord/internal/evidence/wiring"
 	"github.com/concord-dev/concord/internal/policy"
-	"github.com/concord-dev/concord/internal/report"
+	"github.com/concord-dev/concord/pkg/report"
 	"github.com/concord-dev/concord/internal/runner"
 )
 

@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/concord-dev/concord/internal/config"
-	"github.com/concord-dev/concord/internal/controls"
+	"github.com/concord-dev/concord/pkg/config"
+	"github.com/concord-dev/concord/pkg/controls"
 	"github.com/concord-dev/concord/internal/evidence/wiring"
 	"github.com/concord-dev/concord/internal/notify"
 	"github.com/concord-dev/concord/internal/policy"

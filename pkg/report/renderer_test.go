@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/concord-dev/concord/internal/report"
+	"github.com/concord-dev/concord/pkg/report"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 

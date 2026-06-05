@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/concord-dev/concord/internal/cli/credentials"
-	"github.com/concord-dev/concord/internal/report"
+	"github.com/concord-dev/concord/pkg/report"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
