@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,10 +29,74 @@ type evidenceCollectionDTO struct {
 func newEvidenceCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "evidence",
-		Short: "Inspect evidence-collection state on the server",
+		Short: "Inspect evidence-collection state and attach evidence documents",
 	}
 	cmd.AddCommand(newEvidenceFreshnessCmd())
+	cmd.AddCommand(newEvidenceAttachCmd())
 	return cmd
+}
+
+func newEvidenceAttachCmd() *cobra.Command {
+	var (
+		serverURL, orgSlug, token string
+		filePath, notes           string
+	)
+	cmd := &cobra.Command{
+		Use:   "attach",
+		Short: "Upload an evidence document (PDF, screenshot, runbook) as a sha256-addressed attachment",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fs, err := resolveFindingsServer(serverURL, orgSlug, token)
+			if err != nil {
+				return err
+			}
+			a, err := uploadEvidenceFile(cmd.Context(), fs, filePath, notes)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stdout, "attached %s (%d bytes, sha256=%s)\n",
+				a.Filename, a.ByteSize, a.SHA256)
+			return nil
+		},
+	}
+	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
+	cmd.Flags().StringVar(&filePath, "file", "", "Local path to the document (required)")
+	cmd.Flags().StringVar(&notes, "notes", "", "Optional notes describing what this evidence proves")
+	_ = cmd.MarkFlagRequired("file")
+	return cmd
+}
+
+type evidenceAttachmentDTO struct {
+	ID       string `json:"id"`
+	SHA256   string `json:"sha256"`
+	Filename string `json:"filename"`
+	ByteSize int64  `json:"byte_size"`
+}
+
+func uploadEvidenceFile(ctx context.Context, fs findingsServer, path, notes string) (evidenceAttachmentDTO, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return evidenceAttachmentDTO{}, fmt.Errorf("open document: %w", err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	if err != nil {
+		return evidenceAttachmentDTO{}, fmt.Errorf("hash document: %w", err)
+	}
+	body := map[string]any{
+		"sha256":    hex.EncodeToString(h.Sum(nil)),
+		"filename":  path,
+		"byte_size": n,
+	}
+	if notes != "" {
+		body["notes"] = notes
+	}
+	var a evidenceAttachmentDTO
+	if err := apiSend(ctx, fs, "POST",
+		"/v1/orgs/"+fs.orgSlug+"/evidence-attachments", body, &a); err != nil {
+		return evidenceAttachmentDTO{}, err
+	}
+	return a, nil
 }
 
 func newEvidenceFreshnessCmd() *cobra.Command {
