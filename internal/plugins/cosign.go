@@ -46,7 +46,7 @@ func VerifySignature(ctx context.Context, ref string, opts VerifyOptions) (*Veri
 		issuer = defaultOIDCIssuer
 	}
 
-	args := []string{"verify", "--output", "json", "--certificate-oidc-issuer", issuer}
+	args := []string{"verify", "--certificate-oidc-issuer", issuer}
 	switch {
 	case opts.Identity != "":
 		args = append(args, "--certificate-identity", opts.Identity)
@@ -90,8 +90,10 @@ func extractIdentity(stdout, stderr string) string {
 		if id := scanForKey(hay, "Subject:"); id != "" {
 			return id
 		}
-		if id := scanForJSONField(hay, `"subject":`); id != "" {
-			return id
+		for _, key := range []string{`"Subject":`, `"subject":`} {
+			if id := scanForJSONField(hay, key); id != "" {
+				return id
+			}
 		}
 	}
 	return ""
