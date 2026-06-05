@@ -12,28 +12,10 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ListDriftEvents serves GET /v1/orgs/{slug}/drift. Gated by `runs:read`
-// (drift is meta on runs; we don't introduce a separate permission for it).
-// Query params:
-//
-//	limit       1..500 (default 50)
-//	since       RFC3339 inclusive
-//	until       RFC3339 exclusive
-//	control_id  filter to one control's history
-//	from        filter on from_status (e.g. "pass")
-//	to          filter on to_status   (e.g. "fail")
-//	run_id      return only drift events recorded against that run
-//
-// Order: newest first. Use this to power the "regressions inbox" — pair
-// `?from=pass&to=fail` with a since= timestamp to get exactly the
-// pages-someone events for an investigator's time window.
 func (h *Handlers) ListDriftEvents(w http.ResponseWriter, r *http.Request) {
 	p, _ := authctx.PrincipalFrom(r.Context())
 	q := r.URL.Query()
 
-	// Per-run subview: if run_id is supplied, ignore everything else and
-	// return that run's drift in chronological order. The fact-of-the-run
-	// is the single most common UI query (the run detail page).
 	if v := q.Get("run_id"); v != "" {
 		runID, err := uuid.Parse(v)
 		if err != nil {

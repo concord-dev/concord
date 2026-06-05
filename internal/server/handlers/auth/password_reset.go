@@ -16,15 +16,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// RequestPasswordReset handles `POST /v1/auth/password-reset`.
-//
-// Always returns 200 with `{"status":"ok"}` — even when the email is unknown
-// — to avoid leaking which addresses have accounts (user-enumeration via
-// the response is a classic mistake). The reset token, when minted, is
-// logged at info level; production deployments should send it via email and
-// stop printing it.
-//
-// Body: { "email": "..." }
 func (h *Handlers) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, h.limits.PWResetIP, httpx.ClientIP(r)) {
 		return
@@ -42,7 +33,6 @@ func (h *Handlers) RequestPasswordReset(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Always answer 200, regardless of whether the email exists.
 	defer httpx.JSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
 		"note":   "If an account exists for that email, a reset link has been issued.",
@@ -75,10 +65,6 @@ func (h *Handlers) RequestPasswordReset(w http.ResponseWriter, r *http.Request) 
 	log.Info("password reset issued",
 		slog.String("user_id", user.ID.String()),
 		slog.String("email", user.Email))
-	// Deliver via mail asynchronously so SMTP latency / failures never
-	// extend the HTTP response time on a hot endpoint. The LogMailer
-	// fallback prints the URL — sufficient for local dev — so this also
-	// keeps the "I forgot, show me the URL" workflow alive without a relay.
 	h.goAsync(func() { sendPasswordResetEmail(h.mailer, user.Email, confirmURL) })
 	h.audit(r, store.RecordAuditParams{
 		ActorKind:   store.AuditActorUnauthenticated,
@@ -89,14 +75,6 @@ func (h *Handlers) RequestPasswordReset(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// sendPasswordResetEmail composes + delivers the reset-link email. Runs
-// off the request goroutine — we don't want SMTP latency on the response
-// path. Failures are loud (slog) but never propagated: the caller already
-// returned 200 to the user (anti-enumeration) and we can't unwind that.
-//
-// When mailer is nil (handler constructed without one — tests do this),
-// degrade to a slog line that carries the URL, so the dev still has a way
-// to complete the flow.
 func sendPasswordResetEmail(mailer mail.Mailer, to, confirmURL string) {
 	if mailer == nil {
 		slog.Info("password reset: no mailer configured; reset link follows",
@@ -123,13 +101,6 @@ func sendPasswordResetEmail(mailer mail.Mailer, to, confirmURL string) {
 	}
 }
 
-// ConfirmPasswordReset handles `POST /v1/auth/password-reset/confirm`.
-//
-// Body: { "token": "...", "new_password": "..." }
-//
-// On success, the user's password is updated, this token is consumed, every
-// active session for the user is revoked, and a fresh session is minted so
-// the caller is immediately logged in.
 func (h *Handlers) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, h.limits.PWConfirmIP, httpx.ClientIP(r)) {
 		return
@@ -186,9 +157,6 @@ func (h *Handlers) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// resetBaseURL is the scheme://host the operator can paste into an email.
-// Mirrors trustPortalURL — honours X-Forwarded-Proto/Host so a TLS-
-// terminating proxy upstream produces sensible https://… URLs.
 func resetBaseURL(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil {

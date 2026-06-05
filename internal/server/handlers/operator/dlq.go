@@ -11,35 +11,9 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// DLQ surface — Phase 4.
-//
-// Two dead-letter populations live behind these endpoints:
-//
-//   1. event_outbox rows where attempt_count >= dispatcher.MaxAttempts
-//      and published_at IS NULL. These mean the Kafka producer
-//      couldn't ship the event despite repeated retries.
-//
-//   2. webhook_delivery rows where status='dead'. These mean a specific
-//      receiver was broken long enough that the retrier gave up.
-//
-// All routes are operator-token gated by the router and audit every
-// mutating call via the Handlers.audit helper. Replay is reversible
-// (it just resets the row); abandon is reversible too (replay clears
-// abandoned_at). Forensic data (attempts_log, payload, last_error)
-// is preserved across both transitions.
 
-// outboxMaxAttempts is the dispatcher's MaxAttempts threshold the
-// ListDeadOutbox query needs. Kept here as a small constant so the
-// handler doesn't need a dependency injection just for one int; if the
-// dispatcher's default ever changes we update both sites together. The
-// constant is also documented in cmd/server's --outbox-max-attempts
-// help text so an operator setting a non-default value can compute the
-// matching DLQ threshold.
 const outboxMaxAttempts = 20
 
-// ListDLQEvents returns dead event_outbox rows, paginated. Query
-// parameters: ?limit (1..500, default 50), ?offset (default 0),
-// ?org_id (uuid filter), ?kind (event-kind filter).
 func (h *Handlers) ListDLQEvents(w http.ResponseWriter, r *http.Request) {
 	filters, ok := h.parseDLQFilters(w, r)
 	if !ok {
@@ -65,8 +39,6 @@ func (h *Handlers) ListDLQEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetDLQEvent returns one event_outbox row, including its full payload
-// and per-attempt diagnostics. 404 when the id doesn't exist.
 func (h *Handlers) GetDLQEvent(w http.ResponseWriter, r *http.Request) {
 	id, ok := parsePathID(w, r)
 	if !ok {
@@ -84,9 +56,6 @@ func (h *Handlers) GetDLQEvent(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, row)
 }
 
-// ReplayDLQEvent resets a dead event_outbox row so the dispatcher
-// picks it up on its next tick. 404 when the row doesn't exist or has
-// already been published. The reset is audited.
 func (h *Handlers) ReplayDLQEvent(w http.ResponseWriter, r *http.Request) {
 	id, ok := parsePathID(w, r)
 	if !ok {
@@ -112,9 +81,6 @@ func (h *Handlers) ReplayDLQEvent(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// AbandonDLQEvent marks a dead event_outbox row so the dispatcher
-// skips it on every future tick. 404 when the row doesn't exist or has
-// already been published. The mutation is audited.
 func (h *Handlers) AbandonDLQEvent(w http.ResponseWriter, r *http.Request) {
 	id, ok := parsePathID(w, r)
 	if !ok {
@@ -137,8 +103,6 @@ func (h *Handlers) AbandonDLQEvent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ListDLQDeliveries returns dead webhook_delivery rows, paginated.
-// Same query params as ListDLQEvents (?limit, ?offset, ?org_id, ?kind).
 func (h *Handlers) ListDLQDeliveries(w http.ResponseWriter, r *http.Request) {
 	filters, ok := h.parseDLQFilters(w, r)
 	if !ok {
@@ -164,9 +128,6 @@ func (h *Handlers) ListDLQDeliveries(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetDLQDelivery returns one webhook_delivery row, including
-// attempts_log and the most-recent error. 404 when the id doesn't
-// exist.
 func (h *Handlers) GetDLQDelivery(w http.ResponseWriter, r *http.Request) {
 	id, ok := parsePathID(w, r)
 	if !ok {
@@ -184,9 +145,6 @@ func (h *Handlers) GetDLQDelivery(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, d)
 }
 
-// ReplayDLQDelivery transitions a dead webhook_delivery row back to
-// 'failed' so the retrier picks it up on its next tick. The reset is
-// audited.
 func (h *Handlers) ReplayDLQDelivery(w http.ResponseWriter, r *http.Request) {
 	id, ok := parsePathID(w, r)
 	if !ok {
@@ -212,8 +170,6 @@ func (h *Handlers) ReplayDLQDelivery(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// AbandonDLQDelivery marks a dead webhook_delivery row so the retrier
-// skips it.
 func (h *Handlers) AbandonDLQDelivery(w http.ResponseWriter, r *http.Request) {
 	id, ok := parsePathID(w, r)
 	if !ok {
@@ -244,9 +200,6 @@ type dlqFilters struct {
 	Offset int
 }
 
-// parseDLQFilters walks the query string + writes 400 on bad input.
-// Returns (filters, true) on success or (_, false) when a response was
-// already written.
 func (h *Handlers) parseDLQFilters(w http.ResponseWriter, r *http.Request) (dlqFilters, bool) {
 	var f dlqFilters
 	q := r.URL.Query()
@@ -280,10 +233,6 @@ func (h *Handlers) parseDLQFilters(w http.ResponseWriter, r *http.Request) (dlqF
 	return f, true
 }
 
-// parsePathID extracts the {id} path parameter and writes 400 on
-// malformed input. The router enforces the path shape so this
-// function is the second line of defence (operator endpoints don't
-// get to assume the parser; tools can probe the route directly).
 func parsePathID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	idStr := r.PathValue("id")
 	if idStr == "" {

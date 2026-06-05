@@ -15,7 +15,6 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// Findings returns the most recent succeeded run's findings.
 func (h *Handlers) Findings(w http.ResponseWriter, r *http.Request) {
 	p, _ := authctx.PrincipalFrom(r.Context())
 	runs, err := h.store.ListRuns(r.Context(), p.Org.ID, 20)
@@ -39,7 +38,6 @@ func (h *Handlers) Findings(w http.ResponseWriter, r *http.Request) {
 		"no succeeded run yet — push one via POST /v1/orgs/{slug}/runs (use the `concord` CLI)")
 }
 
-// ListRuns returns the last 50 runs without summary/findings blobs.
 func (h *Handlers) ListRuns(w http.ResponseWriter, r *http.Request) {
 	p, _ := authctx.PrincipalFrom(r.Context())
 	runs, err := h.store.ListRuns(r.Context(), p.Org.ID, 50)
@@ -68,7 +66,6 @@ func (h *Handlers) ListRuns(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-// GetRun returns one run with its full findings envelope.
 func (h *Handlers) GetRun(w http.ResponseWriter, r *http.Request) {
 	p, _ := authctx.PrincipalFrom(r.Context())
 	runID, err := uuid.Parse(r.PathValue("id"))
@@ -88,8 +85,6 @@ func (h *Handlers) GetRun(w http.ResponseWriter, r *http.Request) {
 	writeFindingsEnvelope(w, run)
 }
 
-// writeFindingsEnvelope renders a Run with parsed summary + findings JSON.
-// Malformed blobs fall through as their zero values rather than 500.
 func writeFindingsEnvelope(w http.ResponseWriter, run store.Run) {
 	var summary report.Summary
 	var findings []apiv1.Finding

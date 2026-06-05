@@ -8,7 +8,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// CreateOrg creates an organization. Slug must be unique; duplicates surface as 409.
 func (h *Handlers) CreateOrg(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name string `json:"name"`
@@ -54,8 +53,6 @@ func (h *Handlers) GetOrg(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, org)
 }
 
-// CreateUser creates a user. Password is optional — invite-pending users can
-// be created without one.
 func (h *Handlers) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		FirstName string `json:"first_name"`
@@ -93,8 +90,6 @@ func (h *Handlers) ListUsers(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, users)
 }
 
-// ListRoles returns every role with its permission bundle so a UI can render
-// the canonical RBAC matrix.
 func (h *Handlers) ListRoles(w http.ResponseWriter, r *http.Request) {
 	roles, err := h.store.ListRoles(r.Context())
 	if err != nil {

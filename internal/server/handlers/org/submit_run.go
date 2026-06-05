@@ -24,20 +24,10 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// tracer is the package-level Tracer used for custom spans inside the
-// org handlers. Resolves to a no-op when tracing is disabled, so the
-// `tr.Start(...)` calls below are zero-cost in that configuration.
 var tracer = otel.Tracer("github.com/concord-dev/concord/internal/server/handlers/org")
 
-// maxSubmissionBytes caps the request body so a misbehaving (or malicious)
-// agent can't DoS the server with a 5GB findings array. 25MB comfortably
-// covers tens of thousands of findings while keeping memory bounded.
 const maxSubmissionBytes = 25 * 1024 * 1024
 
-// agentSubmission is the wire shape an agent POSTs. Times come from the
-// agent's clock — we don't reject skew, but the run is also stamped with the
-// server's receive time via the row's created_at column so audit views can
-// distinguish "when the agent said it ran" from "when we received it".
 type agentSubmission struct {
 	Agent struct {
 		Version         string `json:"version"`
@@ -49,13 +39,6 @@ type agentSubmission struct {
 	Findings    []apiv1.Finding `json:"findings"`
 }
 
-// SubmitRun accepts a completed run from an agent. Auth is the existing API
-// token (`Authorization: Bearer concord_...`); the same audit/revocation
-// surface that secures every other org route covers this one. No additional
-// signing — the token *is* the agent's identity.
-//
-// On success the bus is told `run.completed` so SSE subscribers see the run
-// in real time, and any registered webhooks fire (best-effort, asynchronously).
 func (h *Handlers) SubmitRun(w http.ResponseWriter, r *http.Request) {
 	p, _ := authctx.PrincipalFrom(r.Context())
 
@@ -80,9 +63,6 @@ func (h *Handlers) SubmitRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if sub.Findings == nil {
-		// Empty `findings` is fine (controls library was empty); nil isn't —
-		// reject so an agent bug that forgets to populate the array surfaces
-		// loudly instead of silently storing an empty run.
 		httpx.Error(w, http.StatusBadRequest, "`findings` must be present (use [] for empty)")
 		return
 	}
@@ -106,10 +86,6 @@ func (h *Handlers) SubmitRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Drift detection: compare the freshly-inserted run's findings to the
-	// prior run's. detectAndPersistDrift handles the "no prior" case (first
-	// run for the org) and any errors itself — its log calls are loud
-	// enough for an operator but never failed the user's submission.
 	transitions := h.detectAndPersistDrift(r.Context(), run, sub.Findings)
 
 	h.broadcast.RunCompleted(run, summaryJSON)
@@ -123,18 +99,8 @@ func (h *Handlers) SubmitRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// detectAndPersistDrift loads the prior run's findings, runs the drift
-// detector against the new submission, persists every transition as a
-// drift_event row, and returns the transitions (re-cast to bus.Transition)
-// for publication. Returns nil on the first-ever run (no prior to
-// compare to) and logs but swallows every infrastructure error: a single
-// failure here must NEVER reject a legit submission.
 func (h *Handlers) detectAndPersistDrift(ctx context.Context, run store.Run, currentFindings []apiv1.Finding) []bus.Transition {
 	ctx, span := tracer.Start(ctx, "drift.detect_and_persist",
-		// org_id + run_id are stable, low-cardinality enough for span
-		// attrs (one tag per request is fine) and let an investigator
-		// pivot from a drift event back to the originating run.
-		// findings_count helps explain unusually long detection times.
 	)
 	span.SetAttributes(
 		attribute.String("concord.org_id", run.OrgID.String()),
@@ -198,12 +164,7 @@ func (h *Handlers) detectAndPersistDrift(ctx context.Context, run store.Run, cur
 			slog.String("run_id", run.ID.String()),
 			slog.Int("transitions", len(rows)),
 			slog.String("err", err.Error()))
-		// Still publish on the bus — losing the audit trail is bad, but
-		// losing the page-someone webhook would be worse. Trade-off
-		// chosen deliberately.
 	}
-	// Surface a friendly summary on the access log so operators reading
-	// logs see drift the way they see auth events.
 	log.Info("drift detected",
 		slog.String("run_id", run.ID.String()),
 		slog.String("prior_run_id", priorRunID.String()),

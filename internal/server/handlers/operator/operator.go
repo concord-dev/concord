@@ -1,7 +1,3 @@
-// Package operator hosts every /operator/v1/* endpoint, the Concord SaaS
-// operator's back-door for provisioning tenants. All routes are gated by
-// middleware.RequireOperator at mount time; nothing in this package re-checks
-// the operator token.
 package operator
 
 import (
@@ -15,18 +11,12 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// Handlers bundles dependencies for the operator route group.
 type Handlers struct {
 	store *store.Store
 }
 
-// New constructs Handlers with the given Store.
 func New(s *store.Store) *Handlers { return &Handlers{store: s} }
 
-// audit records an operator-actor event. Operator events carry actor_kind
-// "operator" with both ID columns NULL — the operator token is a SaaS-
-// platform principal, not a user row. Same best-effort semantics as the
-// auth-handler audit helper.
 func (h *Handlers) audit(r *http.Request, p store.RecordAuditParams) {
 	p.ActorKind = store.AuditActorOperator
 	if p.IP == "" {
@@ -42,7 +32,6 @@ func (h *Handlers) audit(r *http.Request, p store.RecordAuditParams) {
 }
 
 
-// lookupOrgBySlug resolves an org by slug and writes 404/500 on failure.
 func (h *Handlers) lookupOrgBySlug(w http.ResponseWriter, r *http.Request, slug string) (store.Organization, bool) {
 	org, err := h.store.GetOrganizationBySlug(r.Context(), slug)
 	if errors.Is(err, store.ErrNotFound) {
@@ -56,7 +45,6 @@ func (h *Handlers) lookupOrgBySlug(w http.ResponseWriter, r *http.Request, slug 
 	return org, true
 }
 
-// lookupUser accepts either a UUID or an email and returns the matching user.
 func (h *Handlers) lookupUser(w http.ResponseWriter, r *http.Request, idStr, email string) (store.User, bool) {
 	if idStr != "" {
 		id, err := uuid.Parse(idStr)

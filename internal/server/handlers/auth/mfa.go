@@ -1,13 +1,3 @@
-// MFA endpoints — TOTP (RFC 6238) enrollment plus one-time recovery codes.
-//
-// Routes wired by the router:
-//
-//	POST /v1/auth/login/mfa                   second-leg login completion (public)
-//	GET  /v1/me/mfa                            enrollment status (session)
-//	POST /v1/me/mfa/totp/enroll                start TOTP enrollment (session)
-//	POST /v1/me/mfa/totp/verify                verify TOTP and complete enrollment (session)
-//	POST /v1/me/mfa/disable                    turn MFA off — REQUIRES current password (session)
-//	POST /v1/me/mfa/recovery-codes/regenerate  rotate recovery codes — REQUIRES current password (session)
 package auth
 
 import (
@@ -26,21 +16,12 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// mfaIssuer is the label that appears in the user's authenticator app.
-// Hardcoded for now; if Concord ever ships white-labeled SaaS the issuer
-// will need to come from per-tenant config.
 const mfaIssuer = "Concord"
 
-// recoveryCodeCount is the number of one-time codes we hand out at
-// enrollment / regeneration. Ten is the industry norm.
 const recoveryCodeCount = 10
 
-// recoveryCodeBytes is the random byte length per code, base32-encoded,
-// dashed in the middle for readability. 5 bytes → 8 base32 chars (40 bits).
 const recoveryCodeBytes = 5
 
-// GetMFAStatus returns the user's MFA enrollment state plus the number of
-// unused recovery codes. Powers the dashboard "MFA: on/off" indicator.
 func (h *Handlers) GetMFAStatus(w http.ResponseWriter, r *http.Request) {
 	u, _ := authctx.SessionUserFrom(r.Context())
 	enrolled, err := h.store.IsUserMFAEnrolled(r.Context(), u.ID)
@@ -62,10 +43,6 @@ func (h *Handlers) GetMFAStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// EnrollTOTP starts the TOTP enrollment flow: generates a fresh secret,
-// stores it as pending (enrolled_at IS NULL), and returns the
-// provisioning URI so the UI can render a QR code. The next call is
-// VerifyTOTP with a code from the user's authenticator app.
 func (h *Handlers) EnrollTOTP(w http.ResponseWriter, r *http.Request) {
 	u, _ := authctx.SessionUserFrom(r.Context())
 
@@ -105,10 +82,6 @@ func (h *Handlers) EnrollTOTP(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// VerifyTOTP completes enrollment by validating the first code typed from
-// the user's authenticator app. On success: marks the secret enrolled,
-// generates a fresh batch of recovery codes (returned ONCE in the
-// response), audits the event.
 func (h *Handlers) VerifyTOTP(w http.ResponseWriter, r *http.Request) {
 	u, _ := authctx.SessionUserFrom(r.Context())
 
@@ -181,9 +154,6 @@ func (h *Handlers) VerifyTOTP(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// DisableMFA wipes the user's TOTP secret and every recovery code. Gated on
-// a fresh password check so a stolen session can't disable the second
-// factor on its own.
 func (h *Handlers) DisableMFA(w http.ResponseWriter, r *http.Request) {
 	u, _ := authctx.SessionUserFrom(r.Context())
 	var body struct {
@@ -221,8 +191,6 @@ func (h *Handlers) DisableMFA(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// RegenerateRecoveryCodes wipes existing codes and mints a fresh batch.
-// Gated on the user's current password (same reasoning as DisableMFA).
 func (h *Handlers) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 	u, _ := authctx.SessionUserFrom(r.Context())
 	var body struct {
@@ -276,10 +244,6 @@ func (h *Handlers) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// LoginMFA is the second leg of the login flow. It consumes the challenge
-// token returned by /v1/auth/login and validates either a TOTP code or a
-// one-time recovery code. On success it mints a normal session, the same
-// shape /v1/auth/login returns when MFA is not enrolled.
 func (h *Handlers) LoginMFA(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, h.limits.MFASubmitIP, httpx.ClientIP(r)) {
 		return
@@ -392,10 +356,6 @@ func (h *Handlers) LoginMFA(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// generateRecoveryCodes returns `n` user-readable codes (`XXXX-XXXX`) drawn
-// from crypto/rand. Codes are returned in plaintext for one-time display
-// at enrollment / regeneration; the DB only ever stores their argon2id
-// hashes (see store.ReplaceRecoveryCodes).
 func generateRecoveryCodes(n int) ([]string, error) {
 	out := make([]string, 0, n)
 	for i := 0; i < n; i++ {
@@ -405,8 +365,6 @@ func generateRecoveryCodes(n int) ([]string, error) {
 		}
 		s := strings.ToLower(strings.TrimRight(
 			base32.StdEncoding.EncodeToString(buf), "="))
-		// 5 bytes → 8 chars; split into a 4-4 group separated by a dash so
-		// users typing them off paper can pace themselves.
 		if len(s) >= 8 {
 			s = s[:4] + "-" + s[4:8]
 		}

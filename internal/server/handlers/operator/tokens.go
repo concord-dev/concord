@@ -11,8 +11,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// CreateToken mints a new API token for an org. The plaintext is returned
-// ONCE; subsequent reads only see metadata.
 func (h *Handlers) CreateToken(w http.ResponseWriter, r *http.Request) {
 	org, ok := h.lookupOrgBySlug(w, r, r.PathValue("slug"))
 	if !ok {

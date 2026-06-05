@@ -14,9 +14,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// overrideEnvelope is the JSON shape returned on GET/PUT; the raw bytes from
-// the DB get decoded so the response is a real JSON object, not an escaped
-// string.
 type overrideEnvelope struct {
 	ID        uuid.UUID      `json:"id"`
 	ControlID string         `json:"control_id"`
@@ -69,7 +66,6 @@ func (h *Handlers) GetOverride(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, envelopeFromOverride(co))
 }
 
-// PutOverride replaces the params for one control. Body shape: `{"params":{...}}`.
 func (h *Handlers) PutOverride(w http.ResponseWriter, r *http.Request) {
 	p, _ := authctx.PrincipalFrom(r.Context())
 	id := r.PathValue("id")

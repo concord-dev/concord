@@ -8,17 +8,11 @@ import (
 	"github.com/concord-dev/concord/internal/server/httpx"
 )
 
-// trustPortalSettings is the wire shape for GET/PUT. Only the enabled flag is
-// configurable today; future fields (custom logo, domain) would live here too.
 type trustPortalSettings struct {
 	Enabled bool `json:"enabled"`
-	// URL is the public address the portal is reachable at (when enabled).
-	// Computed server-side so clients don't have to know the deployment's
-	// host or path scheme.
 	URL string `json:"url"`
 }
 
-// GetTrustPortalSettings returns the current opt-in state + the public URL.
 func (h *Handlers) GetTrustPortalSettings(w http.ResponseWriter, r *http.Request) {
 	p, _ := authctx.PrincipalFrom(r.Context())
 	httpx.JSON(w, http.StatusOK, trustPortalSettings{
@@ -27,8 +21,6 @@ func (h *Handlers) GetTrustPortalSettings(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// PutTrustPortalSettings flips the opt-in flag. Gated by trust_portal:manage
-// so members/viewers can't change it.
 func (h *Handlers) PutTrustPortalSettings(w http.ResponseWriter, r *http.Request) {
 	p, _ := authctx.PrincipalFrom(r.Context())
 	var body struct {
@@ -53,9 +45,6 @@ func (h *Handlers) PutTrustPortalSettings(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// trustPortalURL builds the public portal URL from the request scheme + host.
-// Behind a reverse proxy that terminates TLS we honour X-Forwarded-Proto so
-// the returned URL is https even when r.TLS is nil.
 func trustPortalURL(r *http.Request, slug string) string {
 	scheme := "http"
 	if r.TLS != nil {

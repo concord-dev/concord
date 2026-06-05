@@ -10,14 +10,6 @@ import (
 	"github.com/concord-dev/concord/internal/server/httpx"
 )
 
-// Events streams Server-Sent Events for the authenticated org. One subscriber
-// per HTTP connection; heartbeats every 15s keep proxy idle timeouts at bay.
-//
-// Wire format (per SSE):
-//
-//	event: <kind>
-//	data: <event JSON>
-//	(blank line)
 func (h *Handlers) Events(w http.ResponseWriter, r *http.Request) {
 	p, ok := authctx.PrincipalFrom(r.Context())
 	if !ok {

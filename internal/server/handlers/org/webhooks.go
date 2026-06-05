@@ -14,8 +14,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// webhookView is the JSON shape returned on list/get. Secret is intentionally
-// stripped — the secret is shown ONCE at create time and never again.
 type webhookView struct {
 	ID          uuid.UUID  `json:"id"`
 	URL         string     `json:"url"`
@@ -40,8 +38,6 @@ func viewFromWebhook(wh store.Webhook) webhookView {
 	}
 }
 
-// isValidWebhookURL enforces the http/https scheme so we never POST to
-// internal-net schemes (file://, gopher://) by accident.
 func isValidWebhookURL(u string) bool {
 	return strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://")
 }

@@ -11,8 +11,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// AddMember attaches a user to an org with one or more roles. Role names are
-// validated up-front so partial inserts can't happen.
 func (h *Handlers) AddMember(w http.ResponseWriter, r *http.Request) {
 	org, ok := h.lookupOrgBySlug(w, r, r.PathValue("slug"))
 	if !ok {

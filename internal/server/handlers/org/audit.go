@@ -10,16 +10,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ListAuditEvents serves GET /v1/orgs/{slug}/audit. Gated by the audit:read
-// permission (owner + admin roles). Query params:
-//
-//	limit   integer 1..500   (default 50)
-//	since   RFC3339 timestamp (inclusive)
-//	until   RFC3339 timestamp (exclusive)
-//	action  exact-match filter on the action name
-//
-// The endpoint reads from the org-scoped index so a single-org query is
-// fast even at millions of rows total.
 func (h *Handlers) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
 	p, _ := authctx.PrincipalFrom(r.Context())
 	q := r.URL.Query()

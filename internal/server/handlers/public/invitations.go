@@ -11,18 +11,8 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// SessionTTL is the lifetime of sessions auto-issued on accept. Mirrors the
-// server-wide default; not configurable per request because there's no
-// authenticated caller to drive it.
 const SessionTTL = 24 * time.Hour
 
-// PreviewInvitation returns the email + org slug + role behind a token so a
-// frontend can render "Join {OrgName} as {role}?" before the user commits.
-// No auth — the token is the proof.
-//
-// 404 collapses unknown / revoked / accepted into one response; 410 is used
-// when the token exists but expired (the message is actionable: "ask for a
-// fresh invitation").
 func (h *Handlers) PreviewInvitation(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
@@ -47,7 +37,6 @@ func (h *Handlers) PreviewInvitation(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Hint the frontend whether the invitee already has a Concord account.
 	_, lookupErr := h.store.GetUserByEmail(r.Context(), inv.Email)
 	needsAccount := errors.Is(lookupErr, store.ErrNotFound)
 
@@ -60,18 +49,6 @@ func (h *Handlers) PreviewInvitation(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// AcceptInvitation completes the flow:
-//   - if the invitee's email is new to Concord, create a user with the
-//     supplied first/last/password
-//   - either way, attach the user to the org with the invited role
-//   - mint a session token so the caller is logged in immediately
-//
-// Body shape:
-//
-//	{ "token": "...", "first_name": "...", "last_name": "...", "password": "..." }
-//
-// For existing accounts first/last/password are ignored (they keep their
-// credentials; this accept just gains them org membership).
 func (h *Handlers) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, h.limits.InviteAcceptIP, httpx.ClientIP(r)) {
 		return
@@ -106,8 +83,6 @@ func (h *Handlers) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusGone, "invitation expired — ask for a fresh one")
 		return
 	case err != nil:
-		// Argues from message: "first_name, last_name, and password are required"
-		// belongs in 400; everything else in 500.
 		if strings.Contains(err.Error(), "required") {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -116,9 +91,6 @@ func (h *Handlers) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Issue a session so the invitee is logged in immediately. New users
-	// don't have any other credential they can authenticate with yet — this
-	// is the only way they'll see the dashboard after clicking the link.
 	sess, plain, err := h.store.CreateSession(r.Context(), res.User.ID, SessionTTL,
 		httpx.ClientIP(r), r.UserAgent())
 	if err != nil {
@@ -132,8 +104,6 @@ func (h *Handlers) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Audit as the now-attached user — by the time we get here the invitation
-	// is consumed and the user is a real member of the org.
 	h.audit(r, store.RecordAuditParams{
 		ActorKind:   store.AuditActorUser,
 		ActorUserID: &res.User.ID,

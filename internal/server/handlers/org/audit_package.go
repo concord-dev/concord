@@ -12,19 +12,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ExportAuditPackage serves GET /v1/orgs/{slug}/audit-package. Gated by
-// audit:read (same as the audit-event endpoint) so the auditor-flag user
-// can pull a bundle on every tenant in scope. Query params:
-//
-//	since   RFC3339 — lower bound for audit + drift event extracts
-//	until   RFC3339 — upper bound (exclusive)
-//	max_runs / max_audit_events / max_drift_events — caps; defaults are
-//	         100 / 5000 / 5000 set inside auditpackage.Build
-//
-// Streams the ZIP directly to the response — no temp file, no buffer.
-// On error AFTER headers are flushed the response is truncated; the
-// client's zip reader will fail integrity checks rather than receive a
-// silently-incomplete bundle.
 func (h *Handlers) ExportAuditPackage(w http.ResponseWriter, r *http.Request) {
 	p, _ := authctx.PrincipalFrom(r.Context())
 	q := r.URL.Query()
@@ -66,15 +53,9 @@ func (h *Handlers) ExportAuditPackage(w http.ResponseWriter, r *http.Request) {
 		pair.set(n)
 	}
 
-	// Attribution string for metadata.json. Sessions surface the user
-	// email via the principal context (set by RequireSession); API
-	// tokens record the token id. Either is enough for an external
-	// auditor reviewing the bundle to know who pulled it.
 	requestedBy := principalLabel(r)
 	opts.RequestedBy = requestedBy
 
-	// Set headers BEFORE any zip write — once auditpackage.Build starts
-	// streaming, the response has flushed and we can't change them.
 	filename := fmt.Sprintf("audit-package-%s-%s.zip",
 		p.Org.Slug, time.Now().UTC().Format("20060102T150405Z"))
 	w.Header().Set("Content-Type", "application/zip")
@@ -83,9 +64,6 @@ func (h *Handlers) ExportAuditPackage(w http.ResponseWriter, r *http.Request) {
 
 	meta, err := auditpackage.Build(r.Context(), h.store, p.Org.ID, opts, w)
 	if err != nil {
-		// Headers are already flushed; we can't switch to JSON 500. The
-		// client will see a truncated zip and the operator gets the slog
-		// from the package itself. Audit the failed attempt for visibility.
 		h.audit(r, store.RecordAuditParams{
 			Action:     "audit_package.export.failure",
 			TargetType: "organization",
@@ -107,10 +85,6 @@ func (h *Handlers) ExportAuditPackage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// principalLabel returns a short string identifying the caller for the
-// metadata.json "requested_by" field. We prefer a human-friendly value
-// when available so auditors reading the bundle see "alice@acme.test"
-// not a UUID; falls back to the token id otherwise.
 func principalLabel(r *http.Request) string {
 	if u, ok := authctx.SessionUserFrom(r.Context()); ok && u.Email != "" {
 		return u.Email

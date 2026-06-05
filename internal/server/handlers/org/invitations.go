@@ -18,9 +18,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// invitationView is the JSON shape returned for invitations. The plaintext
-// token is *only* in the create-response (see createInvitationResult). Lists
-// and gets never re-disclose it — same write-once pattern as API tokens.
 type invitationView struct {
 	ID         uuid.UUID  `json:"id"`
 	Email      string     `json:"email"`
@@ -41,14 +38,6 @@ func viewFromInvitation(inv store.Invitation) invitationView {
 	}
 }
 
-// CreateInvitation mints a pending invitation for (email, role) on the
-// current org. Returns the persisted invitation AND the plaintext accept
-// token — the only time the caller ever sees the token. Subsequent reads
-// return only metadata.
-//
-// Any prior pending invitation for the same (org, email) is silently
-// revoked in the store; the partial-unique index would otherwise reject the
-// insert and a re-invite is the common case.
 func (h *Handlers) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	p, _ := authctx.PrincipalFrom(r.Context())
 	var body struct {
@@ -100,10 +89,6 @@ func (h *Handlers) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		TargetID:   &inv.ID,
 		Details:    map[string]any{"email": inv.Email, "role": inv.RoleName},
 	})
-	// Deliver the invitation email asynchronously. We still return the
-	// accept_url in the response so an admin who needs to share it
-	// manually (out-of-band, e.g. on a Slack DM) can copy/paste — email
-	// is the default, not the only, path.
 	h.goAsync(func() {
 		sendInvitationEmail(h.mailer, inv.Email, p.Org.Name, inv.RoleName, acceptURL(r, token))
 	})
@@ -116,13 +101,6 @@ func (h *Handlers) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// sendInvitationEmail composes + dispatches the "you're invited to {org}"
-// email. Off the request goroutine because SMTP latency must not extend
-// the admin's HTTP response time. Failures slog but never propagate —
-// the admin still sees the accept_url in the response and can re-share.
-//
-// nil mailer (e.g. tests) degrades to a log line carrying the URL so the
-// dev workflow keeps working without an SMTP relay.
 func sendInvitationEmail(mailer mail.Mailer, to, orgName, role, acceptURL string) {
 	if mailer == nil {
 		slog.Info("invitation: no mailer configured; accept link follows",
@@ -151,9 +129,6 @@ func sendInvitationEmail(mailer mail.Mailer, to, orgName, role, acceptURL string
 	}
 }
 
-// ListInvitations returns every pending invitation for the org. Accepted /
-// revoked / expired rows are filtered out — operators interested in audit
-// history should query the DB directly.
 func (h *Handlers) ListInvitations(w http.ResponseWriter, r *http.Request) {
 	p, _ := authctx.PrincipalFrom(r.Context())
 	invs, err := h.store.ListPendingInvitations(r.Context(), p.Org.ID)
@@ -168,9 +143,6 @@ func (h *Handlers) ListInvitations(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-// RevokeInvitation soft-deletes a pending invitation. ID is scoped to the
-// caller's org; not-found is returned identically for "no such id" and
-// "already accepted/revoked".
 func (h *Handlers) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 	p, _ := authctx.PrincipalFrom(r.Context())
 	id, err := uuid.Parse(r.PathValue("id"))
@@ -194,8 +166,6 @@ func (h *Handlers) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// acceptURL builds an absolute URL the inviter can paste into an email.
-// Mirrors the same X-Forwarded-Host/Proto logic as the trust-portal URL.
 func acceptURL(r *http.Request, token string) string {
 	scheme := "http"
 	if r.TLS != nil {

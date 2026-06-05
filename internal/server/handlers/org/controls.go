@@ -11,8 +11,6 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// Me reports the org resolved from the calling token, the auth surface used
-// (token vs session), and (for session users) the resolved permission list.
 func (h *Handlers) Me(w http.ResponseWriter, r *http.Request) {
 	p, _ := authctx.PrincipalFrom(r.Context())
 	resp := map[string]any{
@@ -31,8 +29,6 @@ func (h *Handlers) Me(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, resp)
 }
 
-// Frameworks returns the distinct frameworks loaded into the server with
-// per-framework control counts.
 func (h *Handlers) Frameworks(w http.ResponseWriter, _ *http.Request) {
 	type entry struct {
 		Framework string `json:"framework"`
@@ -50,7 +46,6 @@ func (h *Handlers) Frameworks(w http.ResponseWriter, _ *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-// Controls lists every control, optionally filtered by ?framework=.
 func (h *Handlers) Controls(w http.ResponseWriter, r *http.Request) {
 	framework := r.URL.Query().Get("framework")
 	out := make([]apiv1.Control, 0, len(h.controls))
@@ -69,7 +64,6 @@ func (h *Handlers) Controls(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-// Control fetches a single control by id (case-insensitive).
 func (h *Handlers) Control(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	target := strings.ToLower(id)
