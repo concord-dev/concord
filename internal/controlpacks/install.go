@@ -136,6 +136,9 @@ func extractPack(installRoot, framework, version string, gzipped []byte) (string
 	}
 	dest := PackDir(root, framework, version)
 
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return "", fmt.Errorf("creating install parent: %w", err)
+	}
 	if err := os.RemoveAll(dest); err != nil {
 		return "", fmt.Errorf("clearing target dir: %w", err)
 	}
@@ -147,9 +150,6 @@ func extractPack(installRoot, framework, version string, gzipped []byte) (string
 
 	if err := extractTarGz(bytes.NewReader(gzipped), staging); err != nil {
 		return "", fmt.Errorf("extracting pack tarball: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return "", fmt.Errorf("creating install parent: %w", err)
 	}
 	if err := os.Rename(staging, dest); err != nil {
 		return "", fmt.Errorf("renaming staging into place: %w", err)
