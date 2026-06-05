@@ -1,7 +1,5 @@
-// Package plugins is the host-side machinery that spawns Concord
-// plugin binaries and exposes them as evidence.Collector implementations.
-// The wire protocol lives in proto/concord/plugin/v1; the SDK plugin
-// authors import lives at pkg/plugin.
+// Package plugins is the host-side machinery that spawns Concord plugin
+// binaries and exposes them as evidence.Collector implementations.
 package plugins
 
 import (
@@ -21,17 +19,14 @@ import (
 	pluginv1 "github.com/concord-dev/concord/proto/concord/plugin/v1"
 )
 
-// PluginCollector implements evidence.Collector by forwarding Collect
-// calls to a running plugin process over gRPC. Constructed by the
-// Manager; not instantiated directly.
+// PluginCollector implements evidence.Collector by forwarding Collect calls to a running plugin process.
 type PluginCollector struct {
 	source  string
 	client  pluginv1.CollectorClient
 	timeout time.Duration
 }
 
-// NewPluginCollector wraps a connected gRPC client. The Manager owns
-// the underlying client lifecycle; the wrapper just translates calls.
+// NewPluginCollector wraps a connected gRPC client.
 func NewPluginCollector(source string, client pluginv1.CollectorClient, timeout time.Duration) *PluginCollector {
 	if timeout <= 0 {
 		timeout = 120 * time.Second
@@ -53,16 +48,14 @@ func (p *PluginCollector) Probe(ctx context.Context) (string, error) {
 	return resp.Info, nil
 }
 
-// Collect satisfies evidence.Collector. The control-dir from the
-// Concord-side evidence.Context becomes part of the gRPC request so
-// the plugin can resolve relative fixture paths if it ever needs to.
+// Collect satisfies evidence.Collector.
 func (p *PluginCollector) Collect(cctx evidence.Context, ref apiv1.EvidenceRef) (any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
 
-	params, perr := paramsToStruct(ref.Params)
-	if perr != nil {
-		return nil, fmt.Errorf("plugin %s: marshal params: %w", p.source, perr)
+	params, err := paramsToStruct(ref.Params)
+	if err != nil {
+		return nil, fmt.Errorf("marshalling plugin %s params: %w", p.source, err)
 	}
 
 	resp, err := p.client.Collect(ctx, &pluginv1.CollectRequest{
@@ -80,7 +73,6 @@ func (p *PluginCollector) Collect(cctx evidence.Context, ref apiv1.EvidenceRef) 
 	if err != nil {
 		return nil, mapGRPCError(err)
 	}
-
 	return decodeEvidence(resp)
 }
 
@@ -98,7 +90,7 @@ func decodeEvidence(resp *pluginv1.CollectResponse) (any, error) {
 	if raw := resp.GetValueJson(); len(raw) > 0 {
 		var v any
 		if err := json.Unmarshal(raw, &v); err != nil {
-			return nil, fmt.Errorf("plugin: decode value_json: %w", err)
+			return nil, fmt.Errorf("decoding plugin response: %w", err)
 		}
 		return v, nil
 	}
@@ -108,9 +100,8 @@ func decodeEvidence(resp *pluginv1.CollectResponse) (any, error) {
 	return nil, nil
 }
 
-// mapGRPCError translates a gRPC status into the error vocabulary
-// the existing evidence.Registry expects. Critically, it preserves
-// ErrUnsupportedType so the registry's fixture-fallback still kicks in.
+// mapGRPCError translates a gRPC status into the evidence error vocabulary,
+// preserving ErrUnsupportedType so the registry's fixture-fallback survives.
 func mapGRPCError(err error) error {
 	if err == nil {
 		return nil
@@ -127,9 +118,9 @@ func mapGRPCError(err error) error {
 			}
 		}
 	case codes.DeadlineExceeded:
-		return fmt.Errorf("plugin: deadline exceeded: %s", st.Message())
+		return fmt.Errorf("plugin deadline exceeded: %s", st.Message())
 	case codes.Unavailable:
-		return fmt.Errorf("plugin: unavailable: %s", st.Message())
+		return fmt.Errorf("plugin unavailable: %s", st.Message())
 	}
 	return errors.New(st.Message())
 }

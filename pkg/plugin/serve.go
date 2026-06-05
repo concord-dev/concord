@@ -7,17 +7,10 @@ import (
 	goplugin "github.com/hashicorp/go-plugin"
 )
 
-// SDKVersion is the pkg/plugin release version embedded in
-// Capabilities responses. Bumped on every release.
+// SDKVersion is the pkg/plugin release version embedded in Capabilities responses.
 const SDKVersion = "v0.1.0"
 
-// Serve runs the plugin's main loop. Plugin authors call this from
-// their package main like:
-//
-//	func main() { plugin.Serve(&MyCollector{}) }
-//
-// Blocks until the host disconnects; returns when the parent process
-// goes away.
+// Serve runs the plugin's main loop. Blocks until the host disconnects.
 func Serve(impl Collector) {
 	if impl == nil {
 		fmt.Fprintln(os.Stderr, "plugin.Serve: nil Collector")
@@ -32,8 +25,7 @@ func Serve(impl Collector) {
 	})
 }
 
-// EnvOrFail returns the named env var or exits the plugin with a
-// human-readable error. Tiny convenience for plugin main() functions.
+// EnvOrFail returns the named env var or exits the plugin with a human-readable error.
 func EnvOrFail(key string) string {
 	v := os.Getenv(key)
 	if v == "" {

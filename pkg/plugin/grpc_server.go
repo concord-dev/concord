@@ -15,7 +15,6 @@ import (
 	pluginv1 "github.com/concord-dev/concord/proto/concord/plugin/v1"
 )
 
-// grpcServer adapts a user-supplied Collector to the gRPC service.
 type grpcServer struct {
 	pluginv1.UnimplementedCollectorServer
 	impl Collector
@@ -66,27 +65,30 @@ func (s *grpcServer) Collect(ctx context.Context, req *pluginv1.CollectRequest) 
 		defer cancel()
 	}
 
-	ref := refFromProto(req.Ref)
-	out, err := s.impl.Collect(ctx, ref)
+	out, err := s.impl.Collect(ctx, refFromProto(req.Ref))
 	if err != nil {
 		if errors.Is(err, ErrUnsupportedType) {
-			st := status.New(codes.InvalidArgument, err.Error())
-			withDetails, derr := st.WithDetails(&errdetails.ErrorInfo{Reason: "concord.evidence.unsupported_type"})
-			if derr == nil {
-				st = withDetails
-			}
-			return nil, st.Err()
+			return nil, unsupportedTypeStatus(err).Err()
 		}
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	raw, jerr := json.Marshal(out)
 	if jerr != nil {
-		return nil, status.Errorf(codes.Internal, "marshal evidence: %v", jerr)
+		return nil, status.Errorf(codes.Internal, "marshalling evidence: %v", jerr)
 	}
 	return &pluginv1.CollectResponse{
 		Result: &pluginv1.CollectResponse_ValueJson{ValueJson: raw},
 	}, nil
+}
+
+func unsupportedTypeStatus(err error) *status.Status {
+	st := status.New(codes.InvalidArgument, err.Error())
+	withDetails, derr := st.WithDetails(&errdetails.ErrorInfo{Reason: "concord.evidence.unsupported_type"})
+	if derr != nil {
+		return st
+	}
+	return withDetails
 }
 
 func refFromProto(r *pluginv1.EvidenceRef) EvidenceRef {
@@ -106,23 +108,19 @@ func refFromProto(r *pluginv1.EvidenceRef) EvidenceRef {
 	return out
 }
 
-// CollectorPlugin is the go-plugin Plugin implementation used by both
-// host and plugin side. Exported because internal/plugins references
-// the same Plugin set on the host side.
+// CollectorPlugin is the go-plugin Plugin implementation shared by host and plugin.
 type CollectorPlugin struct {
 	goplugin.NetRPCUnsupportedPlugin
 	Impl Collector
 }
 
-// GRPCServer registers the gRPC service. Called by go-plugin on the
-// plugin process side when the host connects.
+// GRPCServer registers the gRPC service on the plugin side.
 func (p *CollectorPlugin) GRPCServer(_ *goplugin.GRPCBroker, s *grpc.Server) error {
 	pluginv1.RegisterCollectorServer(s, &grpcServer{impl: p.Impl})
 	return nil
 }
 
-// GRPCClient returns a client wrapper. Host-side use only; on the
-// plugin side it is unused (go-plugin handles the dispatch).
+// GRPCClient returns the gRPC client wrapper on the host side.
 func (p *CollectorPlugin) GRPCClient(_ context.Context, _ *goplugin.GRPCBroker, c *grpc.ClientConn) (any, error) {
 	return pluginv1.NewCollectorClient(c), nil
 }

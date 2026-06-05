@@ -19,25 +19,21 @@ import (
 	pluginv1 "github.com/concord-dev/concord/proto/concord/plugin/v1"
 )
 
-// Manager discovers plugin binaries on disk, spawns them on demand,
-// and exposes each as a PluginCollector. Lazy by design: a plugin is
-// only spawned the first time Get is called for its source.
+// Manager discovers plugin binaries on disk and spawns them on demand.
 type Manager struct {
 	dirs []string
 
 	mu         sync.Mutex
-	discovered map[string]*entry  // source -> manifest+path
-	running    map[string]*client // source -> live process+client
+	discovered map[string]*entry
+	running    map[string]*client
 }
 
-// entry is one installed plugin known via filesystem discovery.
 type entry struct {
 	source  string
 	version string
-	path    string // absolute path to the binary
+	path    string
 }
 
-// client wraps a running go-plugin.Client + the gRPC stub.
 type client struct {
 	gpc       *goplugin.Client
 	collector pluginv1.CollectorClient
@@ -46,20 +42,12 @@ type client struct {
 
 // Options tune the manager.
 type Options struct {
-	// Dirs is the list of directories to scan for plugins. Default:
-	// ~/.concord/plugins and ./.concord/plugins (in that order).
-	Dirs []string
-
-	// Timeout is the per-Collect call deadline applied to plugins.
-	// Default 120s.
+	Dirs    []string
 	Timeout time.Duration
-
-	// Logger receives plugin-process log lines forwarded by go-plugin.
-	// Default discards.
-	Logger *slog.Logger
+	Logger  *slog.Logger
 }
 
-// New returns an unconfigured Manager. Call Discover before Get.
+// New returns a manager with no plugins discovered yet. Call Discover before Get.
 func New(opts Options) *Manager {
 	if len(opts.Dirs) == 0 {
 		opts.Dirs = defaultDirs()
@@ -85,15 +73,14 @@ func defaultDirs() []string {
 	return dirs
 }
 
-// Discover walks the configured dirs and records every plugin binary
-// found. Idempotent — calling again refreshes the cache.
+// Discover walks the configured dirs and records every plugin binary found.
 func (m *Manager) Discover() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.discovered = make(map[string]*entry)
 	for _, dir := range m.dirs {
 		if err := m.scanDir(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("scan %s: %w", dir, err)
+			return fmt.Errorf("scanning %s: %w", dir, err)
 		}
 	}
 	return nil
@@ -108,9 +95,6 @@ func (m *Manager) scanDir(dir string) error {
 		if !src.IsDir() {
 			continue
 		}
-		// Pick the highest-versioned subdirectory; for Phase Π-1 we
-		// just take whichever is lexicographically last. Phase Π-4
-		// will replace this with semver resolution against the lockfile.
 		versions, err := os.ReadDir(filepath.Join(dir, src.Name()))
 		if err != nil {
 			continue
@@ -127,12 +111,10 @@ func (m *Manager) scanDir(dir string) error {
 		sort.Strings(versionDirs)
 		ver := versionDirs[len(versionDirs)-1]
 
-		binName := "concord-plugin-" + src.Name()
-		bin := filepath.Join(dir, src.Name(), ver, binName)
+		bin := filepath.Join(dir, src.Name(), ver, "concord-plugin-"+src.Name())
 		if _, err := os.Stat(bin); err != nil {
 			continue
 		}
-		// Latest-wins across discovery dirs (workspace-local beats user-home).
 		m.discovered[src.Name()] = &entry{source: src.Name(), version: ver, path: bin}
 	}
 	return nil
@@ -150,8 +132,7 @@ func (m *Manager) Available() []string {
 	return out
 }
 
-// Has reports whether a plugin for source is discovered. Does NOT
-// imply the plugin is running.
+// Has reports whether a plugin for source has been discovered.
 func (m *Manager) Has(source string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -159,9 +140,7 @@ func (m *Manager) Has(source string) bool {
 	return ok
 }
 
-// Ensure pre-warms each named source by spawning its plugin. Errors
-// for unknown sources are collected and returned together so the
-// caller sees the full picture in one error.
+// Ensure pre-warms each named source by spawning its plugin.
 func (m *Manager) Ensure(ctx context.Context, sources []string) error {
 	var errs []error
 	for _, s := range sources {
@@ -172,8 +151,7 @@ func (m *Manager) Ensure(ctx context.Context, sources []string) error {
 	return errors.Join(errs...)
 }
 
-// Get returns the running PluginCollector for source, spawning it
-// lazily on first call. Subsequent calls reuse the same process.
+// Get returns the running PluginCollector for source, spawning lazily on first call.
 func (m *Manager) Get(_ context.Context, source string) (*PluginCollector, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -209,17 +187,17 @@ func (m *Manager) spawn(e *entry) (*client, error) {
 	conn, err := gpc.Client()
 	if err != nil {
 		gpc.Kill()
-		return nil, fmt.Errorf("connect to plugin %s: %w", e.source, err)
+		return nil, fmt.Errorf("connecting to plugin %s: %w", e.source, err)
 	}
 	raw, err := conn.Dispense(sdkplugin.PluginName)
 	if err != nil {
 		gpc.Kill()
-		return nil, fmt.Errorf("dispense plugin %s: %w", e.source, err)
+		return nil, fmt.Errorf("dispensing plugin %s: %w", e.source, err)
 	}
 	stub, ok := raw.(pluginv1.CollectorClient)
 	if !ok {
 		gpc.Kill()
-		return nil, fmt.Errorf("plugin %s: client is %T, expected CollectorClient", e.source, raw)
+		return nil, fmt.Errorf("plugin %s: client is %T, want CollectorClient", e.source, raw)
 	}
 	return &client{
 		gpc:       gpc,
@@ -228,7 +206,7 @@ func (m *Manager) spawn(e *entry) (*client, error) {
 	}, nil
 }
 
-// Shutdown terminates every running plugin. Safe to call multiple times.
+// Shutdown terminates every running plugin. Safe to call repeatedly.
 func (m *Manager) Shutdown(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

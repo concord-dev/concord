@@ -58,10 +58,7 @@ func LoadFile(path string) (apiv1.Control, error) {
 	return c, nil
 }
 
-// NeededSources returns the unique, sorted set of evidence.Source values
-// referenced by loaded. The "file" source is omitted because it is always
-// served in-process. Used by the plugin manager to lazy-spawn only what
-// the current run will touch.
+// NeededSources returns the unique, sorted, non-file evidence sources referenced by loaded.
 func NeededSources(loaded []Loaded) []string {
 	set := make(map[string]struct{})
 	for _, l := range loaded {

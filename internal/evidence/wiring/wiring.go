@@ -21,42 +21,24 @@ import (
 	"github.com/concord-dev/concord/internal/plugins"
 )
 
-// Opts tunes how BuildRegistry assembles the collector set.
+// Opts tune how BuildRegistry assembles the collector set for one run.
 type Opts struct {
-	// FixturesOnly skips every live collector and serves the file
-	// fixture path on every evidence ref.
-	FixturesOnly bool
-
-	// NeededSources is the set of source names the current run will
-	// touch. Used to lazy-spawn only the plugins this run requires.
-	// Empty means "skip plugin discovery" — callers using the legacy
-	// signature get backwards-compatible behaviour.
+	FixturesOnly  bool
 	NeededSources []string
-
-	// PluginDirs overrides the plugin discovery directories. Empty
-	// means default (~/.concord/plugins and ./.concord/plugins).
-	PluginDirs []string
-
-	// Warn receives non-fatal startup warnings.
-	Warn io.Writer
+	PluginDirs    []string
+	Warn          io.Writer
 }
 
-// Built is the bundle BuildRegistry returns: the registry plus a
-// Shutdown hook the caller must defer (plugin processes are spawned
-// children that need a clean exit).
+// Built bundles the registry with the lifecycle hook callers must defer.
 type Built struct {
 	Registry *evidence.Registry
-	Manager  *plugins.Manager // nil when no plugins discovered or fixtures-only
+	Manager  *plugins.Manager
 	Shutdown func()
 }
 
-// BuildRegistry assembles the evidence registry for one run. In-tree
-// collectors register eagerly (they're cheap). Plugin-backed
-// collectors discover from disk and spawn lazily — only sources named
-// in opts.NeededSources actually start a process.
-//
-// CONCORD_PREFER_PLUGINS=1 causes plugin registrations to overwrite an
-// in-tree collector with the same source name (the migration knob).
+// BuildRegistry assembles the evidence registry. In-tree collectors register
+// eagerly; plugins for sources in opts.NeededSources spawn lazily. Set
+// CONCORD_PREFER_PLUGINS=1 to let plugins override in-tree collectors.
 func BuildRegistry(ctx context.Context, opts Opts) Built {
 	warn := opts.Warn
 	if warn == nil {
@@ -72,12 +54,9 @@ func BuildRegistry(ctx context.Context, opts Opts) Built {
 
 	registerInTree(ctx, reg, warn)
 
-	mgr, shutdown, err := registerPlugins(reg, opts, warn)
-	if err != nil {
+	if mgr, shutdown, err := registerPlugins(reg, opts, warn); err != nil {
 		fmt.Fprintln(warn, "warning: plugin discovery failed:", err)
-		return built
-	}
-	if mgr != nil {
+	} else if mgr != nil {
 		built.Manager = mgr
 		built.Shutdown = shutdown
 	}
@@ -123,10 +102,6 @@ func registerInTree(ctx context.Context, reg *evidence.Registry, warn io.Writer)
 	}
 }
 
-// registerPlugins discovers installed plugin binaries and registers a
-// PluginCollector for each source the run actually needs. Plugins
-// override in-tree collectors only when CONCORD_PREFER_PLUGINS=1.
-// Returns (nil, noop, nil) when no needed sources are listed.
 func registerPlugins(reg *evidence.Registry, opts Opts, warn io.Writer) (*plugins.Manager, func(), error) {
 	if len(opts.NeededSources) == 0 {
 		return nil, func() {}, nil
@@ -170,6 +145,7 @@ func registerPlugins(reg *evidence.Registry, opts Opts, warn io.Writer) (*plugin
 	return mgr, func() { _ = mgr.Shutdown(context.Background()) }, nil
 }
 
+// GitHubToken returns the user-configured GitHub credential, preferring CONCORD_GITHUB_TOKEN.
 func GitHubToken() string {
 	if t := os.Getenv("CONCORD_GITHUB_TOKEN"); t != "" {
 		return t
@@ -177,6 +153,7 @@ func GitHubToken() string {
 	return os.Getenv("GITHUB_TOKEN")
 }
 
+// HasAWSCredentials reports whether the AWS SDK would find usable credentials at runtime.
 func HasAWSCredentials() bool {
 	for _, e := range []string{"AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN_FILE"} {
 		if os.Getenv(e) != "" {
