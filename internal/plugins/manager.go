@@ -1,0 +1,238 @@
+package plugins
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"sync"
+	"time"
+
+	goplugin "github.com/hashicorp/go-plugin"
+
+	sdkplugin "github.com/concord-dev/concord/pkg/plugin"
+	pluginv1 "github.com/concord-dev/concord/proto/concord/plugin/v1"
+)
+
+// Manager discovers plugin binaries on disk, spawns them on demand,
+// and exposes each as a PluginCollector. Lazy by design: a plugin is
+// only spawned the first time Get is called for its source.
+type Manager struct {
+	dirs []string
+
+	mu         sync.Mutex
+	discovered map[string]*entry  // source -> manifest+path
+	running    map[string]*client // source -> live process+client
+}
+
+// entry is one installed plugin known via filesystem discovery.
+type entry struct {
+	source  string
+	version string
+	path    string // absolute path to the binary
+}
+
+// client wraps a running go-plugin.Client + the gRPC stub.
+type client struct {
+	gpc       *goplugin.Client
+	collector pluginv1.CollectorClient
+	wrapper   *PluginCollector
+}
+
+// Options tune the manager.
+type Options struct {
+	// Dirs is the list of directories to scan for plugins. Default:
+	// ~/.concord/plugins and ./.concord/plugins (in that order).
+	Dirs []string
+
+	// Timeout is the per-Collect call deadline applied to plugins.
+	// Default 120s.
+	Timeout time.Duration
+
+	// Logger receives plugin-process log lines forwarded by go-plugin.
+	// Default discards.
+	Logger *slog.Logger
+}
+
+// New returns an unconfigured Manager. Call Discover before Get.
+func New(opts Options) *Manager {
+	if len(opts.Dirs) == 0 {
+		opts.Dirs = defaultDirs()
+	}
+	if opts.Timeout <= 0 {
+		opts.Timeout = 120 * time.Second
+	}
+	return &Manager{
+		dirs:       opts.Dirs,
+		discovered: make(map[string]*entry),
+		running:    make(map[string]*client),
+	}
+}
+
+func defaultDirs() []string {
+	var dirs []string
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(home, ".concord", "plugins"))
+	}
+	if wd, err := os.Getwd(); err == nil {
+		dirs = append(dirs, filepath.Join(wd, ".concord", "plugins"))
+	}
+	return dirs
+}
+
+// Discover walks the configured dirs and records every plugin binary
+// found. Idempotent — calling again refreshes the cache.
+func (m *Manager) Discover() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.discovered = make(map[string]*entry)
+	for _, dir := range m.dirs {
+		if err := m.scanDir(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("scan %s: %w", dir, err)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) scanDir(dir string) error {
+	sources, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, src := range sources {
+		if !src.IsDir() {
+			continue
+		}
+		// Pick the highest-versioned subdirectory; for Phase Π-1 we
+		// just take whichever is lexicographically last. Phase Π-4
+		// will replace this with semver resolution against the lockfile.
+		versions, err := os.ReadDir(filepath.Join(dir, src.Name()))
+		if err != nil {
+			continue
+		}
+		var versionDirs []string
+		for _, v := range versions {
+			if v.IsDir() {
+				versionDirs = append(versionDirs, v.Name())
+			}
+		}
+		if len(versionDirs) == 0 {
+			continue
+		}
+		sort.Strings(versionDirs)
+		ver := versionDirs[len(versionDirs)-1]
+
+		binName := "concord-plugin-" + src.Name()
+		bin := filepath.Join(dir, src.Name(), ver, binName)
+		if _, err := os.Stat(bin); err != nil {
+			continue
+		}
+		// Latest-wins across discovery dirs (workspace-local beats user-home).
+		m.discovered[src.Name()] = &entry{source: src.Name(), version: ver, path: bin}
+	}
+	return nil
+}
+
+// Available lists discovered plugin sources, sorted.
+func (m *Manager) Available() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, 0, len(m.discovered))
+	for s := range m.discovered {
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Has reports whether a plugin for source is discovered. Does NOT
+// imply the plugin is running.
+func (m *Manager) Has(source string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.discovered[source]
+	return ok
+}
+
+// Ensure pre-warms each named source by spawning its plugin. Errors
+// for unknown sources are collected and returned together so the
+// caller sees the full picture in one error.
+func (m *Manager) Ensure(ctx context.Context, sources []string) error {
+	var errs []error
+	for _, s := range sources {
+		if _, err := m.Get(ctx, s); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", s, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// Get returns the running PluginCollector for source, spawning it
+// lazily on first call. Subsequent calls reuse the same process.
+func (m *Manager) Get(_ context.Context, source string) (*PluginCollector, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if c, ok := m.running[source]; ok {
+		return c.wrapper, nil
+	}
+
+	e, ok := m.discovered[source]
+	if !ok {
+		return nil, fmt.Errorf("no plugin discovered for source %q", source)
+	}
+
+	c, err := m.spawn(e)
+	if err != nil {
+		return nil, err
+	}
+	m.running[source] = c
+	return c.wrapper, nil
+}
+
+func (m *Manager) spawn(e *entry) (*client, error) {
+	gpc := goplugin.NewClient(&goplugin.ClientConfig{
+		HandshakeConfig: sdkplugin.HandshakeConfig,
+		Plugins: map[string]goplugin.Plugin{
+			sdkplugin.PluginName: &sdkplugin.CollectorPlugin{},
+		},
+		Cmd:              exec.Command(e.path),
+		AllowedProtocols: []goplugin.Protocol{goplugin.ProtocolGRPC},
+		Managed:          true,
+	})
+	conn, err := gpc.Client()
+	if err != nil {
+		gpc.Kill()
+		return nil, fmt.Errorf("connect to plugin %s: %w", e.source, err)
+	}
+	raw, err := conn.Dispense(sdkplugin.PluginName)
+	if err != nil {
+		gpc.Kill()
+		return nil, fmt.Errorf("dispense plugin %s: %w", e.source, err)
+	}
+	stub, ok := raw.(pluginv1.CollectorClient)
+	if !ok {
+		gpc.Kill()
+		return nil, fmt.Errorf("plugin %s: client is %T, expected CollectorClient", e.source, raw)
+	}
+	return &client{
+		gpc:       gpc,
+		collector: stub,
+		wrapper:   NewPluginCollector(e.source, stub, 120*time.Second),
+	}, nil
+}
+
+// Shutdown terminates every running plugin. Safe to call multiple times.
+func (m *Manager) Shutdown(_ context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, c := range m.running {
+		c.gpc.Kill()
+	}
+	m.running = make(map[string]*client)
+	return nil
+}
