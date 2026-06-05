@@ -12,8 +12,6 @@ import (
 	"github.com/concord-dev/concord/internal/auth"
 )
 
-// APIToken is the long-lived programmatic credential. Token plaintext is
-// returned only at creation; thereafter only hash + metadata persist.
 type APIToken struct {
 	ID              uuid.UUID  `json:"id"`
 	OrgID           uuid.UUID  `json:"org_id"`
@@ -25,8 +23,6 @@ type APIToken struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
-// CreateAPIToken mints a new programmatic token. createdBy may be nil when
-// the token is minted via the admin-bootstrap path (no user identity yet).
 func (s *Store) CreateAPIToken(ctx context.Context, orgID uuid.UUID, name string, createdBy *uuid.UUID) (APIToken, string, error) {
 	plaintext, err := auth.GenerateSecret(auth.APITokenPrefix, 32)
 	if err != nil {
@@ -47,9 +43,6 @@ func (s *Store) CreateAPIToken(ctx context.Context, orgID uuid.UUID, name string
 	return t, plaintext, nil
 }
 
-// ResolveAPIToken looks up the token row matching plaintext, ignoring revoked
-// rows, and bumps last_used_at on success. Returns ErrNotFound when the
-// token is unknown or has been revoked.
 func (s *Store) ResolveAPIToken(ctx context.Context, plaintext string) (APIToken, error) {
 	hash := auth.HashSecret(plaintext)
 	var t APIToken
@@ -66,7 +59,6 @@ func (s *Store) ResolveAPIToken(ctx context.Context, plaintext string) (APIToken
 	return t, err
 }
 
-// ListAPITokens returns every non-revoked token belonging to orgID, newest first.
 func (s *Store) ListAPITokens(ctx context.Context, orgID uuid.UUID) ([]APIToken, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, org_id, name, created_by_user_id, last_used_at, revoked_at, created_at, updated_at
@@ -88,8 +80,6 @@ func (s *Store) ListAPITokens(ctx context.Context, orgID uuid.UUID) ([]APIToken,
 	return out, rows.Err()
 }
 
-// RevokeAPIToken marks a token as revoked. Soft-delete so historical runs
-// retain the FK reference (triggered_by_token).
 func (s *Store) RevokeAPIToken(ctx context.Context, orgID, tokenID uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE api_token SET revoked_at = now()

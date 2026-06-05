@@ -7,7 +7,6 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// Validate checks that a control has the minimum required fields.
 func Validate(c apiv1.Control) error {
 	var errs []error
 

@@ -9,8 +9,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Role is a named bundle of permissions. Roles are data, not enum — new
-// roles can be added at runtime without code changes.
 type Role struct {
 	ID        uuid.UUID `json:"id"`
 	Name      string    `json:"name"`
@@ -18,7 +16,6 @@ type Role struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Permission is one atomic capability, e.g. "runs:create".
 type Permission struct {
 	ID        uuid.UUID `json:"id"`
 	Name      string    `json:"name"`
@@ -26,7 +23,6 @@ type Permission struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// GetRoleByName returns the role identified by its name.
 func (s *Store) GetRoleByName(ctx context.Context, name string) (Role, error) {
 	var r Role
 	err := s.pool.QueryRow(ctx,
@@ -38,7 +34,6 @@ func (s *Store) GetRoleByName(ctx context.Context, name string) (Role, error) {
 	return r, err
 }
 
-// ListRoles returns every role, alphabetical.
 func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, name, created_at, updated_at FROM role ORDER BY name`)
@@ -57,7 +52,6 @@ func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
 	return out, rows.Err()
 }
 
-// ListPermissions returns every defined permission.
 func (s *Store) ListPermissions(ctx context.Context) ([]Permission, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, name, created_at, updated_at FROM permission ORDER BY name`)
@@ -76,7 +70,6 @@ func (s *Store) ListPermissions(ctx context.Context) ([]Permission, error) {
 	return out, rows.Err()
 }
 
-// ListRolePermissions returns every permission attached to roleID.
 func (s *Store) ListRolePermissions(ctx context.Context, roleID uuid.UUID) ([]Permission, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT p.id, p.name, p.created_at, p.updated_at

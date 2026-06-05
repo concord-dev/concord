@@ -11,8 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// WebhookDeliveryStatus is the row-level state machine. Only four values
-// are valid; any other in the DB is a bug.
 type WebhookDeliveryStatus string
 
 const (
@@ -22,9 +20,6 @@ const (
 	DeliveryDead       WebhookDeliveryStatus = "dead"
 )
 
-// WebhookDelivery is one (webhook, event) pair the worker is responsible
-// for. Re-fired event_ids land on the same row (UNIQUE constraint) so
-// the consumer's INSERT becomes a safe UPSERT.
 type WebhookDelivery struct {
 	ID              uuid.UUID
 	WebhookID       uuid.UUID
@@ -42,17 +37,10 @@ type WebhookDelivery struct {
 	SucceededAt     *time.Time
 	AbandonedAt     *time.Time
 
-	// WebhookURL + WebhookSecret are populated by ClaimPendingDeliveries
-	// and ClaimFirstAttempts so the caller can POST without an extra
-	// query per row. They are NOT columns on webhook_delivery — they
-	// come from the webhook table via the FK join.
 	WebhookURL    string
 	WebhookSecret string
 }
 
-// AttemptResult is the per-attempt forensic record appended to
-// attempts_log. Keep the field set small — operators read these on a
-// dashboard.
 type AttemptResult struct {
 	AttemptedAt time.Time `json:"attempted_at"`
 	HTTPStatus  int       `json:"http_status"`
@@ -60,9 +48,6 @@ type AttemptResult struct {
 	DurationMS  int64     `json:"duration_ms"`
 }
 
-// UpsertDeliveryParams seeds a new row (or no-ops if a row with the
-// same (webhook_id, event_id) already exists). Returns the row id.
-// Used by the Kafka consumer right before it POSTs the first attempt.
 type UpsertDeliveryParams struct {
 	WebhookID uuid.UUID
 	EventID   uuid.UUID
@@ -70,11 +55,6 @@ type UpsertDeliveryParams struct {
 	EventKind string
 }
 
-// UpsertDelivery either INSERTs a new row in 'delivering' state, or — if
-// the unique key collides — leaves the existing row alone and returns
-// its id. Returns (id, created bool, error). created=false means the row
-// already existed; the caller should treat that as "this event has
-// already been processed for this webhook" and skip.
 func (s *Store) UpsertDelivery(ctx context.Context, p UpsertDeliveryParams) (uuid.UUID, bool, error) {
 	var id uuid.UUID
 	var inserted bool
@@ -93,8 +73,6 @@ func (s *Store) UpsertDelivery(ctx context.Context, p UpsertDeliveryParams) (uui
 	return id, inserted, nil
 }
 
-// MarkDeliverySucceeded records a successful attempt and transitions
-// status to 'succeeded'. The attempt result is appended to attempts_log.
 func (s *Store) MarkDeliverySucceeded(ctx context.Context, id uuid.UUID, result AttemptResult) error {
 	entry, err := json.Marshal(result)
 	if err != nil {
@@ -115,9 +93,6 @@ func (s *Store) MarkDeliverySucceeded(ctx context.Context, id uuid.UUID, result 
 	return err
 }
 
-// MarkDeliveryFailed records a failed attempt. If the new attempt_count
-// reaches maxAttempts, status becomes 'dead' (no more retries);
-// otherwise 'failed' with next_attempt_at = now() + backoff.
 func (s *Store) MarkDeliveryFailed(ctx context.Context, id uuid.UUID, result AttemptResult, backoff time.Duration, maxAttempts int) (WebhookDeliveryStatus, error) {
 	entry, err := json.Marshal(result)
 	if err != nil {
@@ -150,14 +125,6 @@ func (s *Store) MarkDeliveryFailed(ctx context.Context, id uuid.UUID, result Att
 	return WebhookDeliveryStatus(status), nil
 }
 
-// ClaimPendingDeliveries is the Retrier hot path: claim up to limit
-// failed rows whose backoff window has elapsed, locking them with
-// SELECT FOR UPDATE SKIP LOCKED so concurrent workers shard the work.
-//
-// The returned tx must be committed (success) or rolled back by the
-// caller. Rows are joined with `webhook` so the caller has the URL +
-// secret without a second query per row. The query filters out
-// disabled or deleted webhooks via the INNER JOIN.
 func (s *Store) ClaimPendingDeliveries(ctx context.Context, limit int) (pgx.Tx, []WebhookDelivery, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -205,9 +172,6 @@ func (s *Store) ClaimPendingDeliveries(ctx context.Context, limit int) (pgx.Tx, 
 	return tx, out, nil
 }
 
-// MarkDeliverySucceededTx is the tx-scoped sibling of
-// MarkDeliverySucceeded — used inside ClaimPendingDeliveries' tx so
-// state transitions don't race the lock.
 func (s *Store) MarkDeliverySucceededTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, result AttemptResult) error {
 	entry, err := json.Marshal(result)
 	if err != nil {
@@ -228,7 +192,6 @@ func (s *Store) MarkDeliverySucceededTx(ctx context.Context, tx pgx.Tx, id uuid.
 	return err
 }
 
-// MarkDeliveryFailedTx is the tx-scoped sibling of MarkDeliveryFailed.
 func (s *Store) MarkDeliveryFailedTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, result AttemptResult, backoff time.Duration, maxAttempts int) (WebhookDeliveryStatus, error) {
 	entry, err := json.Marshal(result)
 	if err != nil {
@@ -261,8 +224,6 @@ func (s *Store) MarkDeliveryFailedTx(ctx context.Context, tx pgx.Tx, id uuid.UUI
 	return WebhookDeliveryStatus(status), nil
 }
 
-// GetWebhookDelivery fetches one delivery by id. ErrNotFound when no
-// such row exists. Used by operator endpoints.
 func (s *Store) GetWebhookDelivery(ctx context.Context, id uuid.UUID) (WebhookDelivery, error) {
 	var d WebhookDelivery
 	err := s.pool.QueryRow(ctx,
@@ -281,8 +242,6 @@ func (s *Store) GetWebhookDelivery(ctx context.Context, id uuid.UUID) (WebhookDe
 	return d, err
 }
 
-// ListDeadDeliveriesFilters narrows the DLQ list query. Zero values are
-// "no filter". Limit defaults to 50, capped at 500.
 type ListDeadDeliveriesFilters struct {
 	OrgID  *uuid.UUID
 	Kind   string
@@ -290,10 +249,6 @@ type ListDeadDeliveriesFilters struct {
 	Offset int
 }
 
-// ListDeadDeliveries returns dead, non-abandoned rows newest-first.
-// "Dead" here means status='dead' — the retrier won't touch these any
-// more (the claim query filters on status='failed'). Operators inspect
-// + replay them via /operator/v1/dlq/deliveries.
 func (s *Store) ListDeadDeliveries(ctx context.Context, f ListDeadDeliveriesFilters) ([]WebhookDelivery, error) {
 	limit := f.Limit
 	if limit <= 0 {
@@ -345,10 +300,6 @@ func (s *Store) ListDeadDeliveries(ctx context.Context, f ListDeadDeliveriesFilt
 	return out, rows.Err()
 }
 
-// ReplayDelivery transitions a dead row back to 'failed' with attempt_count=0
-// and next_attempt_at=now() so the retrier picks it up on its next tick.
-// Also clears abandoned_at so a previously-abandoned row can be revived.
-// Returns ErrNotFound when the row doesn't exist or is already succeeded.
 func (s *Store) ReplayDelivery(ctx context.Context, id uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE webhook_delivery
@@ -368,10 +319,6 @@ func (s *Store) ReplayDelivery(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// AbandonDelivery marks a dead row as "operator gave up". The retrier
-// skips abandoned rows. Operators can revive via ReplayDelivery.
-// Returns ErrNotFound when the row doesn't exist or has already
-// succeeded.
 func (s *Store) AbandonDelivery(ctx context.Context, id uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE webhook_delivery

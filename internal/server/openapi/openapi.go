@@ -1,12 +1,3 @@
-// Package openapi embeds the Concord HTTP API specification.
-//
-// The spec is split across multiple YAML chunks (base.yaml, schemas.yaml,
-// paths_public.yaml, paths_org.yaml, paths_admin.yaml) so no single file
-// breaks the per-file LOC budget. They're combined at startup by a
-// recursive-map merger and the result is cached for subsequent requests.
-//
-// The split files are not generated artifacts — every new route lands in
-// one of the chunks alongside its handler in the same change.
 package openapi
 
 import (
@@ -29,8 +20,6 @@ var (
 	specErr   error
 )
 
-// SpecYAML returns the merged spec bytes. First call walks the embedded
-// chunks; subsequent calls return the cached blob.
 func SpecYAML() ([]byte, error) {
 	specOnce.Do(func() {
 		specBytes, specErr = mergeChunks()
@@ -38,9 +27,6 @@ func SpecYAML() ([]byte, error) {
 	return specBytes, specErr
 }
 
-// mergeChunks reads every embedded *.yaml file, parses it as a top-level
-// object, and deep-merges them into one document. Chunks are loaded in
-// lexical filename order so the merge result is deterministic.
 func mergeChunks() ([]byte, error) {
 	entries, err := fs.ReadDir(specFS, ".")
 	if err != nil {
@@ -71,8 +57,6 @@ func mergeChunks() ([]byte, error) {
 	return yaml.Marshal(merged)
 }
 
-// deepMerge folds src into dst. Maps recurse; scalar keys collide loudly so
-// accidental duplicates across files don't silently overwrite each other.
 func deepMerge(dst, src map[string]any, srcName string) error {
 	for k, v := range src {
 		existing, hasExisting := dst[k]

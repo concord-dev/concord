@@ -12,10 +12,6 @@ import (
 	"github.com/concord-dev/concord/internal/auth"
 )
 
-// Session is one browser session. The plaintext token is returned only at
-// creation; the row stores its sha256 hash. IP is read back via INET::text
-// because pgx's default codec for netip.Addr in nullable columns isn't
-// reliable across versions — string round-trips cleanly.
 type Session struct {
 	ID         uuid.UUID  `json:"id"`
 	UserID     uuid.UUID  `json:"user_id"`
@@ -27,10 +23,6 @@ type Session struct {
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
-// CreateSession mints a new session token for userID. ttl is how long the
-// session is valid (typical: 24h–7d). ip/userAgent are recorded for the
-// "active sessions" UI; either may be empty. ip must parse as INET or
-// Postgres rejects the insert — pass an empty string when unknown.
 func (s *Store) CreateSession(ctx context.Context, userID uuid.UUID, ttl time.Duration, ip, userAgent string) (Session, string, error) {
 	plaintext, err := auth.GenerateSecret(auth.SessionTokenPrefix, 32)
 	if err != nil {
@@ -54,8 +46,6 @@ func (s *Store) CreateSession(ctx context.Context, userID uuid.UUID, ttl time.Du
 	return sess, plaintext, nil
 }
 
-// ResolveSession looks up an active (non-expired, non-revoked) session by
-// plaintext token and bumps last_used_at.
 func (s *Store) ResolveSession(ctx context.Context, plaintext string) (Session, error) {
 	hash := auth.HashSecret(plaintext)
 	var sess Session
@@ -73,7 +63,6 @@ func (s *Store) ResolveSession(ctx context.Context, plaintext string) (Session, 
 	return sess, err
 }
 
-// RevokeSession marks a single session as revoked.
 func (s *Store) RevokeSession(ctx context.Context, sessionID uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE user_session SET revoked_at = now()
@@ -87,8 +76,6 @@ func (s *Store) RevokeSession(ctx context.Context, sessionID uuid.UUID) error {
 	return nil
 }
 
-// RevokeAllSessionsForUser invalidates every active session for a user;
-// invoked on password change or admin-revoke.
 func (s *Store) RevokeAllSessionsForUser(ctx context.Context, userID uuid.UUID) error {
 	_, err := s.pool.Exec(ctx,
 		`UPDATE user_session SET revoked_at = now()

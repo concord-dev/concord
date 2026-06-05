@@ -14,26 +14,13 @@ import (
 )
 
 
-// ErrMFAAlreadyEnrolled is returned by EnrollUserTOTP when the user already
-// has a verified TOTP secret. Re-enrollment requires DisableUserMFA first
-// (which is gated on a fresh password check at the handler layer) so a
-// session hijack can't silently swap the second factor.
 var ErrMFAAlreadyEnrolled = errors.New("mfa: user already has an enrolled TOTP secret")
 
-// ErrMFANotEnrolled is returned when MFA operations target a user that
-// hasn't completed TOTP enrollment yet (no row, or row exists but
-// enrolled_at is NULL).
 var ErrMFANotEnrolled = errors.New("mfa: user has no enrolled TOTP secret")
 
-// ErrMFAChallengeExpired is returned when ConsumeMFAChallenge is called past
-// the challenge's TTL.
 var ErrMFAChallengeExpired = errors.New("mfa: challenge expired")
 
 
-// UserTOTP is the read shape for the per-user TOTP enrollment row. The
-// `Secret` field is the base32-encoded TOTP shared secret — must NEVER be
-// returned to API callers; only the enrollment provisioning URI exposes
-// it once at scan time.
 type UserTOTP struct {
 	UserID     uuid.UUID  `json:"user_id"`
 	Secret     string     `json:"-"`
@@ -42,7 +29,6 @@ type UserTOTP struct {
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
-// MFAChallenge is the row shape for an in-flight MFA challenge.
 type MFAChallenge struct {
 	ID         uuid.UUID  `json:"id"`
 	UserID     uuid.UUID  `json:"user_id"`
@@ -52,11 +38,6 @@ type MFAChallenge struct {
 }
 
 
-// BeginUserTOTPEnrollment stores a pending TOTP secret for the user.
-// Subsequent calls before VerifyUserTOTPEnrollment overwrite the pending
-// secret — useful when the user re-scans the QR mid-enrollment. Calling
-// this on an already-enrolled user (enrolled_at IS NOT NULL) returns
-// ErrMFAAlreadyEnrolled.
 func (s *Store) BeginUserTOTPEnrollment(ctx context.Context, userID uuid.UUID, base32Secret string) error {
 	var enrolledAt *time.Time
 	err := s.pool.QueryRow(ctx,
@@ -64,7 +45,6 @@ func (s *Store) BeginUserTOTPEnrollment(ctx context.Context, userID uuid.UUID, b
 	).Scan(&enrolledAt)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		// No row yet — insert.
 		_, err = s.pool.Exec(ctx,
 			`INSERT INTO user_totp (user_id, secret) VALUES ($1, $2)`,
 			userID, base32Secret)
@@ -81,8 +61,6 @@ func (s *Store) BeginUserTOTPEnrollment(ctx context.Context, userID uuid.UUID, b
 	return err
 }
 
-// GetUserTOTP returns the TOTP row (enrolled or pending) for a user.
-// pgx.ErrNoRows surfaces as store.ErrNotFound.
 func (s *Store) GetUserTOTP(ctx context.Context, userID uuid.UUID) (UserTOTP, error) {
 	var t UserTOTP
 	err := s.pool.QueryRow(ctx,
@@ -95,9 +73,6 @@ func (s *Store) GetUserTOTP(ctx context.Context, userID uuid.UUID) (UserTOTP, er
 	return t, err
 }
 
-// MarkUserTOTPEnrolled flips enrolled_at to now() once the user has typed
-// a valid code, completing enrollment. No-op if the row is already
-// enrolled.
 func (s *Store) MarkUserTOTPEnrolled(ctx context.Context, userID uuid.UUID) error {
 	_, err := s.pool.Exec(ctx,
 		`UPDATE user_totp SET enrolled_at = now() WHERE user_id = $1 AND enrolled_at IS NULL`,
@@ -105,16 +80,11 @@ func (s *Store) MarkUserTOTPEnrolled(ctx context.Context, userID uuid.UUID) erro
 	return err
 }
 
-// MarkUserTOTPUsed updates last_used_at on a successful TOTP verification at
-// login. Best-effort: failure to update the column does NOT block login.
 func (s *Store) MarkUserTOTPUsed(ctx context.Context, userID uuid.UUID) {
 	_, _ = s.pool.Exec(ctx,
 		`UPDATE user_totp SET last_used_at = now() WHERE user_id = $1`, userID)
 }
 
-// IsUserMFAEnrolled returns true when the user has a verified TOTP secret
-// (enrolled_at IS NOT NULL). Used by Login to decide whether to short-
-// circuit into the challenge flow.
 func (s *Store) IsUserMFAEnrolled(ctx context.Context, userID uuid.UUID) (bool, error) {
 	var enrolledAt *time.Time
 	err := s.pool.QueryRow(ctx,
@@ -129,9 +99,6 @@ func (s *Store) IsUserMFAEnrolled(ctx context.Context, userID uuid.UUID) (bool, 
 	return enrolledAt != nil, nil
 }
 
-// DisableUserMFA wipes both the TOTP secret and every recovery code for the
-// user, atomically. After this call the user is back to single-factor
-// password auth. Idempotent — returns no error if the user wasn't enrolled.
 func (s *Store) DisableUserMFA(ctx context.Context, userID uuid.UUID) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -149,9 +116,6 @@ func (s *Store) DisableUserMFA(ctx context.Context, userID uuid.UUID) error {
 }
 
 
-// ReplaceRecoveryCodes wipes the user's existing codes and inserts the new
-// argon2id-hashed batch. Returns the count inserted. Atomic — partial
-// state is impossible on failure.
 func (s *Store) ReplaceRecoveryCodes(ctx context.Context, userID uuid.UUID, plaintextCodes []string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -176,8 +140,6 @@ func (s *Store) ReplaceRecoveryCodes(ctx context.Context, userID uuid.UUID, plai
 	return tx.Commit(ctx)
 }
 
-// CountUnusedRecoveryCodes returns how many one-time codes the user has
-// left. Powers the "you have N codes remaining" UI affordance.
 func (s *Store) CountUnusedRecoveryCodes(ctx context.Context, userID uuid.UUID) (int, error) {
 	var n int
 	err := s.pool.QueryRow(ctx,
@@ -187,12 +149,6 @@ func (s *Store) CountUnusedRecoveryCodes(ctx context.Context, userID uuid.UUID) 
 	return n, err
 }
 
-// ConsumeRecoveryCode verifies the submitted code against the user's
-// unused codes and marks the matched row used. Returns (true, nil) on
-// match, (false, nil) on no match, (false, err) on infrastructure failure.
-//
-// O(unused codes) argon2id verifications per call — bounded at 10. The MFA
-// submit endpoint is rate-limited so this is not a DoS vector.
 func (s *Store) ConsumeRecoveryCode(ctx context.Context, userID uuid.UUID, plaintext string) (bool, error) {
 	plaintext = normalizeRecoveryCode(plaintext)
 	rows, err := s.pool.Query(ctx,
@@ -231,17 +187,12 @@ func (s *Store) ConsumeRecoveryCode(ctx context.Context, userID uuid.UUID, plain
 	return false, nil
 }
 
-// normalizeRecoveryCode strips formatting characters (dashes, spaces, case)
-// so a user typing "abcd-efgh" or "ABCDEFGH" hits the same hash.
 func normalizeRecoveryCode(s string) string {
 	r := strings.NewReplacer("-", "", " ", "")
 	return strings.ToLower(r.Replace(s))
 }
 
 
-// CreateMFAChallenge mints a short-lived challenge token bound to user +
-// client IP/UA. Returns the row and the plaintext (concord_mfa_…) — the
-// plaintext is shown ONCE and the DB only holds sha256.
 func (s *Store) CreateMFAChallenge(ctx context.Context, userID uuid.UUID, ip, ua string, ttl time.Duration) (MFAChallenge, string, error) {
 	plain, err := auth.GenerateSecret(auth.MFAChallengePrefix, 32)
 	if err != nil {
@@ -262,12 +213,6 @@ func (s *Store) CreateMFAChallenge(ctx context.Context, userID uuid.UUID, ip, ua
 	return ch, plain, nil
 }
 
-// ConsumeMFAChallenge looks up a live challenge by its plaintext token,
-// marks it consumed under a row lock to prevent double-spend races, and
-// returns the resolved user ID.
-//
-//   ErrNotFound          token unknown, already consumed, or revoked
-//   ErrMFAChallengeExpired   token's expires_at has passed
 func (s *Store) ConsumeMFAChallenge(ctx context.Context, plaintext string) (uuid.UUID, error) {
 	sum := sha256.Sum256([]byte(plaintext))
 

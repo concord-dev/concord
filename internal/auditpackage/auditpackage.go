@@ -1,11 +1,3 @@
-// Package auditpackage builds a self-contained ZIP archive of compliance
-// evidence for one organization: latest findings, recent run history,
-// drift transitions, and the audit-event trail. External auditors export
-// this once per engagement and walk away with everything they need to
-// produce a SOC 2 / ISO 27001 evidence appendix.
-//
-// Output is streamed through an archive/zip writer so a giant org with
-// 10k+ audit events doesn't materialize the whole bundle in memory.
 package auditpackage
 
 import (
@@ -23,31 +15,17 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// Options narrows the bundle to a time window and caps recent-history
-// rows. Zero values map to defensive defaults — see Build's docstring
-// for the resolved policy.
 type Options struct {
-	// Since / Until bound the audit_event and drift_event extracts so a
-	// long-lived org doesn't ship 5 years of every change. Zero Since
-	// means "no lower bound"; zero Until means "now".
 	Since time.Time
 	Until time.Time
 
-	// MaxRuns caps the run-history CSV. 0 → 100.
 	MaxRuns int
-	// MaxAuditEvents caps audit_event rows. 0 → 5000.
 	MaxAuditEvents int
-	// MaxDriftEvents caps drift_event rows. 0 → 5000.
 	MaxDriftEvents int
 
-	// RequestedBy is recorded in metadata.json so the bundle is
-	// attributable. Pass the auditor's email or "operator" depending on
-	// the call site.
 	RequestedBy string
 }
 
-// Metadata is the top-level descriptor written to metadata.json. Stable
-// shape — external tooling parses this to know what's inside the zip.
 type Metadata struct {
 	Version       string         `json:"version"`
 	GeneratedAt   time.Time      `json:"generated_at"`
@@ -58,9 +36,6 @@ type Metadata struct {
 	Counts        Counts         `json:"counts"`
 }
 
-// Counts is the per-section row counter, also surfaced in metadata.json
-// so a downstream pipeline can decide whether to fetch more (the caps
-// are documented + visible).
 type Counts struct {
 	Runs        int `json:"runs"`
 	AuditEvents int `json:"audit_events"`
@@ -69,9 +44,6 @@ type Counts struct {
 }
 
 const (
-	// formatVersion is the metadata.json schema marker. Bump if the
-	// archive layout changes in a non-backwards-compatible way so
-	// downstream parsers can reject unknown shapes loudly.
 	formatVersion = "1"
 
 	defaultMaxRuns        = 100
@@ -79,24 +51,6 @@ const (
 	defaultMaxDriftEvents = 5000
 )
 
-// Build streams a complete audit-package ZIP for orgID into w. Errors
-// return early before any partial archive is written when possible; once
-// the zip writer is open, errors mid-stream cancel the archive (the zip
-// trailer is never written, so consumers see a truncated/invalid zip
-// rather than a misleading "empty looks fine" archive).
-//
-// Filesystem layout of the ZIP:
-//
-//	metadata.json                 top-level descriptor
-//	findings/latest.json          latest succeeded run's findings (JSON array)
-//	findings/latest-summary.json  the run summary (counts by status)
-//	runs.csv                      recent runs (id, status, started_at, ...)
-//	audit-events.csv              audit_event rows in the window
-//	drift-events.csv              drift_event rows in the window
-//	controls-overrides.json       per-org control overrides (current state)
-//
-// Callers should set the HTTP Content-Type to "application/zip" and a
-// Content-Disposition with a sensible filename (`audit-package-<slug>-<ts>.zip`).
 func Build(ctx context.Context, s *store.Store, orgID uuid.UUID, opts Options, w io.Writer) (Metadata, error) {
 	if s == nil {
 		return Metadata{}, errors.New("auditpackage: store is required")
@@ -117,10 +71,6 @@ func Build(ctx context.Context, s *store.Store, orgID uuid.UUID, opts Options, w
 	}
 
 	zw := zip.NewWriter(w)
-	// IMPORTANT: zw.Close writes the zip central-directory trailer.
-	// We call it explicitly at the end (no defer) so a build error
-	// leaves the archive deliberately invalid — better than a truncated
-	// archive that LOOKS valid but is missing a section.
 
 	meta := Metadata{
 		Version:      formatVersion,
@@ -137,8 +87,6 @@ func Build(ctx context.Context, s *store.Store, orgID uuid.UUID, opts Options, w
 		meta.WindowUntil = &u
 	}
 
-	// Latest findings — point-in-time evidence. An org with no succeeded
-	// runs yet still produces a valid bundle; HasFindings flags the case.
 	latest, err := s.GetLatestSucceededRun(ctx, orgID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return meta, fmt.Errorf("auditpackage: latest run: %w", err)
@@ -151,8 +99,6 @@ func Build(ctx context.Context, s *store.Store, orgID uuid.UUID, opts Options, w
 		if werr := writeRawJSON(zw, "findings/latest-summary.json", latest.Summary); werr != nil {
 			return meta, werr
 		}
-		// Also drop a tiny pointer file so consumers see which run
-		// produced the findings without parsing the JSON.
 		if werr := writeJSON(zw, "findings/latest-run.json", map[string]any{
 			"run_id":       latest.ID,
 			"started_at":   latest.StartedAt,
@@ -203,7 +149,6 @@ func Build(ctx context.Context, s *store.Store, orgID uuid.UUID, opts Options, w
 		return meta, err
 	}
 
-	// Metadata last so its counts reflect everything actually written.
 	if err := writeJSON(zw, "metadata.json", meta); err != nil {
 		return meta, err
 	}
@@ -214,9 +159,6 @@ func Build(ctx context.Context, s *store.Store, orgID uuid.UUID, opts Options, w
 	return meta, nil
 }
 
-// writeJSON marshals body and writes it to one zip entry. Indented for
-// human readability — the archive is meant for auditors, who often
-// open the files in a plain text editor.
 func writeJSON(zw *zip.Writer, name string, body any) error {
 	f, err := zw.Create(name)
 	if err != nil {
@@ -230,9 +172,6 @@ func writeJSON(zw *zip.Writer, name string, body any) error {
 	return nil
 }
 
-// writeRawJSON streams a JSON []byte (already encoded by Postgres' JSONB
-// output) into one zip entry without re-marshaling. Avoids the cost of
-// a parse+re-encode on findings arrays that may carry thousands of items.
 func writeRawJSON(zw *zip.Writer, name string, raw []byte) error {
 	f, err := zw.Create(name)
 	if err != nil {

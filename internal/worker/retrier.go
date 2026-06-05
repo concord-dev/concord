@@ -9,7 +9,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// RetrierConfig tunes the failed-delivery poll loop. Zero fields fall back to defaults.
 type RetrierConfig struct {
 	PollInterval  time.Duration
 	BusyInterval  time.Duration
@@ -17,14 +16,12 @@ type RetrierConfig struct {
 	BatchSize     int
 }
 
-// RetrierMetrics is the set of optional bumps the Retrier pushes.
 type RetrierMetrics struct {
 	Tick      func()
 	Claimed   func(n int)
 	TickError func(err error)
 }
 
-// Retrier polls webhook_delivery for failed rows whose backoff elapsed and re-runs Attempt.
 type Retrier struct {
 	store    *store.Store
 	executor *Executor
@@ -32,7 +29,6 @@ type Retrier struct {
 	metrics  RetrierMetrics
 }
 
-// NewRetrier returns a Retrier with defaults applied. store + executor required.
 func NewRetrier(s *store.Store, executor *Executor, cfg RetrierConfig, metrics RetrierMetrics) (*Retrier, error) {
 	if s == nil {
 		return nil, errors.New("worker: NewRetrier needs a Store")
@@ -60,7 +56,6 @@ func NewRetrier(s *store.Store, executor *Executor, cfg RetrierConfig, metrics R
 	}, nil
 }
 
-// Run is the main loop. Blocks until ctx is cancelled.
 func (r *Retrier) Run(ctx context.Context) {
 	slog.Info("worker retrier: starting",
 		slog.Duration("poll", r.cfg.PollInterval),
@@ -126,9 +121,6 @@ func (r *Retrier) tick(ctx context.Context) (bool, error) {
 	return len(batch) == r.cfg.BatchSize, nil
 }
 
-// rebuildEnvelopeBody reconstructs the wire body for a retry. event_id stays
-// stable; receivers dedupe on it, so byte-identity with the first attempt
-// isn't required.
 func (r *Retrier) rebuildEnvelopeBody(d store.WebhookDelivery) ([]byte, error) {
 	env := map[string]any{
 		"version":     1,

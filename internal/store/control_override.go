@@ -11,10 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ControlOverride is a per-org Rego parameter override for a single control.
-// Params is the same JSON shape the local concord.yaml writes — a flat
-// string-keyed map. NULL params is forbidden by the schema; callers that
-// want to "remove" an override should DELETE the row.
 type ControlOverride struct {
 	ID        uuid.UUID `json:"id"`
 	OrgID     uuid.UUID `json:"org_id"`
@@ -24,8 +20,6 @@ type ControlOverride struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// UpsertControlOverride sets (or replaces) the params for (orgID, controlID).
-// params must be a JSON-encoded object; the column has a JSONB type.
 func (s *Store) UpsertControlOverride(ctx context.Context, orgID uuid.UUID, controlID string, params []byte) (ControlOverride, error) {
 	if controlID == "" {
 		return ControlOverride{}, errors.New("control_id is required")
@@ -48,7 +42,6 @@ func (s *Store) UpsertControlOverride(ctx context.Context, orgID uuid.UUID, cont
 	return co, nil
 }
 
-// GetControlOverride returns the override for one control, or ErrNotFound.
 func (s *Store) GetControlOverride(ctx context.Context, orgID uuid.UUID, controlID string) (ControlOverride, error) {
 	var co ControlOverride
 	err := s.pool.QueryRow(ctx,
@@ -62,7 +55,6 @@ func (s *Store) GetControlOverride(ctx context.Context, orgID uuid.UUID, control
 	return co, err
 }
 
-// ListControlOverrides returns every override row for orgID, sorted by control id.
 func (s *Store) ListControlOverrides(ctx context.Context, orgID uuid.UUID) ([]ControlOverride, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, org_id, control_id, params, created_at, updated_at
@@ -83,7 +75,6 @@ func (s *Store) ListControlOverrides(ctx context.Context, orgID uuid.UUID) ([]Co
 	return out, rows.Err()
 }
 
-// DeleteControlOverride removes the row. Returns ErrNotFound when no row matched.
 func (s *Store) DeleteControlOverride(ctx context.Context, orgID uuid.UUID, controlID string) error {
 	tag, err := s.pool.Exec(ctx,
 		`DELETE FROM control_override WHERE org_id = $1 AND control_id = $2`,
@@ -97,13 +88,6 @@ func (s *Store) DeleteControlOverride(ctx context.Context, orgID uuid.UUID, cont
 	return nil
 }
 
-// ControlParamsForOrg returns the per-control params map an org has on file,
-// in the shape the runner.SetParams() expects:
-//
-//	map[control_id]map[param_name]value
-//
-// Decodes every override's JSONB into a Go map. Errors if any row's JSON is
-// malformed — that's a data-integrity issue worth surfacing.
 func (s *Store) ControlParamsForOrg(ctx context.Context, orgID uuid.UUID) (map[string]map[string]any, error) {
 	overrides, err := s.ListControlOverrides(ctx, orgID)
 	if err != nil {

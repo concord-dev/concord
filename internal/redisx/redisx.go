@@ -1,15 +1,3 @@
-// Package redisx is a thin wrapper around go-redis that produces a configured
-// client (single-node or Sentinel-failover) from a flat Config.
-//
-// The wrapper exists so cmd/server can keep its dependency tree shallow and
-// every downstream consumer (rate limiter, idempotency cache, future feature
-// flags) shares the same connection lifecycle, TLS posture, and timeouts.
-//
-// Concord uses go-redis v9. Sentinel mode is preferred for production
-// deployments — a single-node Redis is a single point of failure for both
-// rate limiting and (eventually) Idempotency-Key dedupe. The library handles
-// master failover internally; consumers just see request timeouts during the
-// few seconds while Sentinel promotes a replica.
 package redisx
 
 import (
@@ -23,7 +11,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Mode selects between a single-node Redis and a Sentinel-fronted cluster.
 type Mode string
 
 const (
@@ -31,9 +18,6 @@ const (
 	ModeSentinel Mode = "sentinel"
 )
 
-// Config is the bundle cmd/server passes in. Every field except Addr (single
-// mode) / SentinelAddrs+SentinelMaster (sentinel mode) has a sane default; a
-// caller can leave the rest zero-valued for local-dev posture.
 type Config struct {
 	Mode Mode
 
@@ -46,39 +30,22 @@ type Config struct {
 	Password string
 	DB       int
 
-	// TLS enables TLS to Redis. ServerName lets the operator pin SNI when
-	// the chart wires a managed Redis with a wildcard certificate.
 	TLS        bool
 	ServerName string
-	// InsecureSkipVerify is escape-hatch only for self-signed dev redis;
-	// production deployments should always leave it false.
 	InsecureSkipVerify bool
 
-	// Timeouts apply to every command. Defaults are tuned to fail fast so
-	// a slow / unreachable Redis can't pin handler goroutines.
 	DialTimeout  time.Duration
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
 
-	// PoolSize sets the maximum number of socket connections per node. The
-	// default (10 * runtime.NumCPU() in go-redis) is fine for most loads;
-	// callers override only when contention metrics demand it.
 	PoolSize int
 
-	// MaxRetries on transient command errors. -1 disables.
 	MaxRetries int
 }
 
-// Open builds a redis.Client from cfg. Returns an error if required fields
-// for the chosen mode are missing, or if no mode is set.
-//
-// The returned client is goroutine-safe; share one across the process.
 func Open(cfg Config) (*redis.Client, error) {
 	mode := cfg.Mode
 	if mode == "" {
-		// Heuristic: if the operator filled in SentinelAddrs they wanted
-		// sentinel mode but forgot the explicit Mode. Treat that as
-		// ModeSentinel rather than failing with a confusing error.
 		if len(cfg.SentinelAddrs) > 0 {
 			mode = ModeSentinel
 		} else if cfg.Addr != "" {
@@ -158,8 +125,6 @@ func Open(cfg Config) (*redis.Client, error) {
 	}
 }
 
-// Ping is a thin readiness helper. cmd/server's /readyz probe calls it
-// against a short context so a stuck Redis can't keep the pod in service.
 func Ping(ctx context.Context, c *redis.Client) error {
 	if c == nil {
 		return errors.New("redisx: client is nil")
@@ -167,9 +132,6 @@ func Ping(ctx context.Context, c *redis.Client) error {
 	return c.Ping(ctx).Err()
 }
 
-// ParseSentinelAddrs accepts a comma-separated host:port list and trims it
-// into a slice. Empty input returns nil so callers can pass through env
-// vars without an extra unset-check.
 func ParseSentinelAddrs(s string) []string {
 	if s == "" {
 		return nil

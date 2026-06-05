@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Organization is one customer organization.
 type Organization struct {
 	ID                 uuid.UUID `json:"id"`
 	Name               string    `json:"name"`
@@ -20,15 +19,12 @@ type Organization struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
-// orgColumns is the canonical column list for SELECT projections. Single
-// source of truth so a new column lands in every read.
 const orgColumns = "id, name, slug, trust_portal_enabled, created_at, updated_at"
 
 func scanOrg(row pgx.Row, o *Organization) error {
 	return row.Scan(&o.ID, &o.Name, &o.Slug, &o.TrustPortalEnabled, &o.CreatedAt, &o.UpdatedAt)
 }
 
-// CreateOrganization inserts an org and returns it. Slug must be unique.
 func (s *Store) CreateOrganization(ctx context.Context, name, slug string) (Organization, error) {
 	var o Organization
 	err := scanOrg(s.pool.QueryRow(ctx,
@@ -42,7 +38,6 @@ func (s *Store) CreateOrganization(ctx context.Context, name, slug string) (Orga
 	return o, nil
 }
 
-// GetOrganizationBySlug looks up an org by its human-readable slug.
 func (s *Store) GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error) {
 	var o Organization
 	err := scanOrg(s.pool.QueryRow(ctx,
@@ -54,7 +49,6 @@ func (s *Store) GetOrganizationBySlug(ctx context.Context, slug string) (Organiz
 	return o, err
 }
 
-// GetOrganizationByID looks up an org by ID.
 func (s *Store) GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error) {
 	var o Organization
 	err := scanOrg(s.pool.QueryRow(ctx,
@@ -66,7 +60,6 @@ func (s *Store) GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organiza
 	return o, err
 }
 
-// ListOrganizations returns every organization, oldest first.
 func (s *Store) ListOrganizations(ctx context.Context) ([]Organization, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT `+orgColumns+` FROM organization ORDER BY created_at ASC`)
@@ -85,8 +78,6 @@ func (s *Store) ListOrganizations(ctx context.Context) ([]Organization, error) {
 	return out, rows.Err()
 }
 
-// SetTrustPortalEnabled flips the trust-portal opt-in flag and returns the
-// updated row. Idempotent — repeated calls with the same value are fine.
 func (s *Store) SetTrustPortalEnabled(ctx context.Context, orgID uuid.UUID, enabled bool) (Organization, error) {
 	var o Organization
 	err := scanOrg(s.pool.QueryRow(ctx,

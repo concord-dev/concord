@@ -9,10 +9,8 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// TextRenderer prints a coloured human-readable summary.
 type TextRenderer struct{}
 
-// Render implements Renderer.
 func (TextRenderer) Render(w io.Writer, findings []apiv1.Finding) (Summary, error) {
 	s := Summarize(findings)
 	for _, f := range findings {

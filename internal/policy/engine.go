@@ -1,4 +1,3 @@
-// Package policy evaluates compliance policies using OPA / Rego.
 package policy
 
 import (
@@ -10,22 +9,18 @@ import (
 	"github.com/open-policy-agent/opa/rego"
 )
 
-// Engine evaluates Rego policies against typed inputs.
 type Engine struct{}
 
-// New returns a new policy engine.
 func New() *Engine {
 	return &Engine{}
 }
 
-// Result captures what a policy returned.
 type Result struct {
 	Deny []string
 	Warn []string
 	Pass bool
 }
 
-// EvaluateFile loads a .rego file and runs the deny + warn queries against input.
 func (e *Engine) EvaluateFile(ctx context.Context, regoFile, pkg string, input map[string]any) (Result, error) {
 	src, err := os.ReadFile(regoFile)
 	if err != nil {
@@ -34,7 +29,6 @@ func (e *Engine) EvaluateFile(ctx context.Context, regoFile, pkg string, input m
 	return e.EvaluateSource(ctx, string(src), pkg, input)
 }
 
-// EvaluateSource compiles and evaluates rego source against input.
 func (e *Engine) EvaluateSource(ctx context.Context, src, pkg string, input map[string]any) (Result, error) {
 	deny, err := query(ctx, src, fmt.Sprintf("data.%s.deny", pkg), input)
 	if err != nil {

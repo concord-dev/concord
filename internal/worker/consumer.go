@@ -16,7 +16,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ConsumerConfig configures the Kafka reader + dedupe. Zero fields fall back to defaults.
 type ConsumerConfig struct {
 	Brokers         []string
 	Topic           string
@@ -28,7 +27,6 @@ type ConsumerConfig struct {
 	DedupeKeyPrefix string
 }
 
-// ConsumerMetrics is the set of optional bumps the Consumer pushes.
 type ConsumerMetrics struct {
 	Consumed    func(kind string)
 	DedupeHit   func(kind string)
@@ -39,7 +37,6 @@ type ConsumerMetrics struct {
 	ConsumerLag func(seconds float64)
 }
 
-// Consumer reads concord.events, dedupes, and fans out to enabled webhooks.
 type Consumer struct {
 	store    *store.Store
 	redis    *redis.Client
@@ -49,7 +46,6 @@ type Consumer struct {
 	reader   *kafka.Reader
 }
 
-// NewConsumer wires the Reader + dedupe + Executor. rdb may be nil (DB-only dedupe).
 func NewConsumer(s *store.Store, rdb *redis.Client, executor *Executor, cfg ConsumerConfig, metrics ConsumerMetrics) (*Consumer, error) {
 	if s == nil {
 		return nil, errors.New("worker: NewConsumer needs a Store")
@@ -103,7 +99,6 @@ func NewConsumer(s *store.Store, rdb *redis.Client, executor *Executor, cfg Cons
 	}, nil
 }
 
-// Run is the main loop. Commits offsets only after deliveries persist; blocks until ctx is done.
 func (c *Consumer) Run(ctx context.Context) {
 	slog.Info("worker consumer: starting",
 		slog.String("topic", c.cfg.Topic),
@@ -249,7 +244,6 @@ func (c *Consumer) deliverFirstAttempt(ctx context.Context, h store.Webhook, kin
 		case store.DeliverySucceeded, store.DeliveryDead:
 			return nil
 		}
-		// 'failed' / 'delivering' — the Retrier owns those rows, don't race it from here.
 		return nil
 	}
 

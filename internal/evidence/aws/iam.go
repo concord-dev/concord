@@ -18,10 +18,8 @@ const credentialReportPollAttempts = 10
 
 var credentialReportPollDelay = 2 * time.Second
 
-// SetCredentialReportPollDelay overrides the inter-attempt wait time. Test-only.
 func SetCredentialReportPollDelay(d time.Duration) { credentialReportPollDelay = d }
 
-// collectIAMAccountSummary returns the global IAM account counters.
 func (c *Collector) collectIAMAccountSummary(ref apiv1.EvidenceRef) (any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -39,9 +37,6 @@ func (c *Collector) collectIAMAccountSummary(ref apiv1.EvidenceRef) (any, error)
 	}, nil
 }
 
-// collectIAMPasswordPolicy returns the account-wide password policy. A missing
-// policy (NoSuchEntity) surfaces as `configured: false` data rather than an
-// error so the Rego policy can describe what's wrong.
 func (c *Collector) collectIAMPasswordPolicy(ref apiv1.EvidenceRef) (any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -82,8 +77,6 @@ func isNoPasswordPolicyError(err error) bool {
 	return false
 }
 
-// collectIAMCredentialReport requests a fresh credential report, polls until
-// it's ready, and returns the parsed per-user shape.
 func (c *Collector) collectIAMCredentialReport(ref apiv1.EvidenceRef) (any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -139,8 +132,6 @@ func isReportInProgressError(err error) bool {
 	return false
 }
 
-// parseCredentialReport turns the IAM credential report CSV into a slice of
-// per-user maps. `now` is injected so tests can fix the "days ago" math.
 func parseCredentialReport(csvData string, now time.Time) ([]map[string]any, error) {
 	lines := strings.Split(strings.TrimSpace(csvData), "\n")
 	if len(lines) < 2 {
@@ -204,8 +195,6 @@ func splitCSV(line string) []string { return strings.Split(line, ",") }
 
 func parseCSVBool(s string) bool { return strings.EqualFold(s, "true") }
 
-// normalizeNA collapses the credential report's various "no value" markers
-// to an empty string so downstream rules don't special-case them.
 func normalizeNA(s string) string {
 	switch s {
 	case "N/A", "no_information", "not_supported":
@@ -214,8 +203,6 @@ func normalizeNA(s string) string {
 	return s
 }
 
-// daysAgo returns the integer number of days between when and now, or -1 for
-// any "never used" marker.
 func daysAgo(when string, now time.Time) int {
 	if when == "" || when == "N/A" || when == "no_information" || when == "not_supported" {
 		return -1

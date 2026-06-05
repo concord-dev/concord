@@ -11,12 +11,8 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// OSCALRenderer emits a NIST OSCAL 1.1 Assessment-Results subset.
-// This is the format auditors and GRC tooling ingest. Not yet a full
-// OSCAL profile — only the subset Concord generates from automated checks.
 type OSCALRenderer struct{}
 
-// Render implements Renderer.
 func (OSCALRenderer) Render(w io.Writer, findings []apiv1.Finding) (Summary, error) {
 	s := Summarize(findings)
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -88,9 +84,6 @@ func buildOSCALResult(findings []apiv1.Finding, ts string) oscalResult {
 	return res
 }
 
-// buildMappingProps emits the control's crosswalk to other frameworks as
-// OSCAL `props`. Auditors use these to see that one Concord evaluation
-// covers multiple framework requirements (e.g., SOC 2 + ISO 27001 + NIST).
 func buildMappingProps(f apiv1.Finding) []oscalProp {
 	props := []oscalProp{
 		{Name: "framework", Value: f.Framework, NS: "https://concord.dev/ns"},

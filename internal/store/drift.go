@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// DriftEvent is the read shape returned by ListDriftEvents.
 type DriftEvent struct {
 	ID         uuid.UUID  `json:"id"`
 	OrgID      uuid.UUID  `json:"org_id"`
@@ -21,8 +20,6 @@ type DriftEvent struct {
 	OccurredAt time.Time  `json:"occurred_at"`
 }
 
-// RecordDriftEventParams is the write shape for one transition. Pass a
-// slice to RecordDriftEvents to insert a whole run's worth in one tx.
 type RecordDriftEventParams struct {
 	OrgID      uuid.UUID
 	RunID      uuid.UUID
@@ -33,9 +30,6 @@ type RecordDriftEventParams struct {
 	Rationale  string
 }
 
-// RecordDriftEvents inserts every transition in one transaction so a
-// partial failure can't leave half a run's drift visible. Empty slice is
-// a no-op (the common case: no controls changed status).
 func (s *Store) RecordDriftEvents(ctx context.Context, events []RecordDriftEventParams) error {
 	if len(events) == 0 {
 		return nil
@@ -62,9 +56,6 @@ func (s *Store) RecordDriftEvents(ctx context.Context, events []RecordDriftEvent
 	return tx.Commit(ctx)
 }
 
-// ListDriftOptions configures ListDriftEvents. Zero values mean "no
-// filter" except Limit which defaults to 50 and is capped server-side at
-// 500 to keep a hostile caller from triggering a giant scan.
 type ListDriftOptions struct {
 	Since     time.Time
 	Until     time.Time
@@ -74,7 +65,6 @@ type ListDriftOptions struct {
 	Limit     int
 }
 
-// ListDriftEvents returns drift events for an org, newest first.
 func (s *Store) ListDriftEvents(ctx context.Context, orgID uuid.UUID, opts ListDriftOptions) ([]DriftEvent, error) {
 	if opts.Limit <= 0 {
 		opts.Limit = 50
@@ -126,8 +116,6 @@ func (s *Store) ListDriftEvents(ctx context.Context, orgID uuid.UUID, opts ListD
 	return out, rows.Err()
 }
 
-// ListDriftEventsForRun returns the events recorded against one run. Used
-// by the run-detail UI to show "what changed compared to last time."
 func (s *Store) ListDriftEventsForRun(ctx context.Context, orgID, runID uuid.UUID) ([]DriftEvent, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, org_id, run_id, prior_run_id, control_id,

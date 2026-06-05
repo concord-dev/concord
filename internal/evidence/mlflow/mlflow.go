@@ -14,16 +14,12 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// Collector queries an MLflow tracking server REST API for model
-// registry evidence.
 type Collector struct {
 	baseURL string
 	token   string
 	client  *http.Client
 }
 
-// New returns a collector configured against an MLflow
-// tracking URI. If token is non-empty it is sent as a Bearer header.
 func New(baseURL, token string) *Collector {
 	return &Collector{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -32,8 +28,6 @@ func New(baseURL, token string) *Collector {
 	}
 }
 
-// Probe calls registered-models/search with max_results=1 as a low-cost
-// reachability + auth check.
 func (c *Collector) Probe(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -43,7 +37,6 @@ func (c *Collector) Probe(ctx context.Context) (string, error) {
 	return "tracking server reachable at " + c.baseURL, nil
 }
 
-// Collect dispatches based on ref.Type.
 func (c *Collector) Collect(cctx evidence.Context, ref apiv1.EvidenceRef) (any, error) {
 	switch ref.Type {
 	case "model_registry", "query":
@@ -55,9 +48,6 @@ func (c *Collector) Collect(cctx evidence.Context, ref apiv1.EvidenceRef) (any, 
 	}
 }
 
-// collectModelRegistry calls /api/2.0/mlflow/registered-models/search and
-// normalizes the response into the {tracking_uri, fetched_at, models[]} shape
-// the ISO42001 policies expect.
 func (c *Collector) collectModelRegistry(ref apiv1.EvidenceRef) (any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -104,9 +94,6 @@ func normalizeMLflowModel(rm mlflowRegisteredModel) map[string]any {
 			model["run_id"] = prodVersion.RunID
 		}
 	}
-	// Promote every tag to a top-level field so Rego can read any of them
-	// directly. Fixed model fields above (name, production, version, etc.)
-	// always win over tags with conflicting keys.
 	for k, v := range tags {
 		if _, exists := model[k]; !exists {
 			model[k] = v
@@ -115,10 +102,7 @@ func normalizeMLflowModel(rm mlflowRegisteredModel) map[string]any {
 	return model
 }
 
-// pickProductionVersion picks the latest version flagged as production via
-// MLflow alias OR current_stage="Production". Returns the zero value if none.
 func pickProductionVersion(rm mlflowRegisteredModel) mlflowModelVersion {
-	// Aliases take priority — MLflow 2.x deprecates stages in favor of aliases.
 	for _, alias := range rm.Aliases {
 		if strings.EqualFold(alias.Alias, "production") {
 			for _, v := range rm.LatestVersions {
@@ -173,7 +157,6 @@ func (c *Collector) get(ctx context.Context, path string) ([]byte, error) {
 	return body, nil
 }
 
-// --- MLflow API types (subset we read) ---
 
 type mlflowRegisteredModel struct {
 	Name              string               `json:"name"`

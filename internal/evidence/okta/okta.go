@@ -15,15 +15,12 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// Collector queries an Okta org's REST API for identity evidence.
 type Collector struct {
 	orgURL string
 	token  string
 	client *http.Client
 }
 
-// New returns a collector configured against an Okta org.
-// orgURL is the full org URL (e.g. "https://acme.okta.com"). token is an Okta API token.
 func New(orgURL, token string) *Collector {
 	return &Collector{
 		orgURL: strings.TrimRight(orgURL, "/"),
@@ -32,7 +29,6 @@ func New(orgURL, token string) *Collector {
 	}
 }
 
-// Probe calls /api/v1/users?limit=1 as a low-cost reachability + auth check.
 func (c *Collector) Probe(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -42,7 +38,6 @@ func (c *Collector) Probe(ctx context.Context) (string, error) {
 	return "org reachable at " + c.orgURL, nil
 }
 
-// Collect dispatches based on ref.Type.
 func (c *Collector) Collect(cctx evidence.Context, ref apiv1.EvidenceRef) (any, error) {
 	switch ref.Type {
 	case "users_mfa":
@@ -56,8 +51,6 @@ func (c *Collector) Collect(cctx evidence.Context, ref apiv1.EvidenceRef) (any, 
 	}
 }
 
-// weakFactorTypes are factors we consider too weak to satisfy "strong MFA".
-// SMS/call are subject to SIM-swap; security questions to social engineering.
 var weakFactorTypes = map[string]bool{
 	"sms":               true,
 	"call":              true,
@@ -65,9 +58,6 @@ var weakFactorTypes = map[string]bool{
 	"security_question": true,
 }
 
-// collectUsers lists users matching the given Okta filter and fetches each
-// user's MFA factors. Used by both users_mfa (active users) and
-// users_offboarding (suspended/deprovisioned users).
 func (c *Collector) collectUsers(ref apiv1.EvidenceRef, filter string) (any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -103,7 +93,6 @@ func (c *Collector) collectUsers(ref apiv1.EvidenceRef, filter string) (any, err
 }
 
 func (c *Collector) listUsers(ctx context.Context, filter string) ([]oktaUser, error) {
-	// Single-page (200 users) for v0. Pagination via Link header is a TODO.
 	path := "/api/v1/users?limit=200&filter=" + url.QueryEscape(filter)
 	raw, err := c.get(ctx, path)
 	if err != nil {
@@ -177,7 +166,6 @@ func hasStrongMFA(factors []map[string]any) bool {
 	return false
 }
 
-// --- Okta API types (subset we read) ---
 
 type oktaUser struct {
 	ID      string      `json:"id"`

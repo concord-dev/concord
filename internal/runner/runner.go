@@ -1,4 +1,3 @@
-// Package runner executes a set of controls against an evidence collector.
 package runner
 
 import (
@@ -12,26 +11,21 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// Runner evaluates controls and produces findings.
 type Runner struct {
 	engine    *policy.Engine
 	collector evidence.Collector
 	params    map[string]map[string]any
 }
 
-// New constructs a Runner.
 func New(engine *policy.Engine, collector evidence.Collector) *Runner {
 	return &Runner{engine: engine, collector: collector}
 }
 
-// SetParams installs a per-control parameter override map. Each control's
-// params (keyed by control ID) are exposed to Rego at input._concord.params.
 func (r *Runner) SetParams(p map[string]map[string]any) *Runner {
 	r.params = p
 	return r
 }
 
-// Run evaluates a single control and returns its finding.
 func (r *Runner) Run(ctx context.Context, loaded controls.Loaded) apiv1.Finding {
 	start := time.Now()
 	c := loaded.Control
@@ -87,7 +81,6 @@ func (r *Runner) Run(ctx context.Context, loaded controls.Loaded) apiv1.Finding 
 	return f
 }
 
-// RunAll evaluates every loaded control and returns findings in input order.
 func (r *Runner) RunAll(ctx context.Context, loaded []controls.Loaded) []apiv1.Finding {
 	out := make([]apiv1.Finding, 0, len(loaded))
 	for _, l := range loaded {

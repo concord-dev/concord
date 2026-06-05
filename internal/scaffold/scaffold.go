@@ -1,4 +1,3 @@
-// Package scaffold writes built-in controls and starter config into a user repo.
 package scaffold
 
 import (
@@ -11,18 +10,11 @@ import (
 	"strings"
 )
 
-// Result reports what scaffolding did.
 type Result struct {
 	Written []string
 	Skipped []string
 }
 
-// Frameworks copies the built-in framework tree from src into destDir, honoring an optional
-// allowlist of framework names. If the file already exists at the destination and force is false,
-// it is left untouched and reported in Result.Skipped.
-//
-// src is expected to be rooted such that paths begin with "controls/frameworks/<framework>/...".
-// The "controls/" prefix is stripped on copy so files land at destDir/frameworks/<framework>/...
 func Frameworks(src fs.FS, destDir string, allowed []string, force bool) (Result, error) {
 	allow := toSet(allowed)
 	var r Result
@@ -60,18 +52,12 @@ func Frameworks(src fs.FS, destDir string, allowed []string, force bool) (Result
 	return r, nil
 }
 
-// UpgradeResult classifies each file the walk visited.
 type UpgradeResult struct {
 	New       []string
 	Modified  []string
 	Unchanged []string
 }
 
-// Upgrade compares the embedded controls library against what lives on disk
-// at destDir. With apply=false it returns the diff without touching anything.
-// With apply=true it writes New and Modified files. Files that exist on disk
-// but not in the embedded library are left alone — user-authored controls
-// are never overwritten or removed.
 func Upgrade(src fs.FS, destDir string, allowed []string, apply bool) (UpgradeResult, error) {
 	allow := toSet(allowed)
 	var r UpgradeResult
@@ -127,8 +113,6 @@ func writeBytes(path string, content []byte) error {
 	return os.WriteFile(path, content, 0o644)
 }
 
-// Config writes a starter concord.yaml at destPath unless one already exists and force is false.
-// Returns whether it was written.
 func Config(destPath string, force bool) (bool, error) {
 	if !force {
 		if _, err := os.Stat(destPath); err == nil {
@@ -141,8 +125,6 @@ func Config(destPath string, force bool) (bool, error) {
 	return true, os.WriteFile(destPath, []byte(configTemplate), 0o644)
 }
 
-// GitHubAction writes a starter workflow at destPath unless one already exists and force is false.
-// Returns whether it was written.
 func GitHubAction(destPath string, force bool) (bool, error) {
 	if !force {
 		if _, err := os.Stat(destPath); err == nil {
@@ -184,8 +166,6 @@ func toSet(values []string) map[string]bool {
 	return m
 }
 
-// frameworkAllowed returns true when rel's framework name is in allow, or when allow is empty.
-// rel is expected to look like "frameworks/<framework>/..." or deeper.
 func frameworkAllowed(rel string, allow map[string]bool) bool {
 	if len(allow) == 0 {
 		return true

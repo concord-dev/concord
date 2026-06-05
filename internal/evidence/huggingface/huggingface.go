@@ -15,17 +15,12 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// Collector queries the HuggingFace Hub REST API for model metadata.
 type Collector struct {
 	baseURL string
 	token   string
 	client  *http.Client
 }
 
-// New returns a collector against the public Hub API.
-// token is an HF access token (https://huggingface.co/settings/tokens);
-// optional for public reads but required for private repos and to avoid
-// strict anonymous rate limits.
 func New(baseURL, token string) *Collector {
 	if baseURL == "" {
 		baseURL = "https://huggingface.co"
@@ -37,12 +32,9 @@ func New(baseURL, token string) *Collector {
 	}
 }
 
-// Probe calls /api/whoami-v2 to confirm reachability + auth.
 func (c *Collector) Probe(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	// whoami-v2 needs auth; if no token, fall back to a public endpoint that
-	// always responds (model search with no filter, limit 1).
 	if c.token == "" {
 		if _, err := c.get(ctx, "/api/models?limit=1"); err != nil {
 			return "", err
@@ -63,7 +55,6 @@ func (c *Collector) Probe(ctx context.Context) (string, error) {
 	return "authenticated", nil
 }
 
-// Collect dispatches based on ref.Type.
 func (c *Collector) Collect(cctx evidence.Context, ref apiv1.EvidenceRef) (any, error) {
 	switch ref.Type {
 	case "org_models":
@@ -77,8 +68,6 @@ func (c *Collector) Collect(cctx evidence.Context, ref apiv1.EvidenceRef) (any, 
 	}
 }
 
-// collectOrgModels lists every model under a given author/org. It pulls one
-// page of up to "limit" results (default 200) — pagination is left for v1.
 func (c *Collector) collectOrgModels(ref apiv1.EvidenceRef) (any, error) {
 	author := evidence.StringParam(ref.Params, "author", "")
 	if author == "" {
@@ -114,7 +103,6 @@ func (c *Collector) collectOrgModels(ref apiv1.EvidenceRef) (any, error) {
 	}, nil
 }
 
-// collectModelCard fetches a single repo's metadata. repo_id is "<org>/<name>".
 func (c *Collector) collectModelCard(ref apiv1.EvidenceRef) (any, error) {
 	repoID := evidence.StringParam(ref.Params, "repo_id", "")
 	if repoID == "" {
@@ -175,9 +163,6 @@ func normalizeHFModelDetail(m hfModelDetail) map[string]any {
 	return out
 }
 
-// applyCardData lifts the YAML frontmatter of the model card into top-level
-// fields the policy can read directly. License and datasets are the two fields
-// auditors most often ask about, so we promote them explicitly.
 func applyCardData(into map[string]any, card map[string]any) {
 	if v, ok := card["license"]; ok {
 		into["license"] = v
@@ -223,7 +208,6 @@ func (c *Collector) get(ctx context.Context, path string) ([]byte, error) {
 	return body, nil
 }
 
-// --- HF API types (subset we read) ---
 
 type hfModelListEntry struct {
 	ID           string         `json:"id"`

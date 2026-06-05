@@ -1,6 +1,3 @@
-// Package watcher runs Concord's compliance checks on a periodic schedule,
-// persists each run's findings, and emits state-change events when a control
-// transitions between pass/fail/error across runs.
 package watcher
 
 import (
@@ -16,12 +13,8 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// CheckFunc runs one evaluation cycle and returns the resulting findings.
-// The watcher accepts this as a dependency so cmd-side wiring (controls
-// loading, runner construction, collector registry) stays out of the watch loop.
 type CheckFunc func(ctx context.Context) ([]apiv1.Finding, error)
 
-// Event describes a control's status change between two consecutive runs.
 type Event struct {
 	ControlID string             `json:"control_id"`
 	Title     string             `json:"title"`
@@ -31,28 +24,20 @@ type Event struct {
 	At        time.Time          `json:"at"`
 }
 
-// Options configures a Watcher.
 type Options struct {
 	Interval  time.Duration
 	OutputDir string
 	Once      bool
-	// Now is used in tests to inject a fixed time source.
 	Now func() time.Time
-	// EventSink receives state-change events as they happen. If nil, events
-	// are written to stderr in a one-line text format.
 	EventSink func(Event)
-	// Logger receives operational status lines (start, sleep, errors).
-	// If nil, defaults to stderr.
 	Logger io.Writer
 }
 
-// Watcher executes CheckFunc on a schedule and emits state-change events.
 type Watcher struct {
 	check CheckFunc
 	opts  Options
 }
 
-// New constructs a Watcher.
 func New(check CheckFunc, opts Options) *Watcher {
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
@@ -72,8 +57,6 @@ func New(check CheckFunc, opts Options) *Watcher {
 	return &Watcher{check: check, opts: opts}
 }
 
-// Run executes the watch loop until ctx is cancelled. When opts.Once is true,
-// it runs a single iteration and returns.
 func (w *Watcher) Run(ctx context.Context) error {
 	if err := os.MkdirAll(w.opts.OutputDir, 0o755); err != nil {
 		return fmt.Errorf("creating output dir: %w", err)
@@ -129,8 +112,6 @@ func (w *Watcher) runOnce(ctx context.Context, prev []apiv1.Finding) ([]apiv1.Fi
 	return findings, nil
 }
 
-// Diff returns events for every control whose status changed between prev and
-// curr, plus added/removed controls. Both slices are matched by ControlID.
 func Diff(prev, curr []apiv1.Finding, at time.Time) []Event {
 	prevByID := indexByID(prev)
 	currByID := indexByID(curr)
@@ -187,8 +168,6 @@ func indexByID(f []apiv1.Finding) map[string]apiv1.Finding {
 	return out
 }
 
-// LastRunPath returns the canonical location of the most recent findings file
-// inside outputDir.
 func LastRunPath(outputDir string) string {
 	return filepath.Join(outputDir, "last-run.json")
 }

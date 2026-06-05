@@ -13,9 +13,6 @@ import (
 	"github.com/concord-dev/concord/internal/auth"
 )
 
-// Invitation is a pending or terminal invite for one (org, email). Token is
-// never echoed by the store — the plaintext is returned only by
-// CreateInvitation (mirroring the API-token pattern).
 type Invitation struct {
 	ID         uuid.UUID  `json:"id"`
 	OrgID      uuid.UUID  `json:"org_id"`
@@ -31,7 +28,6 @@ type Invitation struct {
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
-// CreateInvitationParams is the shape callers pass to CreateInvitation.
 type CreateInvitationParams struct {
 	OrgID     uuid.UUID
 	Email     string
@@ -40,14 +36,6 @@ type CreateInvitationParams struct {
 	TTL       time.Duration // defaults to 7 days when zero
 }
 
-// CreateInvitation mints a new pending invitation. Any existing pending row
-// for the same (org_id, email) is revoked in the same transaction — the
-// partial-unique index requires this, and it gives operators a clean
-// "re-invite" UX without unique-violation errors.
-//
-// Returns the persisted row + the plaintext token. The plaintext is the only
-// thing the caller can use to share the link; the store retains only its
-// sha256.
 func (s *Store) CreateInvitation(ctx context.Context, p CreateInvitationParams) (Invitation, string, error) {
 	if p.Email = strings.TrimSpace(p.Email); p.Email == "" {
 		return Invitation{}, "", errors.New("email is required")
@@ -73,7 +61,6 @@ func (s *Store) CreateInvitation(ctx context.Context, p CreateInvitationParams) 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck — explicit Commit below
 
-	// Supersede any prior pending invite for the same (org, email).
 	if _, err := tx.Exec(ctx,
 		`UPDATE invitation
 		 SET revoked_at = now(), revoked_by = $1
@@ -98,7 +85,6 @@ func (s *Store) CreateInvitation(ctx context.Context, p CreateInvitationParams) 
 		return Invitation{}, "", fmt.Errorf("inserting invitation: %w", err)
 	}
 
-	// Join role name for the returned view (saves the handler a round trip).
 	if err := tx.QueryRow(ctx,
 		`SELECT name FROM role WHERE id = $1`, inv.RoleID,
 	).Scan(&inv.RoleName); err != nil {
@@ -111,8 +97,6 @@ func (s *Store) CreateInvitation(ctx context.Context, p CreateInvitationParams) 
 	return inv, plain, nil
 }
 
-// ListPendingInvitations returns active (not accepted, not revoked, not yet
-// expired) invitations for an org, oldest first.
 func (s *Store) ListPendingInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT i.id, i.org_id, i.email, i.role_id, r.name, i.invited_by,
@@ -143,11 +127,6 @@ func (s *Store) ListPendingInvitations(ctx context.Context, orgID uuid.UUID) ([]
 	return out, rows.Err()
 }
 
-// GetInvitationByToken looks up an invitation by its plaintext token. Only
-// pending (not accepted, not revoked) rows match; expiry is reported
-// separately so the caller can produce a useful error message.
-//
-// The returned Invitation always has RoleName populated.
 func (s *Store) GetInvitationByToken(ctx context.Context, plaintext string) (Invitation, error) {
 	hashBytes, err := hexToBytes(auth.HashSecret(plaintext))
 	if err != nil {
@@ -172,8 +151,6 @@ func (s *Store) GetInvitationByToken(ctx context.Context, plaintext string) (Inv
 	return inv, err
 }
 
-// RevokeInvitation soft-deletes a pending invitation. ErrNotFound when the
-// id isn't in this org or is already accepted/revoked.
 func (s *Store) RevokeInvitation(ctx context.Context, orgID, invID uuid.UUID, revokedBy *uuid.UUID) error {
 	ct, err := s.pool.Exec(ctx,
 		`UPDATE invitation
@@ -190,20 +167,13 @@ func (s *Store) RevokeInvitation(ctx context.Context, orgID, invID uuid.UUID, re
 	return nil
 }
 
-// AcceptInvitationParams carries everything an /invitations/accept handler
-// needs to commit the user side of the flow.
 type AcceptInvitationParams struct {
-	// Plaintext token from the URL. Hashed before lookup.
 	Token string
-	// New-user fields. Ignored when the invitation's email already maps to
-	// an existing user.
 	FirstName string
 	LastName  string
 	Password  string
 }
 
-// AcceptInvitationResult tells the caller what just happened so the handler
-// can shape the response (and decide whether to issue a session token).
 type AcceptInvitationResult struct {
 	Invitation    Invitation
 	User          User
@@ -211,17 +181,6 @@ type AcceptInvitationResult struct {
 	AssignedRole  bool // true when AssignRole inserted (false on idempotent re-accept of the same user/org/role)
 }
 
-// AcceptInvitation completes the flow: optionally creates the user, attaches
-// them to the org with the invited role, and marks the invitation accepted —
-// all in one transaction so a partial failure leaves no zombie state.
-//
-// Token validation rules:
-//   - Unknown / accepted / revoked → ErrNotFound
-//   - Expired → returns a sentinel error so the handler can 410 it cleanly
-//
-// Idempotency: re-accepting a token that's already accepted returns
-// ErrNotFound (it's no longer pending). Callers that need to verify acceptance
-// after the fact should query the row by id, not re-submit the token.
 func (s *Store) AcceptInvitation(ctx context.Context, p AcceptInvitationParams) (AcceptInvitationResult, error) {
 	if strings.TrimSpace(p.Token) == "" {
 		return AcceptInvitationResult{}, errors.New("token is required")
@@ -237,8 +196,6 @@ func (s *Store) AcceptInvitation(ctx context.Context, p AcceptInvitationParams) 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// SELECT FOR UPDATE so two concurrent accepts of the same token can't both
-	// win. The loser gets a "no rows" on its second pass and returns ErrNotFound.
 	var inv Invitation
 	err = tx.QueryRow(ctx,
 		`SELECT i.id, i.org_id, i.email, i.role_id, r.name, i.invited_by,
@@ -264,7 +221,6 @@ func (s *Store) AcceptInvitation(ctx context.Context, p AcceptInvitationParams) 
 		return AcceptInvitationResult{}, ErrInvitationExpired
 	}
 
-	// Resolve the user: existing-by-email, or create from p.{FirstName, LastName, Password}.
 	result := AcceptInvitationResult{Invitation: inv}
 	var u User
 	err = tx.QueryRow(ctx,
@@ -295,8 +251,6 @@ func (s *Store) AcceptInvitation(ctx context.Context, p AcceptInvitationParams) 
 	}
 	result.User = u
 
-	// AssignRole equivalent inside the txn (ON CONFLICT DO NOTHING so a
-	// re-invite of an already-attached user is harmless).
 	ct, err := tx.Exec(ctx,
 		`INSERT INTO user_org_role(user_id, org_id, role_id)
 		 VALUES ($1, $2, $3)
@@ -307,7 +261,6 @@ func (s *Store) AcceptInvitation(ctx context.Context, p AcceptInvitationParams) 
 	}
 	result.AssignedRole = ct.RowsAffected() > 0
 
-	// Mark the invitation accepted.
 	if _, err := tx.Exec(ctx,
 		`UPDATE invitation SET accepted_at = now(), accepted_by = $1
 		 WHERE id = $2`,
@@ -319,17 +272,10 @@ func (s *Store) AcceptInvitation(ctx context.Context, p AcceptInvitationParams) 
 	if err := tx.Commit(ctx); err != nil {
 		return AcceptInvitationResult{}, err
 	}
-	// Reflect the freshly-set timestamps in the returned struct for the caller.
 	now := time.Now()
 	result.Invitation.AcceptedAt = &now
 	result.Invitation.AcceptedBy = &u.ID
 	return result, nil
 }
 
-// ErrInvitationExpired is returned by AcceptInvitation when the token exists
-// but its expires_at has passed. Distinct from ErrNotFound so the handler can
-// produce a meaningful "this link expired, ask for a fresh one" message
-// rather than the generic "invalid invitation" we use for unknown / revoked
-// / already-accepted (we collapse those to ErrNotFound deliberately — they
-// shouldn't be distinguishable from an attacker's perspective).
 var ErrInvitationExpired = errors.New("invitation expired")

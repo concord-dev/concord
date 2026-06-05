@@ -19,14 +19,12 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// Collector queries the GitHub REST API for repository evidence.
 type Collector struct {
 	token   string
 	baseURL string
 	client  *http.Client
 }
 
-// New returns a Collector configured with the given token.
 func New(token string) *Collector {
 	return &Collector{
 		token:   token,
@@ -35,15 +33,11 @@ func New(token string) *Collector {
 	}
 }
 
-// SetBaseURL overrides the API base URL. Intended for tests.
 func (c *Collector) SetBaseURL(url string) *Collector {
 	c.baseURL = url
 	return c
 }
 
-// Probe calls GET /user as a low-cost reachability + auth check. Returns the
-// authenticated login (e.g. "octocat") or a wrapped error suitable for
-// surfacing in `concord doctor`.
 func (c *Collector) Probe(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -59,7 +53,6 @@ func (c *Collector) Probe(ctx context.Context) (string, error) {
 	return "authenticated", nil
 }
 
-// Collect dispatches based on ref.Type.
 func (c *Collector) Collect(cctx evidence.Context, ref apiv1.EvidenceRef) (any, error) {
 	switch ref.Type {
 	case "branch_protection":
@@ -116,7 +109,6 @@ func (c *Collector) collectBranchProtection(ref apiv1.EvidenceRef) (any, error) 
 func (c *Collector) collectOrgSecurityPolicy(ref apiv1.EvidenceRef) (any, error) {
 	org := evidence.StringParam(ref.Params, "org", "")
 	if org == "" {
-		// Auto-derive from a "owner/repo" string if provided.
 		repo := evidence.StringParam(ref.Params, "repo", "")
 		if idx := strings.Index(repo, "/"); idx > 0 {
 			org = repo[:idx]
@@ -137,7 +129,6 @@ func (c *Collector) collectOrgSecurityPolicy(ref apiv1.EvidenceRef) (any, error)
 		return nil, fmt.Errorf("unexpected org response shape")
 	}
 
-	// Whitelist the security-relevant fields so policies have a stable, named surface.
 	keys := []string{
 		"two_factor_requirement_enabled",
 		"members_can_create_repositories",
@@ -189,9 +180,6 @@ func (c *Collector) collectFileGlob(ref apiv1.EvidenceRef) (any, error) {
 
 		listing, err := c.getJSON(ctx, fmt.Sprintf("/repos/%s/contents/%s", repo, dir))
 		if err != nil {
-			// 404 on a doc directory means "no documents here yet" — fall
-			// through with an empty listing so the policy's "no docs" deny
-			// rule fires cleanly instead of surfacing a raw HTTP error.
 			if isGitHubNotFound(err) {
 				continue
 			}
@@ -277,8 +265,6 @@ func decodeContent(obj map[string]any) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(cleaned)
 }
 
-// isGitHubNotFound returns true when the error wraps a 404 from the GitHub API.
-// Errors from getJSON include the response body which contains "returned 404" — we sniff that.
 func isGitHubNotFound(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "returned 404")
 }

@@ -23,7 +23,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// ExecutorConfig tunes timeouts, retry math, and body capture. Zero fields fall back to defaults.
 type ExecutorConfig struct {
 	HTTPClient   *http.Client
 	MaxAttempts  int
@@ -33,7 +32,6 @@ type ExecutorConfig struct {
 	UserAgent    string
 }
 
-// Executor performs one webhook POST and records the result in webhook_delivery.
 type Executor struct {
 	store    *store.Store
 	cfg      ExecutorConfig
@@ -43,10 +41,8 @@ type Executor struct {
 	breakers *Breakers
 }
 
-// SetBreakers attaches a circuit-breaker pool. Nil disables.
 func (e *Executor) SetBreakers(b *Breakers) { e.breakers = b }
 
-// ExecutorMetrics is the set of optional bumps the Executor pushes through.
 type ExecutorMetrics struct {
 	AttemptStarted  func(kind string, retry bool)
 	AttemptResult   func(kind, outcome string)
@@ -59,7 +55,6 @@ var defaultHTTPClient = &http.Client{
 	Transport: otelhttp.NewTransport(http.DefaultTransport),
 }
 
-// NewExecutor returns an Executor with defaults applied. store must be non-nil.
 func NewExecutor(s *store.Store, cfg ExecutorConfig, metrics ExecutorMetrics) (*Executor, error) {
 	if s == nil {
 		return nil, errors.New("worker: NewExecutor needs a Store")
@@ -90,8 +85,6 @@ func NewExecutor(s *store.Store, cfg ExecutorConfig, metrics ExecutorMetrics) (*
 	}, nil
 }
 
-// Attempt POSTs body to url and records the result on deliveryID. Pass non-nil tx
-// to run state UPDATEs inside the caller's transaction.
 func (e *Executor) Attempt(ctx context.Context, tx pgx.Tx, deliveryID uuid.UUID, kind, url, secret string, body []byte, retry bool) (store.WebhookDeliveryStatus, error) {
 	if e.metrics.AttemptStarted != nil {
 		e.metrics.AttemptStarted(kind, retry)
@@ -186,7 +179,6 @@ func (e *Executor) doRequest(ctx context.Context, url, secret, kind string, body
 		_, _ = io.Copy(io.Discard, resp.Body)
 		status = resp.StatusCode
 		errMsg = fmt.Sprintf("non-2xx response %d: %s", resp.StatusCode, buf.String())
-		// Non-2xx counts as a breaker-side failure so a persistently-500 receiver trips.
 		return errors.New("non-2xx")
 	})
 	if errors.Is(bErr, ErrCircuitOpen) {
@@ -228,7 +220,6 @@ func (e *Executor) backoff() time.Duration {
 	return d
 }
 
-// BackoffForAttempt returns the deterministic exponential wait for attempt n.
 func BackoffForAttempt(cfg ExecutorConfig, attempt int) time.Duration {
 	if cfg.BackoffBase <= 0 {
 		cfg.BackoffBase = 1 * time.Second

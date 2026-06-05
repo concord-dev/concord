@@ -1,4 +1,3 @@
-// Package controls loads and validates compliance control definitions.
 package controls
 
 import (
@@ -13,13 +12,11 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// Loaded bundles a parsed control with its on-disk path.
 type Loaded struct {
 	Control apiv1.Control
 	Path    string
 }
 
-// Load walks root and returns every parseable control YAML file.
 func Load(root string) ([]Loaded, error) {
 	var out []Loaded
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
@@ -45,7 +42,6 @@ func Load(root string) ([]Loaded, error) {
 	return out, err
 }
 
-// LoadFile parses and validates a single control YAML file.
 func LoadFile(path string) (apiv1.Control, error) {
 	var c apiv1.Control
 	raw, err := os.ReadFile(path)

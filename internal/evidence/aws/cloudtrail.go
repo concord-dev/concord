@@ -11,8 +11,6 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// collectCloudTrailTrails returns every trail in the account joined with its
-// live logging status.
 func (c *Collector) collectCloudTrailTrails(ref apiv1.EvidenceRef) (any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

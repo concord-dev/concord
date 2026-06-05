@@ -10,7 +10,6 @@ import (
 	"github.com/sony/gobreaker"
 )
 
-// BreakerConfig tunes the per-host circuit breaker pool. Zero fields fall back to defaults.
 type BreakerConfig struct {
 	MaxConsecutiveFails uint32
 	OpenTimeout         time.Duration
@@ -19,10 +18,8 @@ type BreakerConfig struct {
 	OnStateChange       func(host string, from, to gobreaker.State)
 }
 
-// ErrCircuitOpen is returned by Execute when the per-host breaker is open.
 var ErrCircuitOpen = errors.New("worker: circuit breaker open for receiver")
 
-// Breakers is the per-host pool of gobreaker.CircuitBreaker instances. Nil receiver = disabled.
 type Breakers struct {
 	cfg BreakerConfig
 
@@ -36,7 +33,6 @@ type pooledBreaker struct {
 	lastUse uint64
 }
 
-// NewBreakers constructs a Breakers pool with defaults applied.
 func NewBreakers(cfg BreakerConfig) *Breakers {
 	if cfg.MaxConsecutiveFails == 0 {
 		cfg.MaxConsecutiveFails = 5
@@ -56,8 +52,6 @@ func NewBreakers(cfg BreakerConfig) *Breakers {
 	}
 }
 
-// Execute runs fn behind the per-host breaker keyed off targetURL.
-// A nil receiver bypasses the breaker.
 func (b *Breakers) Execute(targetURL string, fn func() error) error {
 	if b == nil {
 		return fn()

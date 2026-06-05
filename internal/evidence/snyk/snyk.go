@@ -15,8 +15,6 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// Collector queries Snyk's REST API for organisation-scoped issue data.
-// It speaks the versioned /rest API rather than the legacy /v1 surface.
 type Collector struct {
 	baseURL    string
 	token      string
@@ -24,8 +22,6 @@ type Collector struct {
 	client     *http.Client
 }
 
-// New returns a collector configured for the given API token.
-// The default base URL is https://api.snyk.io; override via SetBaseURL for tests.
 func New(token string) *Collector {
 	return &Collector{
 		baseURL:    "https://api.snyk.io",
@@ -35,14 +31,10 @@ func New(token string) *Collector {
 	}
 }
 
-// SetBaseURL overrides the API host. Intended for tests against httptest.
 func (c *Collector) SetBaseURL(u string) *Collector { c.baseURL = u; return c }
 
-// SetAPIVersion pins a specific Snyk REST API date version.
 func (c *Collector) SetAPIVersion(v string) *Collector { c.apiVersion = v; return c }
 
-// Probe lists at most one issue against the org as a reachability + auth check.
-// Returns the org id on success.
 func (c *Collector) Probe(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -52,7 +44,6 @@ func (c *Collector) Probe(ctx context.Context) (string, error) {
 	return "authenticated against " + c.baseURL, nil
 }
 
-// Collect dispatches based on ref.Type.
 func (c *Collector) Collect(cctx evidence.Context, ref apiv1.EvidenceRef) (any, error) {
 	switch ref.Type {
 	case "org_issues":
@@ -109,9 +100,6 @@ func (c *Collector) collectOrgIssues(ref apiv1.EvidenceRef) (any, error) {
 	}, nil
 }
 
-// collectContainerIssues lists every container-type project in the org and
-// pulls open issues across them. The result attaches the originating project
-// name to each issue so policies can identify which image is affected.
 func (c *Collector) collectContainerIssues(ref apiv1.EvidenceRef) (any, error) {
 	orgID := evidence.StringParam(ref.Params, "org_id", "")
 	if orgID == "" {
@@ -316,9 +304,6 @@ func summarizeSnykIssues(issues []map[string]any) map[string]any {
 	}
 }
 
-// nextPath converts a fully-qualified or relative next-link into a path Snyk's
-// get() can call. Returns "" when there is no next page. We strip baseURL so
-// the get() helper can prepend it cleanly without producing host duplication.
 func nextPath(next, baseURL string) string {
 	if next == "" {
 		return ""

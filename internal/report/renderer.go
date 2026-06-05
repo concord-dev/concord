@@ -1,4 +1,3 @@
-// Package report renders findings in human and machine formats.
 package report
 
 import (
@@ -8,7 +7,6 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// Summary captures aggregate counts across findings.
 type Summary struct {
 	Pass int `json:"pass"`
 	Fail int `json:"fail"`
@@ -16,7 +14,6 @@ type Summary struct {
 	Warn int `json:"warnings"`
 }
 
-// Summarize returns a Summary for findings without rendering anything.
 func Summarize(findings []apiv1.Finding) Summary {
 	var s Summary
 	for _, f := range findings {
@@ -33,20 +30,14 @@ func Summarize(findings []apiv1.Finding) Summary {
 	return s
 }
 
-// Renderer formats a set of findings to a writer and returns the aggregate Summary.
 type Renderer interface {
 	Render(w io.Writer, findings []apiv1.Finding) (Summary, error)
 }
 
-// Opts carries renderer configuration that doesn't fit on the Renderer interface
-// itself (e.g., org name for the public trust portal).
 type Opts struct {
 	OrgName string
 }
 
-// RendererFor returns the renderer for the named format.
-// "" / "text" → coloured TTY output; "json" / "oscal" / "markdown" / "md" →
-// machine or doc output; "trust-portal" → public-facing HTML page.
 func RendererFor(format string, opts Opts) (Renderer, error) {
 	switch format {
 	case "", "text":

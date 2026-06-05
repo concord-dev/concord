@@ -13,9 +13,6 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// collectS3BucketEncryption pulls every bucket's server-side encryption config.
-// Buckets with no encryption get a `configured: false` marker so policies can
-// flag them without a special-case error.
 func (c *Collector) collectS3BucketEncryption(ref apiv1.EvidenceRef) (any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -77,9 +74,6 @@ func isNoEncryptionError(err error) bool {
 	return false
 }
 
-// collectS3PublicAccessBlock returns every bucket's PAB settings. Buckets
-// without a PAB configured get explicit `false` flags so the policy can
-// distinguish "not configured" from "all four flags off".
 func (c *Collector) collectS3PublicAccessBlock(ref apiv1.EvidenceRef) (any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

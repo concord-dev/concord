@@ -1,5 +1,3 @@
-// Package auth holds the cryptographic helpers shared by the store and HTTP
-// layers: argon2id password hashing and constant-time secret generation.
 package auth
 
 import (
@@ -13,8 +11,6 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-// Argon2id parameters tuned for a 2024-era server. Aligns with OWASP guidance:
-// memory dominates the cost so attackers can't trivially throw GPUs at it.
 const (
 	argonTime    = 3
 	argonMemory  = 64 * 1024 // 64 MiB
@@ -23,16 +19,8 @@ const (
 	argonSaltLen = 16
 )
 
-// ErrInvalidPasswordHash is returned by VerifyPassword when the stored hash
-// does not parse as a PHC-encoded argon2id string.
 var ErrInvalidPasswordHash = errors.New("password hash is not a valid argon2id string")
 
-// HashPassword returns a PHC-encoded argon2id hash of plaintext:
-//
-//	$argon2id$v=19$m=65536,t=3,p=4$<b64-salt>$<b64-hash>
-//
-// The format is self-describing so a future migration to different parameters
-// (or a different algorithm entirely) can coexist with old hashes.
 func HashPassword(plaintext string) (string, error) {
 	if plaintext == "" {
 		return "", errors.New("password must not be empty")
@@ -49,11 +37,8 @@ func HashPassword(plaintext string) (string, error) {
 	), nil
 }
 
-// VerifyPassword checks plaintext against an encoded hash. Returns
-// (matched, error). Constant-time comparison protects against timing oracles.
 func VerifyPassword(plaintext, encoded string) (bool, error) {
 	parts := strings.Split(encoded, "$")
-	// Expected: ["", "argon2id", "v=19", "m=...,t=...,p=...", "<salt>", "<hash>"]
 	if len(parts) != 6 || parts[1] != "argon2id" {
 		return false, ErrInvalidPasswordHash
 	}

@@ -1,6 +1,3 @@
-// Package notify provides event sinks that turn watcher state-change events
-// into outgoing notifications (stderr, Slack incoming-webhook, generic JSON
-// webhook). Every sink is a func(Event) so they compose via Multi.
 package notify
 
 import (
@@ -16,13 +13,8 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// Sink is the contract every notifier satisfies. It must be safe to call from
-// inside the watch loop and should not block longer than the configured client
-// timeout — the loop runs sequentially per iteration.
 type Sink = func(watcher.Event)
 
-// Stderr writes a one-line text representation to w. Used as the default sink
-// when neither Slack nor a generic webhook is configured.
 func Stderr(w io.Writer) Sink {
 	return func(e watcher.Event) {
 		fmt.Fprintf(w, "[%s] %s: %s → %s (%s)\n",
@@ -30,8 +22,6 @@ func Stderr(w io.Writer) Sink {
 	}
 }
 
-// Multi fans out a single event to every supplied sink in order. nil sinks
-// are skipped so callers can wire them conditionally.
 func Multi(sinks ...Sink) Sink {
 	return func(e watcher.Event) {
 		for _, s := range sinks {
@@ -42,10 +32,6 @@ func Multi(sinks ...Sink) Sink {
 	}
 }
 
-// Slack posts each event as a Slack incoming-webhook message. The payload uses
-// block-kit so the channel rendering shows the control id, transition, and
-// reason as separate fields. Errors are written to errOut; they never block
-// the watch loop.
 func Slack(webhookURL string, client *http.Client, errOut io.Writer) Sink {
 	if client == nil {
 		client = defaultClient()
@@ -78,9 +64,6 @@ func Slack(webhookURL string, client *http.Client, errOut io.Writer) Sink {
 	}
 }
 
-// Webhook POSTs the raw Event as JSON to url. Suitable for hooking into any
-// generic alerting/SIEM/automation pipeline (PagerDuty events API, n8n,
-// Tines, etc.). Each event becomes one request.
 func Webhook(url string, client *http.Client, errOut io.Writer) Sink {
 	if client == nil {
 		client = defaultClient()
@@ -113,9 +96,6 @@ func Webhook(url string, client *http.Client, errOut io.Writer) Sink {
 	}
 }
 
-// slackPayload renders an event into a minimal block-kit message. The colour
-// hint is encoded in the first emoji rather than Slack's "attachments" legacy
-// path, which keeps the payload aligned with the modern incoming-webhook spec.
 func slackPayload(e watcher.Event) map[string]any {
 	emoji := severityEmoji(e)
 	header := fmt.Sprintf("%s %s — %s", emoji, e.ControlID, e.Reason)

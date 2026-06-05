@@ -9,11 +9,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// RunStatus enumerates the terminal states an agent-submitted run can carry.
-// `succeeded` is what every successful POST /v1/orgs/{slug}/runs writes;
-// `failed` is reserved for agents that want to report a hard error from
-// their own collectors. The legacy `pending` / `running` states from the
-// server-side worker era are gone — runs land terminal.
 type RunStatus string
 
 const (
@@ -21,16 +16,12 @@ const (
 	RunFailed    RunStatus = "failed"
 )
 
-// RunSource describes how a run row got into the table. Single value today
-// (`agent`) — the field is kept to make future provenance (e.g. operator
-// uploads, federated runs) a zero-migration addition.
 type RunSource string
 
 const (
 	RunSourceAgent RunSource = "agent"
 )
 
-// Run is the row shape for one evaluation cycle.
 type Run struct {
 	ID               uuid.UUID  `json:"id"`
 	OrgID            uuid.UUID  `json:"org_id"`
@@ -46,7 +37,6 @@ type Run struct {
 	AgentVersion     string     `json:"agent_version,omitempty"`
 }
 
-// SubmitRunParams carries an agent-completed run for direct insertion.
 type SubmitRunParams struct {
 	OrgID        uuid.UUID
 	TokenID      *uuid.UUID
@@ -59,8 +49,6 @@ type SubmitRunParams struct {
 	Findings     []byte
 }
 
-// SubmitRun inserts a completed run from an agent push. Unlike CreateRun,
-// this is a single-shot insert: no pending → running transition.
 func (s *Store) SubmitRun(ctx context.Context, p SubmitRunParams) (Run, error) {
 	if p.Source != RunSourceAgent {
 		return Run{}, errors.New("SubmitRun requires Source = RunSourceAgent")
@@ -92,7 +80,6 @@ func (s *Store) SubmitRun(ctx context.Context, p SubmitRunParams) (Run, error) {
 	return r, err
 }
 
-// GetRun fetches a run by ID, scoped to orgID.
 func (s *Store) GetRun(ctx context.Context, orgID, runID uuid.UUID) (Run, error) {
 	var r Run
 	err := s.pool.QueryRow(ctx,
@@ -112,7 +99,6 @@ func (s *Store) GetRun(ctx context.Context, orgID, runID uuid.UUID) (Run, error)
 	return r, err
 }
 
-// ListRuns returns the last `limit` runs for an organization, newest first.
 func (s *Store) ListRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]Run, error) {
 	if limit <= 0 {
 		limit = 50
@@ -141,10 +127,6 @@ func (s *Store) ListRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]Run
 	return out, rows.Err()
 }
 
-// GetLatestSucceededRun returns the most recent run for orgID whose
-// status is RunSucceeded, including its findings + summary JSON. Used by
-// the audit-package export ("point-in-time evidence") and the trust
-// portal. Returns ErrNotFound when the org has no successful runs yet.
 func (s *Store) GetLatestSucceededRun(ctx context.Context, orgID uuid.UUID) (Run, error) {
 	var r Run
 	err := s.pool.QueryRow(ctx,
@@ -167,14 +149,6 @@ func (s *Store) GetLatestSucceededRun(ctx context.Context, orgID uuid.UUID) (Run
 	return r, err
 }
 
-// GetPreviousRunFindings returns the findings JSONB blob + run ID of the
-// most recent run for `orgID` that is NOT `excludeRunID`. Used by the
-// drift detector inside SubmitRun: pass the freshly-inserted run's ID as
-// `excludeRunID` and you get its immediate predecessor.
-//
-// Returns ErrNotFound when no prior run exists (i.e. this org's first
-// run). Findings can be `[]` legitimately — caller distinguishes via the
-// (nil, ErrNotFound) vs ([]byte{...}, nil) split, not via length.
 func (s *Store) GetPreviousRunFindings(ctx context.Context, orgID, excludeRunID uuid.UUID) ([]byte, uuid.UUID, error) {
 	var (
 		priorID  uuid.UUID
@@ -194,7 +168,6 @@ func (s *Store) GetPreviousRunFindings(ctx context.Context, orgID, excludeRunID 
 	return findings, priorID, err
 }
 
-// nullIfEmpty converts an empty string to a nil interface so pgx writes SQL NULL.
 func nullIfEmpty(s string) any {
 	if s == "" {
 		return nil

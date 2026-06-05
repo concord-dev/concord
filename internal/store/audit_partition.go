@@ -5,9 +5,6 @@ import (
 	"time"
 )
 
-// AuditPartition is the row shape concord_ensure_audit_partition
-// returns. Distinct from EventOutboxRow et al. — this is partition
-// bookkeeping, not domain data.
 type AuditPartition struct {
 	Name       string    `json:"name"`
 	RangeStart time.Time `json:"range_start"`
@@ -15,16 +12,6 @@ type AuditPartition struct {
 	Created    bool      `json:"created"`
 }
 
-// EnsureAuditPartition idempotently creates the monthly audit_event
-// partition that contains month. Returns the partition's name and
-// bounds, plus a boolean indicating whether this call actually
-// created the partition (false → it already existed).
-//
-// The PL/pgSQL function does the heavy lifting (locking semantics,
-// name derivation, range arithmetic); this Go wrapper just calls it.
-// Idempotent + safe to invoke concurrently from multiple server
-// replicas — each replica that wins the race creates the partition;
-// the rest see "already existed" and move on.
 func (s *Store) EnsureAuditPartition(ctx context.Context, month time.Time) (AuditPartition, error) {
 	var p AuditPartition
 	err := s.pool.QueryRow(ctx,
@@ -35,14 +22,7 @@ func (s *Store) EnsureAuditPartition(ctx context.Context, month time.Time) (Audi
 	return p, err
 }
 
-// ListAuditPartitions returns every audit_event partition currently
-// attached to the parent, ordered by their range start. Operators
-// use this to verify next month exists ahead of the rollover.
 func (s *Store) ListAuditPartitions(ctx context.Context) ([]AuditPartition, error) {
-	// Query pg_inherits to find every partition of audit_event, then
-	// read the partition expression to recover the bounds. The
-	// expression is stored as "FOR VALUES FROM ('2026-06-01') TO ('2026-07-01')"
-	// so we parse it via pg_get_expr.
 	rows, err := s.pool.Query(ctx, `
 		SELECT
 		  c.relname,

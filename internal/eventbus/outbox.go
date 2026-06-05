@@ -15,17 +15,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Outbox is the persistence surface for the event_outbox table.
 type Outbox struct {
 	pool *pgxpool.Pool
 }
 
-// NewOutbox binds an Outbox to the shared pgxpool.
 func NewOutbox(pool *pgxpool.Pool) *Outbox {
 	return &Outbox{pool: pool}
 }
 
-// EnqueueTx inserts evt into event_outbox under tx. Pass nil tx to use the pool directly.
 func (o *Outbox) EnqueueTx(ctx context.Context, tx pgx.Tx, evt Event) (uuid.UUID, error) {
 	if err := (&evt).validate(); err != nil {
 		return uuid.Nil, err
@@ -53,7 +50,6 @@ func (o *Outbox) EnqueueTx(ctx context.Context, tx pgx.Tx, evt Event) (uuid.UUID
 	return id, nil
 }
 
-// Enqueue is EnqueueTx against the pool (no transaction).
 func (o *Outbox) Enqueue(ctx context.Context, evt Event) (uuid.UUID, error) {
 	return o.EnqueueTx(ctx, nil, evt)
 }
@@ -137,7 +133,6 @@ func (o *Outbox) markFailed(ctx context.Context, tx pgx.Tx, id uuid.UUID, errStr
 	return err
 }
 
-// LagSeconds returns the age (s) of the oldest unpublished, non-dead row, or 0 if none.
 func (o *Outbox) LagSeconds(ctx context.Context, maxAttempts int) (float64, error) {
 	var secs *float64
 	err := o.pool.QueryRow(ctx,
@@ -155,7 +150,6 @@ func (o *Outbox) LagSeconds(ctx context.Context, maxAttempts int) (float64, erro
 	return *secs, nil
 }
 
-// CleanupPublished deletes published rows older than retain; returns rows removed.
 func (o *Outbox) CleanupPublished(ctx context.Context, retain time.Duration) (int64, error) {
 	tag, err := o.pool.Exec(ctx,
 		`DELETE FROM event_outbox
@@ -168,7 +162,6 @@ func (o *Outbox) CleanupPublished(ctx context.Context, retain time.Duration) (in
 	return tag.RowsAffected(), nil
 }
 
-// DispatcherConfig tunes the Dispatcher loop. Zero fields fall back to defaults.
 type DispatcherConfig struct {
 	PollInterval    time.Duration
 	BusyInterval    time.Duration
@@ -181,7 +174,6 @@ type DispatcherConfig struct {
 	CleanupRetain   time.Duration
 }
 
-// Dispatcher polls the outbox and ships rows to a Publisher.
 type Dispatcher struct {
 	outbox    *Outbox
 	publisher Publisher
@@ -191,7 +183,6 @@ type Dispatcher struct {
 	rndMu     sync.Mutex
 }
 
-// DispatcherMetrics exposes optional metric callbacks; nil fields are no-ops.
 type DispatcherMetrics struct {
 	Enqueued    func(kind string)
 	Published   func(kind string)
@@ -203,7 +194,6 @@ type DispatcherMetrics struct {
 	TickError   func(stage string, err error)
 }
 
-// NewDispatcher fills defaults and returns a ready-to-run Dispatcher.
 func NewDispatcher(outbox *Outbox, publisher Publisher, cfg DispatcherConfig, metrics DispatcherMetrics) (*Dispatcher, error) {
 	if outbox == nil {
 		return nil, errors.New("eventbus: NewDispatcher needs an Outbox")
@@ -248,7 +238,6 @@ func NewDispatcher(outbox *Outbox, publisher Publisher, cfg DispatcherConfig, me
 	}, nil
 }
 
-// Run is the main loop. Blocks until ctx is cancelled.
 func (d *Dispatcher) Run(ctx context.Context) {
 	slog.Info("event dispatcher: starting",
 		slog.Duration("poll", d.cfg.PollInterval),

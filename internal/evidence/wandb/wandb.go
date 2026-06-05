@@ -15,17 +15,12 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// Collector queries the Weights & Biases GraphQL API for model-registry
-// evidence. The returned shape matches MLflow's model_registry output so the
-// same ISO42001 policies can consume evidence from either platform.
 type Collector struct {
 	baseURL string
 	apiKey  string
 	client  *http.Client
 }
 
-// New returns a collector configured against the W&B public API
-// (https://api.wandb.ai). apiKey is the user/service API key from wandb.me/authorize.
 func New(baseURL, apiKey string) *Collector {
 	if baseURL == "" {
 		baseURL = "https://api.wandb.ai"
@@ -37,7 +32,6 @@ func New(baseURL, apiKey string) *Collector {
 	}
 }
 
-// Probe runs a minimal `viewer { username }` GraphQL query to verify auth.
 func (c *Collector) Probe(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -57,7 +51,6 @@ func (c *Collector) Probe(ctx context.Context) (string, error) {
 	return "authenticated", nil
 }
 
-// Collect dispatches based on ref.Type.
 func (c *Collector) Collect(cctx evidence.Context, ref apiv1.EvidenceRef) (any, error) {
 	switch ref.Type {
 	case "model_registry":
@@ -69,8 +62,6 @@ func (c *Collector) Collect(cctx evidence.Context, ref apiv1.EvidenceRef) (any, 
 	}
 }
 
-// collectModelRegistry pulls the model artifact collections under the given
-// W&B entity (and optional project filter) and returns an MLflow-shaped result.
 func (c *Collector) collectModelRegistry(ref apiv1.EvidenceRef) (any, error) {
 	entityName := evidence.StringParam(ref.Params, "entity", "")
 	if entityName == "" {
@@ -109,10 +100,6 @@ func (c *Collector) collectModelRegistry(ref apiv1.EvidenceRef) (any, error) {
 	}, nil
 }
 
-// normalizeWandbCollection produces an MLflow-compatible model entry:
-// a "production" version is the artifact with alias "production" or "prod",
-// and the collection's tags + the production artifact's metadata are promoted
-// to top-level fields so Rego can read them directly.
 func normalizeWandbCollection(project string, coll wandbArtifactCollection) map[string]any {
 	prod := pickWandbProductionArtifact(coll)
 	tags := mergeWandbTags(coll.Tags.Edges, prod.metadata())
@@ -134,8 +121,6 @@ func normalizeWandbCollection(project string, coll wandbArtifactCollection) map[
 	return model
 }
 
-// pickWandbProductionArtifact returns the first artifact under coll that has
-// an alias of "production" or "prod". Falls back to zero value if none.
 func pickWandbProductionArtifact(coll wandbArtifactCollection) wandbArtifact {
 	for _, edge := range coll.Artifacts.Edges {
 		for _, aliasEdge := range edge.Node.Aliases.Edges {
@@ -148,10 +133,6 @@ func pickWandbProductionArtifact(coll wandbArtifactCollection) wandbArtifact {
 	return wandbArtifact{}
 }
 
-// mergeWandbTags collapses the collection-level tag list and the production
-// artifact's metadata map (JSON keys) into a single string-keyed map.
-// Collection tags become {tagName: "true"} so policies can check for tag
-// presence the same way they check MLflow string tags.
 func mergeWandbTags(tagEdges []wandbTagEdge, metadata map[string]any) map[string]any {
 	out := make(map[string]any, len(tagEdges)+len(metadata))
 	for _, t := range tagEdges {
@@ -163,8 +144,6 @@ func mergeWandbTags(tagEdges []wandbTagEdge, metadata map[string]any) map[string
 	return out
 }
 
-// graphql posts query+variables to /graphql and decodes the result into out.
-// Non-2xx responses are surfaced as errors with the body included.
 func (c *Collector) graphql(ctx context.Context, query string, vars map[string]any, out any) error {
 	body, err := json.Marshal(map[string]any{"query": query, "variables": vars})
 	if err != nil {
@@ -192,7 +171,6 @@ func (c *Collector) graphql(ctx context.Context, query string, vars map[string]a
 		return fmt.Errorf("wandb /graphql returned %d: %s", resp.StatusCode, string(raw))
 	}
 
-	// W&B returns 200 even on GraphQL errors — sniff for them.
 	var probe struct {
 		Errors []struct {
 			Message string `json:"message"`
@@ -208,7 +186,6 @@ func (c *Collector) graphql(ctx context.Context, query string, vars map[string]a
 	return json.Unmarshal(raw, out)
 }
 
-// --- W&B GraphQL types (subset we read) ---
 
 const wandbRegistryQuery = `query ConcordRegistry($entityName: String!) {
   entity(name: $entityName) {
@@ -300,15 +277,12 @@ type wandbAliasEdge struct {
 	} `json:"node"`
 }
 
-// metadata decodes the artifact's metadata JSON to a string-keyed map.
-// W&B stores metadata as a JSON object; an empty or invalid value yields nil.
 func (a wandbArtifact) metadata() map[string]any {
 	if len(a.Metadata) == 0 {
 		return nil
 	}
 	var out map[string]any
 	if err := json.Unmarshal(a.Metadata, &out); err != nil {
-		// W&B occasionally stores metadata as a JSON string containing JSON.
 		var s string
 		if err2 := json.Unmarshal(a.Metadata, &s); err2 == nil && s != "" {
 			_ = json.Unmarshal([]byte(s), &out)

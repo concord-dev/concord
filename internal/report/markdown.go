@@ -8,10 +8,8 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// MarkdownRenderer emits an auditor-friendly audit pack.
 type MarkdownRenderer struct{}
 
-// Render implements Renderer.
 func (MarkdownRenderer) Render(w io.Writer, findings []apiv1.Finding) (Summary, error) {
 	s := Summarize(findings)
 	now := time.Now().UTC().Format(time.RFC3339)

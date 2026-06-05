@@ -10,9 +10,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// AuditActor enumerates the principal kinds that can be recorded as the
-// `actor_kind` of an audit_event row. The string values match the CHECK
-// constraint in 0001_init.up.sql — don't rename without a migration.
 type AuditActor string
 
 const (
@@ -23,7 +20,6 @@ const (
 	AuditActorSystem          AuditActor = "system"
 )
 
-// AuditEvent is the read shape returned by ListAuditEvents.
 type AuditEvent struct {
 	ID           uuid.UUID       `json:"id"`
 	OccurredAt   time.Time       `json:"occurred_at"`
@@ -40,8 +36,6 @@ type AuditEvent struct {
 	Details      json.RawMessage `json:"details,omitempty"`
 }
 
-// RecordAuditParams is the write surface. Zero values are tolerated for every
-// optional field; ActorKind and Action are the only hard requirements.
 type RecordAuditParams struct {
 	ActorKind    AuditActor
 	ActorUserID  *uuid.UUID
@@ -56,10 +50,6 @@ type RecordAuditParams struct {
 	Details      map[string]any
 }
 
-// RecordAudit inserts one audit event. Failures are logged but never returned
-// — auditing is best-effort and must NEVER fail the request that triggered
-// it. Calling code can rely on this being a noisy slog.Error on disaster
-// without having to handle errors at every call site.
 func (s *Store) RecordAudit(ctx context.Context, p RecordAuditParams) {
 	if p.ActorKind == "" || p.Action == "" {
 		slog.Error("audit: missing required fields",
@@ -98,9 +88,6 @@ func (s *Store) RecordAudit(ctx context.Context, p RecordAuditParams) {
 	}
 }
 
-// ListAuditOptions configures ListAuditEvents. Zero values mean "no filter"
-// except Limit which defaults to 50 and is capped at 500 server-side so a
-// hostile caller can't request a million-row scan.
 type ListAuditOptions struct {
 	Since  time.Time
 	Until  time.Time
@@ -108,8 +95,6 @@ type ListAuditOptions struct {
 	Limit  int
 }
 
-// ListAuditEvents returns audit rows for an org, newest first. Pass an empty
-// orgID to list across every org (operator-only — callers must enforce that).
 func (s *Store) ListAuditEvents(ctx context.Context, orgID uuid.UUID, opts ListAuditOptions) ([]AuditEvent, error) {
 	if opts.Limit <= 0 {
 		opts.Limit = 50
@@ -118,8 +103,6 @@ func (s *Store) ListAuditEvents(ctx context.Context, orgID uuid.UUID, opts ListA
 		opts.Limit = 500
 	}
 
-	// Build the WHERE clause incrementally so optional filters compose
-	// without us having to write 2^N variant queries.
 	q := `SELECT id, occurred_at, actor_kind, actor_user_id, actor_token_id,
 	             org_id, action, COALESCE(target_type,''), target_id,
 	             COALESCE(host(ip),''), COALESCE(user_agent,''),

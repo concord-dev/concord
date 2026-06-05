@@ -10,15 +10,10 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// TrustPortalRenderer produces a self-contained, public-facing HTML page
-// suitable for hosting at trust.<your-domain>. Internal evidence (deny
-// messages, bucket names, user emails) is deliberately omitted — only
-// control ID, title, framework, and pass/fail badge are surfaced.
 type TrustPortalRenderer struct {
 	OrgName string
 }
 
-// Render writes the trust-portal HTML to w.
 func (r TrustPortalRenderer) Render(w io.Writer, findings []apiv1.Finding) (Summary, error) {
 	s := Summarize(findings)
 
