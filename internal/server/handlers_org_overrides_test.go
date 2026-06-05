@@ -18,11 +18,9 @@ func TestOverrides_PutGetListDelete(t *testing.T) {
 	h := newHarness(t)
 	base := "/v1/orgs/" + h.org.Slug + "/controls/SOC2-CC8.1/overrides"
 
-	// No override yet → 404.
 	respMiss, _ := h.do(t, "GET", base, "", h.apiToken)
 	assert.Equal(t, http.StatusNotFound, respMiss.StatusCode)
 
-	// PUT a value.
 	respPut, raw := h.do(t, "PUT", base, `{"params":{"min_reviewers":4}}`, h.apiToken)
 	require.Equal(t, http.StatusOK, respPut.StatusCode, string(raw))
 	var env struct {
@@ -33,13 +31,11 @@ func TestOverrides_PutGetListDelete(t *testing.T) {
 	assert.Equal(t, "SOC2-CC8.1", env.ControlID)
 	assert.EqualValues(t, 4, env.Params["min_reviewers"])
 
-	// GET returns the same envelope.
 	respGet, rawGet := h.do(t, "GET", base, "", h.apiToken)
 	require.Equal(t, http.StatusOK, respGet.StatusCode)
 	require.NoError(t, json.Unmarshal(rawGet, &env))
 	assert.EqualValues(t, 4, env.Params["min_reviewers"])
 
-	// LIST contains exactly the one row.
 	respList, rawList := h.do(t, "GET", "/v1/orgs/"+h.org.Slug+"/overrides", "", h.apiToken)
 	require.Equal(t, http.StatusOK, respList.StatusCode)
 	var list []struct {
@@ -49,7 +45,6 @@ func TestOverrides_PutGetListDelete(t *testing.T) {
 	require.Len(t, list, 1)
 	assert.Equal(t, "SOC2-CC8.1", list[0].ControlID)
 
-	// DELETE removes it.
 	respDel, _ := h.do(t, "DELETE", base, "", h.apiToken)
 	assert.Equal(t, http.StatusNoContent, respDel.StatusCode)
 	respGet2, _ := h.do(t, "GET", base, "", h.apiToken)
@@ -79,7 +74,6 @@ func TestOverrides_RequireOverridePermission(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 
-	// Spin up a viewer (read-only) and login.
 	email := uniqueEmail("viewer-ovr")
 	pw := "v"
 	v, _ := h.st.CreateUser(ctx, store.CreateUserParams{
@@ -94,12 +88,10 @@ func TestOverrides_RequireOverridePermission(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &got))
 
-	// Viewer can GET (controls:read).
 	respR, _ := h.do(t, "GET",
 		"/v1/orgs/"+h.org.Slug+"/overrides", "", got.Token)
 	assert.Equal(t, http.StatusOK, respR.StatusCode)
 
-	// Viewer cannot PUT (controls:override).
 	respW, bodyW := h.do(t, "PUT",
 		"/v1/orgs/"+h.org.Slug+"/controls/SOC2-CC8.1/overrides",
 		`{"params":{"min_reviewers":99}}`, got.Token)
@@ -107,9 +99,3 @@ func TestOverrides_RequireOverridePermission(t *testing.T) {
 	assert.Contains(t, string(bodyW), "controls:override")
 }
 
-// Note: an older integration test asserted that overrides flipped a
-// server-side run from pass→fail at runtime. In agent-push mode the agent
-// fetches overrides from /v1/orgs/{slug}/overrides and applies them locally
-// before running, so that runtime-coupling test no longer belongs here.
-// Coverage of override *application* lives in the runner package's tests;
-// this file owns the API surface only.

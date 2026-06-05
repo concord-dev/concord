@@ -27,19 +27,16 @@ func TestOperator_CreateUserAndAssignRoles(t *testing.T) {
 	resp, raw := h.do(t, "POST", "/operator/v1/users", body, testOperatorToken)
 	require.Equal(t, http.StatusCreated, resp.StatusCode, string(raw))
 
-	// Assign two roles in one call.
 	addBody := fmt.Sprintf(`{"email":%q,"roles":["admin","viewer"]}`, email)
 	resp2, raw2 := h.do(t, "POST", "/operator/v1/orgs/"+h.org.Slug+"/members",
 		addBody, testOperatorToken)
 	require.Equal(t, http.StatusCreated, resp2.StatusCode, string(raw2))
 
-	// Verify via list members.
 	respL, rawL := h.do(t, "GET", "/operator/v1/orgs/"+h.org.Slug+"/members",
 		"", testOperatorToken)
 	require.Equal(t, http.StatusOK, respL.StatusCode)
 	var members []store.OrgMember
 	require.NoError(t, json.Unmarshal(rawL, &members))
-	// Harness preloaded an "owner" user; the new invitee is the second.
 	var found *store.OrgMember
 	for i := range members {
 		if members[i].User.Email == email {
@@ -65,7 +62,6 @@ func TestOperator_AddMember_UnknownRoleRejected(t *testing.T) {
 
 func TestOperator_RevokeToken_BlocksFutureUse(t *testing.T) {
 	h := newHarness(t)
-	// Mint a fresh token via the admin API.
 	respC, rawC := h.do(t, "POST", "/operator/v1/orgs/"+h.org.Slug+"/tokens",
 		`{"name":"ephemeral"}`, testOperatorToken)
 	require.Equal(t, http.StatusCreated, respC.StatusCode)

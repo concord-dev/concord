@@ -57,8 +57,6 @@ func TestRunCC8_1ParamOverride_StricterReviewerCount(t *testing.T) {
 	require.NoError(t, err)
 	c.Spec.Evidence[0].Fixture = "./tests/fixtures/cc8.1-pass.json"
 
-	// The pass fixture has required_approving_review_count = 2.
-	// With default min_reviewers = 1, this passes. With override min_reviewers = 3, it must fail.
 	r := New(policy.New(), evidence.NewFileCollector()).SetParams(map[string]map[string]any{
 		"SOC2-CC8.1": {"min_reviewers": 3},
 	})
@@ -74,13 +72,11 @@ func TestRunCC8_1ParamOverride_DefaultStillWorks(t *testing.T) {
 	require.NoError(t, err)
 	c.Spec.Evidence[0].Fixture = "./tests/fixtures/cc8.1-pass.json"
 
-	// No params installed → default of 1 applies → fixture (which has 2 reviewers) passes.
 	r := New(policy.New(), evidence.NewFileCollector())
 	f := r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
 	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v", f.Messages)
 }
 
-// --- SOC2-CC6.1 — MFA enforcement ---
 
 const cc61Path = "controls/frameworks/soc2/cc6.1-mfa-enforcement.yaml"
 
@@ -94,7 +90,6 @@ func TestRunCC6_1_SMSOnlyFails(t *testing.T) {
 	f := runCC61(t, "cc6.1-okta-sms-only.json")
 	assert.Equal(t, apiv1.StatusFail, f.Status)
 	assert.Contains(t, f.Messages, `active user "bob@example.com" has no strong MFA factor enrolled (TOTP, push, WebAuthn, or hardware token required)`)
-	// Alice has strong MFA — must NOT deny her.
 	for _, m := range f.Messages {
 		assert.NotContains(t, m, "alice@example.com")
 	}
@@ -104,7 +99,6 @@ func TestRunCC6_1_SingleStrongWarns(t *testing.T) {
 	f := runCC61(t, "cc6.1-okta-single-strong.json")
 	assert.Equal(t, apiv1.StatusPass, f.Status, "single-strong is a warn, not a deny")
 	assert.Contains(t, f.Warnings, `user "alice@example.com" has only one strong MFA factor (two recommended for device-loss redundancy)`)
-	// Carol has 2 factors (push + sms): one strong, one weak. Should warn about weak alongside strong.
 	assert.Contains(t, f.Warnings, `user "carol@example.com" still has weak factors (SMS/call/email) enrolled alongside strong MFA — remove to prevent phishing-fallback`)
 }
 
@@ -118,7 +112,6 @@ func runCC61(t *testing.T, fixture string) apiv1.Finding {
 	return r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
 }
 
-// --- SOC2-CC7.1 — Vulnerability management via Trivy ---
 
 const cc71Path = "controls/frameworks/soc2/cc7.1-vulnerability-management.yaml"
 
@@ -131,7 +124,6 @@ func TestRunCC7_1_CriticalFails(t *testing.T) {
 	f := runCC71(t, "cc7.1-trivy-critical.json", nil)
 	assert.Equal(t, apiv1.StatusFail, f.Status)
 	assert.Contains(t, f.Messages, "2 CRITICAL vulnerabilities present (threshold: 0) — see warnings for fix paths")
-	// Two warnings: one for the fixable, one for the un-fixable.
 	assert.Contains(t, f.Warnings, "[CRITICAL] CVE-2024-99001 in github.com/example/auth-lib@1.2.3 — upgrade to 1.2.4")
 	assert.Contains(t, f.Warnings, "[CRITICAL] CVE-2024-99002 in github.com/example/crypto-lib has no fix available yet — document exception or apply workaround")
 }
@@ -143,13 +135,11 @@ func TestRunCC7_1_HighFixableFailsAtDefaultThreshold(t *testing.T) {
 }
 
 func TestRunCC7_1_HighFixablePassesWithRelaxedThreshold(t *testing.T) {
-	// Override max_high to 5 — the 2 highs in the fixture should now pass.
 	params := map[string]map[string]any{
 		"SOC2-CC7.1": {"max_high": 5},
 	}
 	f := runCC71(t, "cc7.1-trivy-high-fixable.json", params)
 	assert.Equal(t, apiv1.StatusPass, f.Status, "with max_high=5, fixture's 2 highs should pass; messages=%v", f.Messages)
-	// Warnings should still fire so engineers see what to fix.
 	assert.Contains(t, f.Warnings, "[HIGH] CVE-2024-77001 in github.com/example/parser@0.4.0 — upgrade to 0.5.0")
 }
 
@@ -163,7 +153,6 @@ func runCC71(t *testing.T, fixture string, params map[string]map[string]any) api
 	return r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
 }
 
-// --- SOC2-CC6.3 — Offboarding ---
 
 const cc63Path = "controls/frameworks/soc2/cc6.3-offboarding.yaml"
 
@@ -179,7 +168,6 @@ func TestRunCC6_3_ResidualFactorFails(t *testing.T) {
 	assert.Contains(t, f.Messages, `SUSPENDED user "on-leave@example.com" still has an ACTIVE push factor — remove enrollment`)
 }
 
-// --- SOC2-CC9.2 — Risk register ---
 
 const cc92Path = "controls/frameworks/soc2/cc9.2-risk-register.yaml"
 
@@ -203,7 +191,6 @@ func TestRunCC9_2_StaleAndMalformedFails(t *testing.T) {
 	assert.Contains(t, f.Warnings, `risk register entry "docs/risk-register/old-risk.md" is high severity and still open — schedule treatment`)
 }
 
-// --- SOC2-CC1.4 — GitHub org security baseline ---
 
 const cc14Path = "controls/frameworks/soc2/cc1.4-github-org-security-baseline.yaml"
 
@@ -221,7 +208,6 @@ func TestRunCC1_4_No2FAFails(t *testing.T) {
 	assert.Contains(t, f.Warnings, "secret scanning is NOT enabled by default on new repositories")
 }
 
-// --- SOC2-CC6.2 — Periodic access reviews ---
 
 const cc62Path = "controls/frameworks/soc2/cc6.2-access-reviews.yaml"
 
@@ -233,7 +219,6 @@ func TestRunCC6_2_Pass(t *testing.T) {
 func TestRunCC6_2_StaleFails(t *testing.T) {
 	f := runSingleEv(t, cc62Path, "cc6.2-reviews-stale.json")
 	assert.Equal(t, apiv1.StatusFail, f.Status)
-	// Exact day count depends on test date — match on substring.
 	found := false
 	for _, m := range f.Messages {
 		if strings.Contains(m, "most recent access-review") && strings.Contains(m, "schedule the next review cycle") {
@@ -244,7 +229,6 @@ func TestRunCC6_2_StaleFails(t *testing.T) {
 	assert.True(t, found, "expected freshness deny; got %v", f.Messages)
 }
 
-// --- SOC2-CC7.2 — Incident response runbook ---
 
 const cc72Path = "controls/frameworks/soc2/cc7.2-incident-response.yaml"
 
@@ -265,7 +249,6 @@ func TestRunCC7_2_MissingOwnerFails(t *testing.T) {
 	assert.Contains(t, f.Messages, `IR runbook "docs/incident-response/main.md" is missing required field "on_call_owner"`)
 }
 
-// --- SOC2-CC2.1 — Required policies published ---
 
 const cc21Path = "controls/frameworks/soc2/cc2.1-policy-communication.yaml"
 
@@ -282,7 +265,6 @@ func TestRunCC2_1_MissingPoliciesFails(t *testing.T) {
 	assert.Contains(t, f.Messages, `policy "docs/policies/data-protection.md" is missing required field "approved_by"`)
 }
 
-// --- SOC2-CC3.1 — Risk assessment process ---
 
 const cc31Path = "controls/frameworks/soc2/cc3.1-risk-assessment-process.yaml"
 
@@ -297,7 +279,6 @@ func TestRunCC3_1_MissingProcessFails(t *testing.T) {
 	assert.Contains(t, f.Messages, "no risk-assessment process documented at docs/policies/risk-assessment-process.md")
 }
 
-// --- SOC2-CC4.1 — Monitoring strategy ---
 
 const cc41Path = "controls/frameworks/soc2/cc4.1-monitoring-strategy.yaml"
 
@@ -312,7 +293,6 @@ func TestRunCC4_1_EmptyFails(t *testing.T) {
 	assert.Contains(t, f.Messages, "no monitoring strategy doc found under docs/monitoring/")
 }
 
-// --- SOC2-CC5.1 — Control activities register ---
 
 const cc51Path = "controls/frameworks/soc2/cc5.1-control-activities-register.yaml"
 
@@ -328,7 +308,6 @@ func TestRunCC5_1_TooFewEntriesFails(t *testing.T) {
 	assert.Contains(t, f.Warnings, `control register entry "docs/control-activities/branch-protection.md" is ad_hoc — consider formalizing for audit`)
 }
 
-// --- SOC2-CC7.1-containers — Snyk container scans ---
 
 const cc71ContainersPath = "controls/frameworks/soc2/cc7.1-container-vulnerabilities.yaml"
 
@@ -342,7 +321,6 @@ func TestRunCC7_1Containers_CriticalAndHighFail(t *testing.T) {
 	assert.Equal(t, apiv1.StatusFail, f.Status)
 	assert.Contains(t, f.Messages, "1 CRITICAL container issue(s) open (threshold: 0) — see warnings for affected images")
 	assert.Contains(t, f.Messages, "2 HIGH container issue(s) open (threshold: 0)")
-	// Per-image warns must name the image.
 	found := false
 	for _, w := range f.Warnings {
 		if strings.Contains(w, "concord-api:prod") && strings.Contains(w, "CRITICAL") {
@@ -352,7 +330,6 @@ func TestRunCC7_1Containers_CriticalAndHighFail(t *testing.T) {
 	assert.True(t, found, "expected a CRITICAL warning naming concord-api:prod; got %v", f.Warnings)
 }
 
-// --- CIS-AWS-1.10 — Console MFA ---
 
 const cisAws110Path = "controls/frameworks/cis-aws/1.10-console-mfa.yaml"
 
@@ -365,13 +342,11 @@ func TestRunCISAWS1_10_ConsoleUserWithoutMFAFails(t *testing.T) {
 	f := runSingleEv(t, cisAws110Path, "credentials-console-no-mfa.json")
 	assert.Equal(t, apiv1.StatusFail, f.Status)
 	assert.Contains(t, f.Messages, `user "console-only-bob" has a console password but no MFA device — enroll an MFA factor or disable console login`)
-	// Root with mfa_active=true but password_enabled=false must NOT fire.
 	for _, m := range f.Messages {
 		assert.NotContains(t, m, "<root_account>", "root MFA is handled by CIS-AWS-1.5, not 1.10")
 	}
 }
 
-// --- SOC2-CC7.1-snyk — Snyk-tracked vulnerabilities ---
 
 const cc71SnykPath = "controls/frameworks/soc2/cc7.1-vulnerability-management-snyk.yaml"
 
@@ -385,7 +360,6 @@ func TestRunCC7_1Snyk_CriticalAndHighFail(t *testing.T) {
 	assert.Equal(t, apiv1.StatusFail, f.Status)
 	assert.Contains(t, f.Messages, "1 CRITICAL Snyk issue(s) open (threshold: 0) — see warnings for fix paths")
 	assert.Contains(t, f.Messages, "3 HIGH Snyk issue(s) open (threshold: 0)")
-	// Per-issue warns: fixable vs unfixable bucketing.
 	assert.Contains(t, f.Warnings, "[CRITICAL] CVE-2024-1234 in lodash@4.17.10 — fix available via Snyk")
 	assert.Contains(t, f.Warnings, "[HIGH] CVE-2024-9999 in regex-foo has no fix yet — document exception or apply workaround")
 }
@@ -403,7 +377,6 @@ func TestRunCC7_1Snyk_RelaxedThresholdPasses(t *testing.T) {
 	assert.Equal(t, apiv1.StatusPass, f.Status, "relaxed thresholds should accept the fixture")
 }
 
-// --- CIS-AWS-1.16 — IAM password policy ---
 
 const cisAws116Path = "controls/frameworks/cis-aws/1.16-iam-password-policy.yaml"
 
@@ -415,7 +388,6 @@ func TestRunCISAWS1_16_Pass(t *testing.T) {
 func TestRunCISAWS1_16_WeakPolicyFails(t *testing.T) {
 	f := runSingleEv(t, cisAws116Path, "iam-password-policy-weak.json")
 	assert.Equal(t, apiv1.StatusFail, f.Status)
-	// Each weak attribute should produce its own message.
 	assert.Contains(t, f.Messages, "minimum_password_length is 8, must be >= 14")
 	assert.Contains(t, f.Messages, "require_symbols is false (CIS-AWS-1.16 requires symbols)")
 	assert.Contains(t, f.Messages, "expire_passwords is false; max_password_age must be set to <= 90 days")
@@ -442,7 +414,6 @@ func TestRunCISAWS1_16_TightenedMinLength(t *testing.T) {
 	assert.Contains(t, f.Messages, "minimum_password_length is 14, must be >= 16")
 }
 
-// --- CIS-AWS-4.1 — Unused credentials ---
 
 const cisAws41Path = "controls/frameworks/cis-aws/4.1-unused-credentials.yaml"
 
@@ -465,7 +436,6 @@ func TestRunCISAWS4_1_TightenedWindow(t *testing.T) {
 	require.NoError(t, err)
 	c.Spec.Evidence[0].Fixture = "./tests/fixtures/credentials-pass.json"
 
-	// Tighten max_unused_days to 0 so alice's 1-day-old access key trips the rule.
 	r := New(policy.New(), evidence.NewFileCollector()).SetParams(map[string]map[string]any{
 		"CIS-AWS-4.1": {"max_unused_days": 0},
 	})
@@ -474,7 +444,6 @@ func TestRunCISAWS4_1_TightenedWindow(t *testing.T) {
 	assert.Contains(t, f.Messages, `user "alice" access key #1 active but unused for 1 days (limit 0) — deactivate the key`)
 }
 
-// runSingleEv is the helper for single-evidence controls.
 func runSingleEv(t *testing.T, controlRelPath, fixture string) apiv1.Finding {
 	t.Helper()
 	controlPath := filepath.Join(repoRoot(t), controlRelPath)

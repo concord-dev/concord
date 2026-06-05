@@ -22,7 +22,6 @@ func TestUpsertControlOverride_InsertsThenUpdates(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "SOC2-CC8.1", first.ControlID)
 
-	// Second upsert replaces (same control id) and bumps updated_at.
 	time.Sleep(5 * time.Millisecond)
 	second, err := s.UpsertControlOverride(ctx, org.ID, "SOC2-CC8.1",
 		[]byte(`{"min_reviewers": 4, "block_force_pushes": true}`))
@@ -82,7 +81,6 @@ func TestControlOverride_CannotCrossOrg(t *testing.T) {
 	b, _ := s.CreateOrganization(ctx, "B", uniqueSlug("b"))
 	_, _ = s.UpsertControlOverride(ctx, a.ID, "SOC2-CC8.1", []byte(`{"min_reviewers": 9}`))
 
-	// Org B looking up org A's override sees ErrNotFound.
 	_, err := s.GetControlOverride(ctx, b.ID, "SOC2-CC8.1")
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }

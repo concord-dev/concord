@@ -20,7 +20,6 @@ const (
 	euAct14Path = "controls/frameworks/eu-ai-act/article-14-human-oversight.yaml"
 )
 
-// --- Article 11 — technical documentation ---
 
 func TestRunEUAct11_Pass(t *testing.T) {
 	f := runMultiFixture(t, euAct11Path, map[string]string{
@@ -37,7 +36,6 @@ func TestRunEUAct11_MissingDocFails(t *testing.T) {
 	})
 	assert.Equal(t, apiv1.StatusFail, f.Status)
 	assert.Contains(t, f.Messages, `high-risk model "fraud-detector" has no technical documentation under docs/ai/technical-documentation/`)
-	// spam-classifier is "limited", not "high" — should NOT trigger a deny.
 	for _, m := range f.Messages {
 		assert.NotContains(t, m, "spam-classifier")
 	}
@@ -52,10 +50,8 @@ func TestRunEUAct11_StaleDocFails(t *testing.T) {
 	assert.Contains(t, f.Messages, `technical doc "docs/ai/technical-documentation/fraud-detector.md" has not been reviewed in over 180 days`)
 }
 
-// --- Article 13 — transparency / model card ---
 
 func TestRunEUAct13_PassViaTag(t *testing.T) {
-	// models fixture has public_model_card_url tag on fraud-detector
 	f := runMultiFixture(t, euAct13Path, map[string]string{
 		"model_registry": "models-with-high-risk.json",
 		"model_cards":    "model-cards-empty.json", // no file needed when URL tag present
@@ -64,7 +60,6 @@ func TestRunEUAct13_PassViaTag(t *testing.T) {
 }
 
 func TestRunEUAct13_PassViaFile(t *testing.T) {
-	// models fixture lacks card URL; the file-based card satisfies the control
 	f := runMultiFixture(t, euAct13Path, map[string]string{
 		"model_registry": "models-no-card-url.json",
 		"model_cards":    "model-cards-pass.json",
@@ -81,7 +76,6 @@ func TestRunEUAct13_FailsWhenNeitherPresent(t *testing.T) {
 	assert.Contains(t, f.Messages, `high-risk model "fraud-detector" has neither public_model_card_url tag nor docs/ai/model-cards/<model>.md`)
 }
 
-// --- Article 14 — human oversight ---
 
 func TestRunEUAct14_Pass(t *testing.T) {
 	f := runMultiFixture(t, euAct14Path, map[string]string{
@@ -101,7 +95,6 @@ func TestRunEUAct14_MissingSectionFails(t *testing.T) {
 	assert.Contains(t, f.Messages, `oversight runbook "docs/ai/oversight/fraud-detector.md" is missing required section "kill_switch"`)
 }
 
-// --- helper ---
 
 func runMultiFixture(t *testing.T, controlRelPath string, fixtureByEvID map[string]string) apiv1.Finding {
 	t.Helper()

@@ -13,8 +13,6 @@ import (
 	"github.com/concord-dev/concord/internal/server/middleware"
 )
 
-// captureHandler stashes the request-scoped ID + the value the middleware
-// echoed in the response, so each test can assert on both.
 type captureHandler struct {
 	gotCtxID string
 }
@@ -57,11 +55,6 @@ func TestRequestID_HonoursInboundValue(t *testing.T) {
 }
 
 func TestRequestID_RejectsHostileInbound(t *testing.T) {
-	// Control characters or absurdly long values must be replaced — we don't
-	// want an upstream attacker injecting newlines into our log pipeline.
-	// Drive the middleware directly because Go's HTTP client/server stack
-	// pre-validates header bytes before our code ever sees them, which would
-	// hide the rejection we're trying to assert here.
 	cases := map[string]string{
 		"control char": "abc\x00def",
 		"too long":     strings.Repeat("x", 200),

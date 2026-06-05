@@ -16,9 +16,6 @@ import (
 )
 
 
-// seedDeadOutboxRow enqueues an event_outbox row then forces it past the
-// dispatcher's max-attempts ceiling so it qualifies as dead. Returns the
-// row id.
 func seedDeadOutboxRow(t *testing.T, h *harness, kind string) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
@@ -35,8 +32,6 @@ func seedDeadOutboxRow(t *testing.T, h *harness, kind string) uuid.UUID {
 	return id
 }
 
-// seedDeadDelivery inserts a webhook + a webhook_delivery row already at
-// status='dead'. Returns (deliveryID, webhookID).
 func seedDeadDelivery(t *testing.T, h *harness, kind string) (uuid.UUID, uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
@@ -95,7 +90,6 @@ func TestDLQEvents_ListAndPaginate(t *testing.T) {
 	assert.Equal(t, 50, got.Limit)
 	assert.Equal(t, 0, got.Offset)
 
-	// Pagination — limit=1 returns 1 row.
 	resp, raw = h.do(t, "GET", "/operator/v1/dlq/events?limit=1", "", testOperatorToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	require.NoError(t, json.Unmarshal(raw, &got))
@@ -167,8 +161,6 @@ func TestDLQEvents_ReplayResetsRowAndAudits(t *testing.T) {
 	resp, raw := h.do(t, "POST", "/operator/v1/dlq/events/"+id.String()+"/replay", "", testOperatorToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 
-	// Row should be eligible for the dispatcher again: attempt_count=0,
-	// last_error NULL, next_attempt_at <= now().
 	row, err := h.c.Store.GetOutboxRow(context.Background(), id)
 	require.NoError(t, err)
 	assert.Equal(t, 0, row.AttemptCount)
@@ -176,7 +168,6 @@ func TestDLQEvents_ReplayResetsRowAndAudits(t *testing.T) {
 	assert.True(t, row.NextAttemptAt.Before(time.Now().Add(time.Second)),
 		"next_attempt_at must be reset to now")
 
-	// Audit row should exist.
 	audited := findAuditAction(t, h, "dlq.event.replay")
 	assert.NotZero(t, audited, "replay must write an audit_event row")
 }
@@ -192,7 +183,6 @@ func TestDLQEvents_AbandonHidesFromDispatcher(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, row.AbandonedAt, "abandoned_at must be stamped")
 
-	// List query honours the abandoned filter.
 	resp, raw := h.do(t, "GET", "/operator/v1/dlq/events", "", testOperatorToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var got struct {
@@ -208,8 +198,6 @@ func TestDLQEvents_AbandonHidesFromDispatcher(t *testing.T) {
 }
 
 func TestDLQEvents_ReplayClearsAbandonment(t *testing.T) {
-	// Operators may abandon then change their mind. Replay must lift
-	// the abandon flag.
 	h := newHarness(t)
 	id := seedDeadOutboxRow(t, h, "run.completed")
 
@@ -229,7 +217,6 @@ func TestDLQDeliveries_ListAndReplayAndAbandon(t *testing.T) {
 	h := newHarness(t)
 	id, _ := seedDeadDelivery(t, h, "run.completed")
 
-	// List
 	resp, raw := h.do(t, "GET", "/operator/v1/dlq/deliveries", "", testOperatorToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	var listed struct {
@@ -246,7 +233,6 @@ func TestDLQDeliveries_ListAndReplayAndAbandon(t *testing.T) {
 	}
 	assert.True(t, found, "seeded dead delivery must be in the list")
 
-	// Get
 	resp, raw = h.do(t, "GET", "/operator/v1/dlq/deliveries/"+id.String(), "", testOperatorToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	var got store.WebhookDelivery
@@ -254,7 +240,6 @@ func TestDLQDeliveries_ListAndReplayAndAbandon(t *testing.T) {
 	assert.Equal(t, id, got.ID)
 	assert.Equal(t, store.DeliveryDead, got.Status)
 
-	// Replay
 	resp, _ = h.do(t, "POST", "/operator/v1/dlq/deliveries/"+id.String()+"/replay", "", testOperatorToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	d, err := h.c.Store.GetWebhookDelivery(context.Background(), id)
@@ -264,19 +249,15 @@ func TestDLQDeliveries_ListAndReplayAndAbandon(t *testing.T) {
 	require.NotNil(t, d.NextAttemptAt)
 	assert.True(t, d.NextAttemptAt.Before(time.Now().Add(time.Second)))
 
-	// Abandon
 	resp, _ = h.do(t, "DELETE", "/operator/v1/dlq/deliveries/"+id.String(), "", testOperatorToken)
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 	d, _ = h.c.Store.GetWebhookDelivery(context.Background(), id)
 	require.NotNil(t, d.AbandonedAt)
 
-	// Audit
 	assert.NotZero(t, findAuditAction(t, h, "dlq.delivery.replay"))
 	assert.NotZero(t, findAuditAction(t, h, "dlq.delivery.abandon"))
 }
 
-// findAuditAction returns the count of audit_event rows for the given
-// action — used to assert that an audited operation actually fired.
 func findAuditAction(t *testing.T, h *harness, action string) int {
 	t.Helper()
 	var n int

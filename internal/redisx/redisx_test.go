@@ -51,9 +51,6 @@ func TestOpen_RejectsUnknownMode(t *testing.T) {
 }
 
 func TestOpen_InfersModeFromSentinelAddrs(t *testing.T) {
-	// Mode "" + SentinelAddrs set should infer sentinel mode (and then
-	// fail because we didn't set SentinelMaster — proving the inference
-	// happened).
 	_, err := redisx.Open(redisx.Config{SentinelAddrs: []string{"s1:26379"}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "SentinelMaster",
@@ -61,7 +58,6 @@ func TestOpen_InfersModeFromSentinelAddrs(t *testing.T) {
 }
 
 func TestOpen_InfersModeFromAddr(t *testing.T) {
-	// Mode "" + Addr should produce a working single-mode client.
 	rdb, err := redisx.Open(redisx.Config{Addr: "127.0.0.1:6379"})
 	require.NoError(t, err)
 	require.NotNil(t, rdb)

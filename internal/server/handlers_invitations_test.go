@@ -33,7 +33,6 @@ func TestInvitations_CreateReturnsTokenOnceAndIsListable(t *testing.T) {
 	assert.Equal(t, email, created.Invitation["email"])
 	assert.Equal(t, "member", created.Invitation["role"])
 
-	// List shows it, but without the plaintext token.
 	respL, rawL := h.do(t, "GET", "/v1/orgs/"+h.org.Slug+"/invitations", "", h.apiToken)
 	require.Equal(t, http.StatusOK, respL.StatusCode)
 	var listed []map[string]any
@@ -47,7 +46,6 @@ func TestInvitations_ReinviteSupersedesPriorPending(t *testing.T) {
 	h := newHarness(t)
 	email := uniqueEmail("dup")
 
-	// Invite #1.
 	_, raw1 := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/invitations",
 		fmt.Sprintf(`{"email":%q,"role":"member"}`, email), h.apiToken)
 	var c1 struct {
@@ -55,12 +53,10 @@ func TestInvitations_ReinviteSupersedesPriorPending(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw1, &c1))
 
-	// Invite #2 — same email, different role.
 	resp2, raw2 := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/invitations",
 		fmt.Sprintf(`{"email":%q,"role":"viewer"}`, email), h.apiToken)
 	require.Equal(t, http.StatusCreated, resp2.StatusCode, string(raw2))
 
-	// Exactly one pending invitation now; the first token must not resolve.
 	respL, rawL := h.do(t, "GET", "/v1/orgs/"+h.org.Slug+"/invitations", "", h.apiToken)
 	require.Equal(t, http.StatusOK, respL.StatusCode)
 	var listed []map[string]any
@@ -68,7 +64,6 @@ func TestInvitations_ReinviteSupersedesPriorPending(t *testing.T) {
 	assert.Len(t, listed, 1, "re-invite must collapse to one pending row")
 	assert.Equal(t, "viewer", listed[0]["role"], "the latest invite wins")
 
-	// The superseded token must no longer resolve.
 	respP, err := http.Get(h.srv.URL + "/v1/invitations/accept?token=" + url.QueryEscape(c1.Token))
 	require.NoError(t, err)
 	defer respP.Body.Close()
@@ -92,7 +87,6 @@ func TestInvitations_RevokePending(t *testing.T) {
 		"", h.apiToken)
 	assert.Equal(t, http.StatusNoContent, respD.StatusCode)
 
-	// Re-revoke is 404 (already revoked).
 	respD2, _ := h.do(t, "DELETE",
 		"/v1/orgs/"+h.org.Slug+"/invitations/"+created.Invitation.ID.String(),
 		"", h.apiToken)
@@ -112,7 +106,6 @@ func TestInvitations_AcceptFlowNewUser(t *testing.T) {
 	h := newHarness(t)
 	email := uniqueEmail("newbie")
 
-	// Mint invite.
 	_, raw := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/invitations",
 		fmt.Sprintf(`{"email":%q,"role":"member"}`, email), h.apiToken)
 	var created struct {
@@ -120,7 +113,6 @@ func TestInvitations_AcceptFlowNewUser(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &created))
 
-	// Preview: needs_account should be true.
 	respP, rawP := h.do(t, "GET",
 		"/v1/invitations/accept?token="+url.QueryEscape(created.Token), "", "")
 	require.Equal(t, http.StatusOK, respP.StatusCode, string(rawP))
@@ -134,7 +126,6 @@ func TestInvitations_AcceptFlowNewUser(t *testing.T) {
 	assert.Equal(t, "member", preview.Role)
 	assert.True(t, preview.NeedsAccount, "brand-new email → needs_account=true")
 
-	// Accept: must include first/last/password.
 	pw := "newuser-pass-12345"
 	respA, rawA := h.do(t, "POST", "/v1/invitations/accept",
 		fmt.Sprintf(`{"token":%q,"first_name":"Newbie","last_name":"User","password":%q}`,
@@ -152,13 +143,11 @@ func TestInvitations_AcceptFlowNewUser(t *testing.T) {
 	assert.NotEmpty(t, accepted.Token, "session token must be issued")
 	assert.Equal(t, "member", accepted.Role)
 
-	// The new user can log in with the password they just set.
 	respLogin, _ := h.do(t, "POST", "/v1/auth/login",
 		fmt.Sprintf(`{"email":%q,"password":%q}`, email, pw), "")
 	assert.Equal(t, http.StatusCreated, respLogin.StatusCode,
 		"the password set during accept must be valid for /auth/login")
 
-	// Re-accepting the same token is now 404 (consumed).
 	respA2, _ := h.do(t, "POST", "/v1/invitations/accept",
 		fmt.Sprintf(`{"token":%q}`, created.Token), "")
 	assert.Equal(t, http.StatusNotFound, respA2.StatusCode,
@@ -167,10 +156,7 @@ func TestInvitations_AcceptFlowNewUser(t *testing.T) {
 
 func TestInvitations_AcceptFlowExistingUserNoCredsNeeded(t *testing.T) {
 	h := newHarness(t)
-	// Use a brand new org so the existing harness user isn't already a member.
 	other, _ := h.st.CreateOrganization(t.Context(), "Other Co", uniqueSlug("other"))
-	// Mint an operator-driven owner+token for `other` so we can hit its
-	// invitations endpoint.
 	otherOwner, _ := h.st.CreateUser(t.Context(), store.CreateUserParams{
 		FirstName: "Other", LastName: "Owner",
 		Email: uniqueEmail("other-owner"), Password: "other-pw-1234",
@@ -179,7 +165,6 @@ func TestInvitations_AcceptFlowExistingUserNoCredsNeeded(t *testing.T) {
 	require.NoError(t, h.st.AssignRole(t.Context(), otherOwner.ID, other.ID, role.ID))
 	_, otherTok, _ := h.st.CreateAPIToken(t.Context(), other.ID, "ci", nil)
 
-	// Invite the *existing* harness user to the new org.
 	_, raw := h.do(t, "POST", "/v1/orgs/"+other.Slug+"/invitations",
 		fmt.Sprintf(`{"email":%q,"role":"viewer"}`, h.user.Email), otherTok)
 	var created struct {
@@ -187,7 +172,6 @@ func TestInvitations_AcceptFlowExistingUserNoCredsNeeded(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &created))
 
-	// Preview should report needs_account=false.
 	respP, rawP := h.do(t, "GET",
 		"/v1/invitations/accept?token="+url.QueryEscape(created.Token), "", "")
 	require.Equal(t, http.StatusOK, respP.StatusCode, string(rawP))
@@ -198,7 +182,6 @@ func TestInvitations_AcceptFlowExistingUserNoCredsNeeded(t *testing.T) {
 	assert.False(t, preview.NeedsAccount,
 		"existing user email → needs_account=false")
 
-	// Accept body needs only the token — no first/last/password required.
 	respA, rawA := h.do(t, "POST", "/v1/invitations/accept",
 		fmt.Sprintf(`{"token":%q}`, created.Token), "")
 	require.Equal(t, http.StatusOK, respA.StatusCode, string(rawA))

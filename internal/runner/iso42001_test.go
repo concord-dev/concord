@@ -63,7 +63,6 @@ func TestRunISO42001Stale(t *testing.T) {
 	assert.Contains(t, f.Messages, `risk doc "docs/ai/risk-assessments/fraud-detector.md" has not been reviewed in over 365 days`)
 }
 
-// --- ISO 42001 §7.4: Model evaluation ---
 
 func TestRunISO42001_ModelEval_Pass(t *testing.T) {
 	f := runISO42001Eval(t, "eval-pass.json")
@@ -92,7 +91,6 @@ func runISO42001Eval(t *testing.T, fixture string) apiv1.Finding {
 	return r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
 }
 
-// --- ISO 42001 §8.2: Data Quality ---
 
 func TestRunISO42001_DataQuality_Pass(t *testing.T) {
 	f := runISO42001DataQuality(t, "data-quality-pass.json")

@@ -9,9 +9,6 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
-// f is shorthand for building a Finding with just the fields the detector
-// inspects. The `msg` slot lands in Messages — the detector pulls the first
-// non-empty entry into Transition.Rationale at boundary time.
 func f(id string, st apiv1.FindingStatus, msg string) apiv1.Finding {
 	out := apiv1.Finding{ControlID: id, Status: st}
 	if msg != "" {
@@ -27,8 +24,6 @@ func TestDetect_NilOrEmptyInputsReturnNil(t *testing.T) {
 }
 
 func TestDetect_FirstRunHasNoPriorAndYieldsNoDrift(t *testing.T) {
-	// First-ever run: 50 fresh controls, all with status. Surfacing them as
-	// drift would be a wall of noise the user has to dismiss.
 	current := []apiv1.Finding{
 		f("a", apiv1.StatusPass, ""),
 		f("b", apiv1.StatusFail, "bad config"),
@@ -68,8 +63,6 @@ func TestDetect_FailToPassIsEmittedAsRemediation(t *testing.T) {
 }
 
 func TestDetect_NewControlsAreNotDrift(t *testing.T) {
-	// A new control showing up after a library upgrade must NOT be
-	// reported as drift — it's a scope addition, not a regression.
 	prior := []apiv1.Finding{f("a", apiv1.StatusPass, "")}
 	current := []apiv1.Finding{
 		f("a", apiv1.StatusPass, ""),
@@ -79,8 +72,6 @@ func TestDetect_NewControlsAreNotDrift(t *testing.T) {
 }
 
 func TestDetect_DisappearedControlsAreNotDrift(t *testing.T) {
-	// Scope shrunk (controls removed from library). Surface as drift would
-	// imply someone broke a control they actually intentionally retired.
 	prior := []apiv1.Finding{
 		f("a", apiv1.StatusPass, ""),
 		f("b-retired", apiv1.StatusFail, "x"),

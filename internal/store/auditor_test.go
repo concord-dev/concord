@@ -24,7 +24,6 @@ func TestSetUserAuditor_RoundTripsAndIsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, got)
 
-	// Idempotent — re-granting must not error.
 	require.NoError(t, s.SetUserAuditor(ctx, u.ID, true))
 
 	require.NoError(t, s.SetUserAuditor(ctx, u.ID, false))
@@ -42,8 +41,6 @@ func TestSetUserAuditor_UnknownUserReturnsNotFound(t *testing.T) {
 }
 
 func TestHasPermission_AuditorShortCircuitsReadsAcrossAnyOrg(t *testing.T) {
-	// The whole point of the auditor flag: a user who is NOT a member of
-	// org X must still pass HasPermission for any *:read perm.
 	s := openTestStore(t)
 	ctx := context.Background()
 	auditor, _ := s.CreateUser(ctx, store.CreateUserParams{
@@ -51,7 +48,6 @@ func TestHasPermission_AuditorShortCircuitsReadsAcrossAnyOrg(t *testing.T) {
 	})
 	require.NoError(t, s.SetUserAuditor(ctx, auditor.ID, true))
 
-	// Two orgs neither of which the auditor belongs to.
 	a, _ := s.CreateOrganization(ctx, "OrgA", uniqueSlug("a"))
 	b, _ := s.CreateOrganization(ctx, "OrgB", uniqueSlug("b"))
 
@@ -67,9 +63,6 @@ func TestHasPermission_AuditorShortCircuitsReadsAcrossAnyOrg(t *testing.T) {
 }
 
 func TestHasPermission_AuditorDoesNotGrantWritePermissions(t *testing.T) {
-	// Equally important — auditor must NOT escalate to writes. Anyone
-	// reviewing a SOC 2 report needs evidence and read access, not the
-	// ability to disable webhooks or override controls.
 	s := openTestStore(t)
 	ctx := context.Background()
 	auditor, _ := s.CreateUser(ctx, store.CreateUserParams{
@@ -93,8 +86,6 @@ func TestHasPermission_AuditorDoesNotGrantWritePermissions(t *testing.T) {
 }
 
 func TestHasPermission_NonAuditorStillGatedByPerOrgRole(t *testing.T) {
-	// Sanity: the auditor short-circuit must not regress non-auditor
-	// users — they still need a real role binding.
 	s := openTestStore(t)
 	ctx := context.Background()
 	u, _ := s.CreateUser(ctx, store.CreateUserParams{
@@ -111,14 +102,10 @@ func TestListUserOrgs_AuditorSeesEveryOrgWithSyntheticRole(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// Seed three orgs.
 	a, _ := s.CreateOrganization(ctx, "A", uniqueSlug("a"))
 	b, _ := s.CreateOrganization(ctx, "B", uniqueSlug("b"))
 	c, _ := s.CreateOrganization(ctx, "C", uniqueSlug("c"))
 
-	// Auditor is a member of A only (with the owner role) — we want to
-	// prove that the real role on A shows up, AND the auditor-synthetic
-	// role shows up for B and C.
 	auditor, _ := s.CreateUser(ctx, store.CreateUserParams{
 		FirstName: "Au", LastName: "Bm", Email: uniqueEmail("auditor"),
 	})
@@ -134,14 +121,12 @@ func TestListUserOrgs_AuditorSeesEveryOrgWithSyntheticRole(t *testing.T) {
 		byOrgID[uo.Organization.ID.String()] = uo
 	}
 
-	// A: real owner role (not the synthetic auditor placeholder).
 	require.Contains(t, byOrgID, a.ID.String())
 	if assert.Len(t, byOrgID[a.ID.String()].Roles, 1) {
 		assert.Equal(t, "owner", byOrgID[a.ID.String()].Roles[0].Name,
 			"real role bindings must take precedence over the synthetic auditor role on orgs the user actually belongs to")
 	}
 
-	// B + C: synthetic auditor role.
 	for _, org := range []store.Organization{b, c} {
 		uo, present := byOrgID[org.ID.String()]
 		require.Truef(t, present, "auditor must see org %s in their org list", org.Slug)
@@ -155,7 +140,6 @@ func TestListAuditors_FiltersToFlaggedUsers(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// One auditor, one regular user, in that order.
 	au, _ := s.CreateUser(ctx, store.CreateUserParams{
 		FirstName: "A", LastName: "u", Email: uniqueEmail("auditor"),
 	})
@@ -172,9 +156,6 @@ func TestListAuditors_FiltersToFlaggedUsers(t *testing.T) {
 	}
 }
 
-// uuidNil returns the zero UUID — kept in a helper because importing
-// google/uuid for a single literal here would otherwise force every
-// other test in this file to thread it.
 func uuidNil(t *testing.T) (zero [16]byte) {
 	t.Helper()
 	return zero

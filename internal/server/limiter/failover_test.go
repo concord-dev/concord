@@ -13,9 +13,6 @@ import (
 	"github.com/concord-dev/concord/internal/server/limiter"
 )
 
-// fakePrimary implements failoverPrimary via AllowE so tests can exercise
-// FailoverBucket without booting a Redis. The behaviour is set per-call
-// from the test by mutating ResultErr / ResultOK / ResultRA.
 type fakePrimary struct {
 	mu       sync.Mutex
 	calls    atomic.Uint64
@@ -36,7 +33,6 @@ func TestFailover_PrimaryHealthyServesPrimary(t *testing.T) {
 	fallback := limiter.NewMemoryBucket(limiter.Config{
 		Rate: limiter.Every(time.Hour), Burst: 1, // very tight; would deny if hit
 	})
-	// burn the fallback's only token so any fall-through would 429.
 	fallback.Allow("x")
 
 	fb, err := limiter.NewFailoverBucket(primary, fallback)
@@ -58,8 +54,6 @@ func TestFailover_PrimaryErrorsRouteToFallback(t *testing.T) {
 	require.NoError(t, err)
 	fb.OnPrimaryError = func(error) { errCount.Add(1) }
 
-	// First two must be admitted by the fallback bucket (burst=2);
-	// third must be denied.
 	ok1, _ := fb.Allow("k")
 	ok2, _ := fb.Allow("k")
 	ok3, ra3 := fb.Allow("k")
@@ -72,12 +66,6 @@ func TestFailover_PrimaryErrorsRouteToFallback(t *testing.T) {
 }
 
 func TestFailover_FallbackTighterThanPrimary(t *testing.T) {
-	// The whole point of the design: a sustained Redis outage caps each
-	// pod at a fraction of the shared budget, so the fleet-wide ceiling
-	// during the outage stays close to the configured rate. We model
-	// that by allowing the primary to admit 10 in burst but the fallback
-	// only 2. When the primary is healthy, all 10 pass. When it fails,
-	// only 2 do.
 	primary := &fakePrimary{ResultOK: true}
 	fallback := limiter.NewMemoryBucket(limiter.Config{Rate: limiter.Every(time.Hour), Burst: 2})
 	fb, _ := limiter.NewFailoverBucket(primary, fallback)
@@ -87,7 +75,6 @@ func TestFailover_FallbackTighterThanPrimary(t *testing.T) {
 		assert.True(t, ok, "primary healthy: 10 passes")
 	}
 
-	// Now make the primary fail and observe the tightened fallback.
 	primary.Err = limiter.ErrUnavailable
 	primary.ResultOK = false
 	pass := 0

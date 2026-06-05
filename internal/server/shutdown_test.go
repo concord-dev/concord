@@ -11,9 +11,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// TestShutdown_NoInFlightWorkReturnsImmediately is the happy path: no
-// outstanding webhooks/emails, Shutdown must not introduce artificial
-// latency on a clean SIGTERM.
 func TestShutdown_NoInFlightWorkReturnsImmediately(t *testing.T) {
 	h := newHarness(t)
 	start := time.Now()
@@ -22,10 +19,6 @@ func TestShutdown_NoInFlightWorkReturnsImmediately(t *testing.T) {
 		"clean Shutdown with no background work must return promptly — anything > 100ms is a regression")
 }
 
-// TestShutdown_IsIdempotent guards against the cmd/server signal path
-// reaching Concord.Shutdown twice (e.g. SIGTERM followed by a second
-// signal). A second call with no in-flight work must return promptly and
-// without error.
 func TestShutdown_IsIdempotent(t *testing.T) {
 	h := newHarness(t)
 	require.NoError(t, h.c.Shutdown(context.Background()))

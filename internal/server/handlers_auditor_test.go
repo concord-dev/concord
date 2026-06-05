@@ -13,15 +13,10 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// TestAuditor_GrantThenCrossOrgReadFlows is the load-bearing integration
-// for B2: an operator promotes a user to auditor, the user logs in
-// normally, and then reads org-scoped endpoints on an org they are NOT
-// a member of. Writes against the same org must continue to 403.
 func TestAuditor_GrantThenCrossOrgReadFlows(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 
-	// Create the would-be auditor user (NOT a member of h.org).
 	password := "audit-pass-" + h.org.Slug
 	auditor, err := h.st.CreateUser(ctx, store.CreateUserParams{
 		FirstName: "Ex", LastName: "Auditor",
@@ -30,7 +25,6 @@ func TestAuditor_GrantThenCrossOrgReadFlows(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Operator grants the auditor flag via the public endpoint.
 	body := fmt.Sprintf(`{"user_id":%q}`, auditor.ID.String())
 	resp, raw := h.do(t, "POST", "/operator/v1/auditors", body, testOperatorToken)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "grant: %s", raw)
@@ -39,7 +33,6 @@ func TestAuditor_GrantThenCrossOrgReadFlows(t *testing.T) {
 	assert.True(t, granted.IsAuditor,
 		"the grant response must carry the post-update row so the operator UI sees the new state immediately")
 
-	// Auditor logs in.
 	loginBody := fmt.Sprintf(`{"email":%q,"password":%q}`, auditor.Email, password)
 	resp, raw = h.do(t, "POST", "/v1/auth/login", loginBody, "")
 	require.Equalf(t, http.StatusCreated, resp.StatusCode, "login: %s", raw)
@@ -48,18 +41,14 @@ func TestAuditor_GrantThenCrossOrgReadFlows(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &loginRes))
 
-	// Read against h.org — auditor is NOT a member of it but the read
-	// must still succeed because of is_auditor.
 	resp, raw = h.do(t, "GET", "/v1/orgs/"+h.org.Slug+"/runs", "", loginRes.Token)
 	assert.Equalf(t, http.StatusOK, resp.StatusCode,
 		"auditor must read runs on an org they don't belong to: %s", raw)
 
-	// Audit log read — gated by audit:read, which is also a *:read perm.
 	resp, _ = h.do(t, "GET", "/v1/orgs/"+h.org.Slug+"/audit", "", loginRes.Token)
 	assert.Equal(t, http.StatusOK, resp.StatusCode,
 		"auditor must reach /audit on a non-member org — that's the headline use case for external auditors")
 
-	// Write must STILL 403 — auditor flag never grants writes.
 	submitBody := `{"agent":{"version":"x"},"started_at":"2026-06-04T00:00:00Z","completed_at":"2026-06-04T00:00:01Z","summary":{},"findings":[]}`
 	resp, _ = h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/runs", submitBody, loginRes.Token)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode,
@@ -87,17 +76,13 @@ func TestAuditor_RevokeRestoresStrictPerOrgGating(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &loginRes))
 
-	// Confirm read works pre-revoke.
 	resp, _ = h.do(t, "GET", "/v1/orgs/"+h.org.Slug+"/runs", "", loginRes.Token)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	// Revoke via the operator endpoint.
 	body := fmt.Sprintf(`{"user_id":%q}`, auditor.ID.String())
 	resp, _ = h.do(t, "DELETE", "/operator/v1/auditors", body, testOperatorToken)
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 
-	// Subsequent read must now 403 — the same session, the same endpoint,
-	// the only thing that changed is the user's is_auditor flag.
 	resp, _ = h.do(t, "GET", "/v1/orgs/"+h.org.Slug+"/runs", "", loginRes.Token)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode,
 		"after revoke, the auditor's session must lose cross-org read access on the next request — proves HasPermission consults is_auditor live, not at session-mint time")

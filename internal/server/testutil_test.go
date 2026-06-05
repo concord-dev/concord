@@ -47,8 +47,6 @@ func openStore(t *testing.T) *store.Store {
 	return s
 }
 
-// harness bundles a running httptest server with a pre-built tenant: one
-// org, one API token, one user (with a known password and the owner role).
 type harness struct {
 	srv      *httptest.Server
 	c        *server.Concord
@@ -93,9 +91,6 @@ func newHarness(t *testing.T) *harness {
 		password: password, apiToken: plain}
 }
 
-// rebuildServer reruns Router on the Concord struct and swaps the underlying
-// httptest.Server. Use after toggling test-only state (e.g. SetLimitsForTest)
-// since the router captures handler-level deps at construction time.
 func (h *harness) rebuildServer(t *testing.T) {
 	t.Helper()
 	h.srv.Close()
@@ -125,8 +120,6 @@ func (h *harness) do(t *testing.T, method, path, body, auth string) (*http.Respo
 }
 
 
-// login posts to /v1/auth/login with the harness credentials and returns
-// the freshly-minted session token plaintext.
 func (h *harness) login(t *testing.T) string {
 	t.Helper()
 	body := fmt.Sprintf(`{"email":%q,"password":%q}`, h.user.Email, h.password)
@@ -142,9 +135,6 @@ func (h *harness) login(t *testing.T) string {
 func uniqueSlug(p string) string  { return fmt.Sprintf("%s-%s", p, uuid.NewString()[:8]) }
 func uniqueEmail(p string) string { return fmt.Sprintf("%s+%s@example.com", p, uuid.NewString()[:8]) }
 
-// submitTestRun POSTs a synthetic agent submission to /v1/orgs/{slug}/runs.
-// In agent-push mode there is no server-side worker to trigger; tests that
-// want a run to exist just push one. Returns the run id on success.
 func (h *harness) submitTestRun(t *testing.T, auth string, findings string) string {
 	t.Helper()
 	if findings == "" {

@@ -82,7 +82,6 @@ func TestListAuditEvents_FiltersComposeAndOrderNewestFirst(t *testing.T) {
 	ctx := context.Background()
 	org, _ := s.CreateOrganization(ctx, "Filter", uniqueSlug("filter"))
 
-	// Three events in a known order.
 	for _, action := range []string{"x", "y", "x"} {
 		s.RecordAudit(ctx, store.RecordAuditParams{
 			ActorKind: store.AuditActorSystem,
@@ -92,28 +91,22 @@ func TestListAuditEvents_FiltersComposeAndOrderNewestFirst(t *testing.T) {
 		time.Sleep(5 * time.Millisecond) // separate occurred_at timestamps
 	}
 
-	// Action filter.
 	xs, err := s.ListAuditEvents(ctx, org.ID, store.ListAuditOptions{Action: "x"})
 	require.NoError(t, err)
 	require.Len(t, xs, 2)
 	for _, e := range xs {
 		assert.Equal(t, "x", e.Action)
 	}
-	// Newest first.
 	assert.True(t, xs[0].OccurredAt.After(xs[1].OccurredAt) ||
 		xs[0].OccurredAt.Equal(xs[1].OccurredAt),
 		"results must be ordered newest first")
 
-	// Limit cap.
 	one, err := s.ListAuditEvents(ctx, org.ID, store.ListAuditOptions{Limit: 1})
 	require.NoError(t, err)
 	assert.Len(t, one, 1)
 }
 
 func TestRecordAudit_OrgDeleteCascadesEvents(t *testing.T) {
-	// audit_event.org_id has ON DELETE CASCADE — tenant deletion must wipe
-	// its audit trail along with the rest of the org's rows. Operator events
-	// that scoped no org are unaffected, but we don't exercise that here.
 	s := openTestStore(t)
 	ctx := context.Background()
 	org, _ := s.CreateOrganization(ctx, "Cascade", uniqueSlug("cascade"))
@@ -136,8 +129,6 @@ func TestRecordAudit_OrgDeleteCascadesEvents(t *testing.T) {
 }
 
 func TestRecordAudit_MissingActionDoesNotPanic(t *testing.T) {
-	// Best-effort contract: an invalid call must log and return cleanly
-	// rather than crashing the caller.
 	s := openTestStore(t)
 	ctx := context.Background()
 	org, _ := s.CreateOrganization(ctx, "Bad", uniqueSlug("bad"))
@@ -145,7 +136,6 @@ func TestRecordAudit_MissingActionDoesNotPanic(t *testing.T) {
 	s.RecordAudit(ctx, store.RecordAuditParams{
 		ActorKind: store.AuditActorSystem,
 		OrgID:     &org.ID,
-		// Action intentionally empty.
 	})
 
 	events, _ := s.ListAuditEvents(ctx, org.ID, store.ListAuditOptions{})

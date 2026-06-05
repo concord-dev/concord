@@ -60,7 +60,6 @@ func TestNewWriter_PlainRequiresCredentials(t *testing.T) {
 }
 
 func TestNewWriter_Defaults(t *testing.T) {
-	// A minimum-config writer should be constructable without error.
 	w, err := kafkax.NewWriter(kafkax.Config{
 		Brokers: []string{"localhost:9092"},
 		Topic:   "concord.events",

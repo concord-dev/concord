@@ -14,8 +14,6 @@ import (
 	"github.com/concord-dev/concord/internal/server/cors"
 )
 
-// trivialHandler returns a non-empty body so tests can confirm the inner
-// handler ran (vs. CORS short-circuiting).
 func trivialHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "ok")
@@ -85,7 +83,6 @@ func TestNoOriginHeader_PassesThroughForCurlAndAgents(t *testing.T) {
 	srv := httptest.NewServer(mw(trivialHandler()))
 	t.Cleanup(srv.Close)
 
-	// No Origin header → server-to-server or CLI caller. Must work normally.
 	resp, err := http.Get(srv.URL + "/x")
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -127,7 +124,6 @@ func TestPreflight_AllowedOrigin_Returns204WithoutCallingHandler(t *testing.T) {
 	}
 	assert.Equal(t, "720", resp.Header.Get("Access-Control-Max-Age"),
 		"12-minute MaxAge should serialize as 720 seconds")
-	// Vary on the preflight-specific request headers protects intermediaries.
 	vary := strings.Join(resp.Header.Values("Vary"), ",")
 	assert.Contains(t, vary, "Access-Control-Request-Method")
 	assert.Contains(t, vary, "Access-Control-Request-Headers")
@@ -157,10 +153,6 @@ func TestPreflight_DisallowedOrigin_204WithoutCORSHeaders(t *testing.T) {
 }
 
 func TestPreflight_WithoutRequestMethodHeader_IsTreatedAsRegularOPTIONS(t *testing.T) {
-	// Plain OPTIONS (no Access-Control-Request-Method) is NOT a preflight —
-	// it should fall through to the inner handler, which for our mux means
-	// 404 (no OPTIONS routes registered) but at least we don't accidentally
-	// short-circuit non-CORS OPTIONS calls.
 	innerCalled := false
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		innerCalled = true

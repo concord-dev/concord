@@ -23,7 +23,6 @@ func TestDocs_ServesSwaggerUIShim(t *testing.T) {
 	resp, body := h.do(t, "GET", "/docs", "", "")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Contains(t, resp.Header.Get("Content-Type"), "text/html")
-	// The shim must point at /openapi.yaml and load swagger-ui from CDN.
 	assert.Contains(t, string(body), "/openapi.yaml")
 	assert.Contains(t, string(body), "swagger-ui")
 }

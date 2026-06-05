@@ -19,9 +19,6 @@ import (
 	"github.com/concord-dev/concord/internal/server/idempotency"
 )
 
-// requireRedis returns a *redis.Client against CONCORD_TEST_REDIS_ADDR
-// or skips. The idempotency tests need a real Redis because the
-// middleware leans on SETNX semantics + TTLs.
 func requireRedis(t *testing.T) *redis.Client {
 	t.Helper()
 	addr := os.Getenv("CONCORD_TEST_REDIS_ADDR")
@@ -43,9 +40,6 @@ func requireRedis(t *testing.T) *redis.Client {
 	return rdb
 }
 
-// newServer wraps a counting handler in the middleware so we can
-// observe how many times it executed. Returns the test server URL +
-// a pointer to the counter.
 func newServer(t *testing.T, cfg idempotency.Config) (string, *atomic.Int32) {
 	t.Helper()
 	var calls atomic.Int32
@@ -182,9 +176,6 @@ func TestIdempotency_ConcurrentRequestsCollapseToOneExecution(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Exactly one request executed the handler. The other 19 either
-	// got the cached response or saw the pending sentinel (409). The
-	// sum must be N, the handler must have run once.
 	assert.Equal(t, int32(1), calls.Load(),
 		"only one of %d concurrent requests should execute the handler", N)
 	assert.Equal(t, int32(N), successCount.Load()+pendingCount.Load(),
@@ -192,8 +183,6 @@ func TestIdempotency_ConcurrentRequestsCollapseToOneExecution(t *testing.T) {
 }
 
 func TestIdempotency_DegradesToPassThroughWhenRedisUnreachable(t *testing.T) {
-	// A client pointed at a port nothing listens on. Every Redis call
-	// fails; the middleware must let the handler run anyway.
 	rdb := redis.NewClient(&redis.Options{
 		Addr:        "127.0.0.1:1",
 		DialTimeout: 50 * time.Millisecond,

@@ -13,8 +13,6 @@ import (
 	"github.com/concord-dev/concord/internal/cli/credentials"
 )
 
-// pinPath redirects credentials.Path() at a temp file for the test. Done
-// via the CONCORD_CREDENTIALS_FILE env var which the package honours.
 func pinPath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -68,8 +66,6 @@ func TestCurrent_ErrorsWhenCursorPointsAtMissingProfile(t *testing.T) {
 }
 
 func TestSave_IsAtomicAcrossCrashSimulation(t *testing.T) {
-	// Write once, then write again with different content. The temp-file
-	// rename pattern must leave NO stale .tmp siblings on the happy path.
 	path := pinPath(t)
 
 	f1 := &credentials.File{}
@@ -105,11 +101,8 @@ func TestLoadOrInit_BuildsEmptyFileWhenMissing(t *testing.T) {
 
 func TestDelete_TolerantOfMissingFile(t *testing.T) {
 	pinPath(t)
-	// File does not exist yet — Delete must be a no-op, NOT an error. The
-	// user's intent is "be logged out" and they already are.
 	assert.NoError(t, credentials.Delete())
 
-	// Now actually write something and confirm Delete removes it.
 	f := &credentials.File{}
 	f.SetCurrent("default")
 	require.NoError(t, credentials.Save(f))
@@ -134,7 +127,6 @@ func TestPath_HonoursCONCORDCredentialsFileOverride(t *testing.T) {
 }
 
 func TestPath_FallsBackToXDGOrHome(t *testing.T) {
-	// Explicit XDG wins over HOME.
 	t.Setenv("CONCORD_CREDENTIALS_FILE", "")
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg")
 	p, err := credentials.Path()
@@ -142,9 +134,6 @@ func TestPath_FallsBackToXDGOrHome(t *testing.T) {
 	assert.Equal(t, "/tmp/xdg/concord/credentials.json", p)
 }
 
-// TestLoad_RejectsCorruptJSON proves Load doesn't silently fall back to an
-// empty file when the on-disk content is garbage — the user gets a hard
-// error so they can repair it, not a stealth re-login prompt.
 func TestLoad_RejectsCorruptJSON(t *testing.T) {
 	path := pinPath(t)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))

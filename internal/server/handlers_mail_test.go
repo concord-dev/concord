@@ -14,10 +14,6 @@ import (
 	"github.com/concord-dev/concord/internal/notify/mail"
 )
 
-// captureMailer records every Send call. Implements mail.Mailer so it
-// drops in wherever the prod LogMailer/SMTPMailer would. The waitFor*
-// helper exists because both flows fire the email off a goroutine — the
-// HTTP response returns before Send completes, so the test must poll.
 type captureMailer struct {
 	mu   sync.Mutex
 	sent []mail.Message
@@ -66,10 +62,6 @@ func TestPasswordReset_DeliversEmailWithConfirmURL(t *testing.T) {
 }
 
 func TestPasswordReset_UnknownEmailDoesNotSendMail(t *testing.T) {
-	// Anti-enumeration: the API still returns 200, but we must NOT email
-	// a randomly-typed address. Otherwise an attacker who can intercept
-	// the SMTP relay can enumerate accounts via "an email arrived = it's
-	// real" side channel.
 	h := newHarness(t)
 	cm := &captureMailer{}
 	h.c.SetMailerForTest(cm)
@@ -79,7 +71,6 @@ func TestPasswordReset_UnknownEmailDoesNotSendMail(t *testing.T) {
 		`{"email":"nobody-here@example.com"}`, "")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	// Give the background goroutine plenty of time to misbehave.
 	time.Sleep(150 * time.Millisecond)
 	cm.mu.Lock()
 	defer cm.mu.Unlock()

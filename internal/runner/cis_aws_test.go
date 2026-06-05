@@ -48,7 +48,6 @@ func runCISAWSS3(t *testing.T, fixture string) apiv1.Finding {
 	return runControlWithFixture(t, cisAWSS3Path, fixture)
 }
 
-// --- CIS-AWS-1.4 ---
 
 func TestRunCISAWS_NoRootAccessKeys_Pass(t *testing.T) {
 	f := runControlWithFixture(t, cisAWSNoRootKeysPath, "iam-pass.json")
@@ -68,7 +67,6 @@ func TestRunCISAWS_NoRootAccessKeys_WarnOnMFAGaps(t *testing.T) {
 	assert.Contains(t, f.Warnings, "only 8 of 12 IAM users have MFA devices configured")
 }
 
-// --- CIS-AWS-1.5 ---
 
 func TestRunCISAWS_RootMFA_Pass(t *testing.T) {
 	f := runControlWithFixture(t, cisAWSRootMFAPath, "iam-pass.json")
@@ -81,7 +79,6 @@ func TestRunCISAWS_RootMFA_FailWhenDisabled(t *testing.T) {
 	assert.Contains(t, f.Messages, "root account MFA is not enabled — enable an MFA device on the root user immediately")
 }
 
-// --- CIS-AWS-2.1.5 ---
 
 func TestRunCISAWS_S3PAB_Pass(t *testing.T) {
 	f := runControlWithFixture(t, cisAWSS3PABPath, "s3-pab-pass.json")
@@ -91,13 +88,10 @@ func TestRunCISAWS_S3PAB_Pass(t *testing.T) {
 func TestRunCISAWS_S3PAB_PartialFails(t *testing.T) {
 	f := runControlWithFixture(t, cisAWSS3PABPath, "s3-pab-partial.json")
 	assert.Equal(t, apiv1.StatusFail, f.Status)
-	// One bucket has block_public_policy disabled.
 	assert.Contains(t, f.Messages, `bucket "concord-prod-data" has Public Access Block flag "block_public_policy" disabled`)
-	// Other bucket has no PAB at all.
 	assert.Contains(t, f.Messages, `bucket "concord-website-assets" has no Public Access Block configuration at all`)
 }
 
-// --- CIS-AWS-3.1 ---
 
 func TestRunCISAWS_CloudTrail_Pass(t *testing.T) {
 	f := runControlWithFixture(t, cisAWSCloudTrailPath, "cloudtrail-pass.json")
@@ -123,7 +117,6 @@ func TestRunCISAWS_CloudTrail_EmptyFails(t *testing.T) {
 	assert.Contains(t, f.Messages, "no CloudTrail trails exist in this account")
 }
 
-// --- helper ---
 
 func runControlWithFixture(t *testing.T, controlRelPath, fixture string) apiv1.Finding {
 	t.Helper()

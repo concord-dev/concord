@@ -11,9 +11,6 @@ import (
 	"github.com/concord-dev/concord/internal/server/openapi"
 )
 
-// spec is the lightweight shape we parse the YAML into. We don't ship a
-// full OpenAPI library dep just for tests; YAML round-trip + targeted
-// assertions are enough to catch drift.
 type spec struct {
 	OpenAPI    string                            `json:"openapi"`
 	Info       map[string]any                    `json:"info"`
@@ -58,35 +55,27 @@ func TestSpec_SecuritySchemesPresent(t *testing.T) {
 	}
 }
 
-// TestSpec_CoversEveryExpectedRoute is the drift detector. Every path the
-// server registers should appear in the spec; the test fails loudly when a
-// route is added without updating the contract.
 func TestSpec_CoversEveryExpectedRoute(t *testing.T) {
 	s := loadSpec(t)
 
 	wantRoutes := map[string][]string{
-		// Public.
 		"/healthz":      {"get"},
 		"/readyz":       {"get"},
 		"/metrics":      {"get"},
 		"/version":      {"get"},
-		// Auth.
 		"/v1/auth/login":                        {"post"},
 		"/v1/auth/login/mfa":                    {"post"},
 		"/v1/auth/logout":                       {"post"},
 		"/v1/auth/password-reset":               {"post"},
 		"/v1/auth/password-reset/confirm":       {"post"},
 		"/v1/invitations/accept":                {"get", "post"},
-		// Session-scoped.
 		"/v1/me":      {"get"},
 		"/v1/me/orgs": {"get"},
-		// MFA enrollment + management (session-scoped).
 		"/v1/me/mfa":                                {"get"},
 		"/v1/me/mfa/totp/enroll":                    {"post"},
 		"/v1/me/mfa/totp/verify":                    {"post"},
 		"/v1/me/mfa/disable":                        {"post"},
 		"/v1/me/mfa/recovery-codes/regenerate":      {"post"},
-		// Org API.
 		"/v1/orgs/{slug}/me":                          {"get"},
 		"/v1/orgs/{slug}/frameworks":                  {"get"},
 		"/v1/orgs/{slug}/controls":                    {"get"},
@@ -106,7 +95,6 @@ func TestSpec_CoversEveryExpectedRoute(t *testing.T) {
 		"/v1/orgs/{slug}/invitations/{id}":        {"delete"},
 		"/v1/orgs/{slug}/audit":                   {"get"},
 		"/v1/orgs/{slug}/audit-package":           {"get"},
-		// Operator (SaaS-operator back-door — gates CONCORD_OPERATOR_TOKEN).
 		"/operator/v1/orgs":                         {"get", "post"},
 		"/operator/v1/orgs/{slug}":                  {"get"},
 		"/operator/v1/orgs/{slug}/tokens":           {"get", "post"},
@@ -147,13 +135,6 @@ func TestSpec_EveryOperationHasOperationID(t *testing.T) {
 	}
 }
 
-// TestSpec_NoUnreferencedSchemas catches dead components. Every top-level
-// schema should appear in at least one $ref or be declared as an `allOf`
-// base for another schema.
-//
-// Implementation: serialize the parsed map back to YAML (bytes are easiest
-// to grep) and check every schema name shows up at least twice (definition
-// + one $ref reference).
 func TestSpec_NoUnreferencedSchemas(t *testing.T) {
 	raw, err := openapi.SpecYAML()
 	require.NoError(t, err)
@@ -169,8 +150,6 @@ func TestSpec_NoUnreferencedSchemas(t *testing.T) {
 	var unreferenced []string
 	for _, n := range names {
 		needle := "#/components/schemas/" + n
-		// Schemas that exist only as `allOf` bases (RoleWithPermissions
-		// references Role) still satisfy this rule via the needle above.
 		if !contains(body, needle) {
 			unreferenced = append(unreferenced, n)
 		}

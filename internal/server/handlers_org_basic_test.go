@@ -39,7 +39,6 @@ func TestOrgAPI_UnknownOrgReturns404(t *testing.T) {
 func TestOrgAPI_OwnerSessionCanSubmitRun(t *testing.T) {
 	h := newHarness(t)
 	sessTok := h.login(t)
-	// Owner has runs:create — submitting an agent run via session auth works.
 	runID := h.submitTestRun(t, sessTok, "[]")
 	assert.NotEmpty(t, runID)
 }
@@ -48,7 +47,6 @@ func TestOrgAPI_ViewerSessionForbiddenFromCreateRun(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 
-	// Spin up a viewer user attached to the harness org.
 	viewerEmail := uniqueEmail("viewer")
 	viewerPass := "viewer-pass"
 	viewer, _ := h.st.CreateUser(ctx, store.CreateUserParams{
@@ -57,7 +55,6 @@ func TestOrgAPI_ViewerSessionForbiddenFromCreateRun(t *testing.T) {
 	viewerRole, _ := h.st.GetRoleByName(ctx, "viewer")
 	require.NoError(t, h.st.AssignRole(ctx, viewer.ID, h.org.ID, viewerRole.ID))
 
-	// Log the viewer in.
 	body := fmt.Sprintf(`{"email":%q,"password":%q}`, viewerEmail, viewerPass)
 	_, raw := h.do(t, "POST", "/v1/auth/login", body, "")
 	var got struct {
@@ -65,11 +62,9 @@ func TestOrgAPI_ViewerSessionForbiddenFromCreateRun(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &got))
 
-	// Viewer can READ.
 	respR, _ := h.do(t, "GET", "/v1/orgs/"+h.org.Slug+"/frameworks", "", got.Token)
 	assert.Equal(t, http.StatusOK, respR.StatusCode, "viewer holds controls:read")
 
-	// Viewer cannot SUBMIT runs.
 	respC, bodyC := h.do(t, "POST", "/v1/orgs/"+h.org.Slug+"/runs",
 		`{"agent":{"version":"t"},"started_at":"2026-01-01T00:00:00Z","completed_at":"2026-01-01T00:00:00Z","summary":{},"findings":[]}`,
 		got.Token)

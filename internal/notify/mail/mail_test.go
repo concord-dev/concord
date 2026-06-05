@@ -44,8 +44,6 @@ func TestBuildRFC822_HasCanonicalHeadersAndCRLFLines(t *testing.T) {
 	assert.Contains(t, s, "Subject: hello\r\n")
 	assert.Contains(t, s, "MIME-Version: 1.0\r\n")
 	assert.Contains(t, s, "Content-Type: text/plain; charset=utf-8\r\n")
-	// CRLF line endings throughout the body — bare LF would corrupt the
-	// SMTP DATA section because "\n.\n" terminates the message.
 	assert.Contains(t, s, "line1\r\nline2\r\n")
 	assert.NotContains(t, s, "line1\nline2",
 		"any bare LF in the wire bytes is a protocol violation waiting to happen")
@@ -57,8 +55,6 @@ func TestBuildRFC822_DefaultsEmptySubject(t *testing.T) {
 }
 
 
-// fakeSession records the verbs the mailer drives, plus the body bytes.
-// Per-call return-error knobs let us exercise failure paths.
 type fakeSession struct {
 	verbs        []string
 	bodyBytes    []byte
@@ -111,8 +107,6 @@ func TestSMTPMailer_DrivesProtocolInTheRightOrder(t *testing.T) {
 		To: "user@example.com", Subject: "hi", Body: "hello",
 	})
 	require.NoError(t, err)
-	// Order matters: HELO, then MAIL FROM, RCPT, DATA, QUIT. AUTH absent
-	// because Username was empty.
 	assert.Equal(t, []string{"HELO", "MAIL", "RCPT", "DATA", "QUIT"}, fs.verbs)
 	assert.Contains(t, string(fs.bodyBytes), "Subject: hi\r\n")
 	assert.Contains(t, string(fs.bodyBytes), "hello\r\n")
@@ -160,10 +154,6 @@ func TestSMTPMailer_RejectsInvalidAddresses(t *testing.T) {
 }
 
 
-// startFakeSMTP is a minimal SMTP server that speaks just enough of the
-// protocol to accept HELO, MAIL FROM, RCPT TO, DATA, QUIT. Used for one
-// integration test below; the rest of the SMTPMailer logic is covered by
-// the fakeSession unit tests above.
 func startFakeSMTP(t *testing.T) (host string, port int, recvd <-chan string) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -241,10 +231,6 @@ func handleSMTPConn(conn net.Conn, mu *sync.Mutex, bodies *[]string, ch chan<- s
 }
 
 func TestSMTPMailer_EndToEndAgainstFakeListener(t *testing.T) {
-	// Exercises the real defaultDial + smtp.Client path against an
-	// in-process listener. Catches anything the unit tests' fakeSession
-	// can't reach (real net/smtp quirks, line-ending bugs we'd never
-	// notice with bytes.Buffer captures).
 	host, port, recvd := startFakeSMTP(t)
 	m := New(Config{
 		Host: host, Port: port,

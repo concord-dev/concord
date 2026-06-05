@@ -18,24 +18,20 @@ func TestUserTOTP_EnrollFlow(t *testing.T) {
 		FirstName: "M", LastName: "FA", Email: uniqueEmail("totp"),
 	})
 
-	// New user → not enrolled.
 	enrolled, err := s.IsUserMFAEnrolled(ctx, u.ID)
 	require.NoError(t, err)
 	assert.False(t, enrolled)
 
-	// Begin enrollment → row exists but enrolled_at is NULL.
 	require.NoError(t, s.BeginUserTOTPEnrollment(ctx, u.ID, "JBSWY3DPEHPK3PXP"))
 	enrolled, err = s.IsUserMFAEnrolled(ctx, u.ID)
 	require.NoError(t, err)
 	assert.False(t, enrolled, "pending enrollment must NOT count as enrolled")
 
-	// Mark enrolled.
 	require.NoError(t, s.MarkUserTOTPEnrolled(ctx, u.ID))
 	enrolled, err = s.IsUserMFAEnrolled(ctx, u.ID)
 	require.NoError(t, err)
 	assert.True(t, enrolled)
 
-	// Re-enroll on an already-enrolled user must fail loudly.
 	err = s.BeginUserTOTPEnrollment(ctx, u.ID, "NEWSECRET")
 	assert.ErrorIs(t, err, store.ErrMFAAlreadyEnrolled,
 		"re-enrolling without disable first must error — silent overwrite would let a session hijack swap the second factor")
@@ -72,7 +68,6 @@ func TestRecoveryCodes_NormalizationAndOneTimeUse(t *testing.T) {
 	n, _ := s.CountUnusedRecoveryCodes(ctx, u.ID)
 	assert.Equal(t, 1, n)
 
-	// Different formatting must match (case-insensitive, dashes optional).
 	ok, err := s.ConsumeRecoveryCode(ctx, u.ID, "abcdefgh")
 	require.NoError(t, err)
 	assert.True(t, ok, "code must match regardless of case or dash formatting")
@@ -80,7 +75,6 @@ func TestRecoveryCodes_NormalizationAndOneTimeUse(t *testing.T) {
 	n, _ = s.CountUnusedRecoveryCodes(ctx, u.ID)
 	assert.Equal(t, 0, n, "consumed code must be marked used")
 
-	// Second submission of the same code now fails.
 	ok, err = s.ConsumeRecoveryCode(ctx, u.ID, "abcdefgh")
 	require.NoError(t, err)
 	assert.False(t, ok, "second use of the same recovery code must fail — one-time semantics")
@@ -102,7 +96,6 @@ func TestMFAChallenge_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, u.ID, gotUser)
 
-	// Replay must fail (consumed_at is set).
 	_, err = s.ConsumeMFAChallenge(ctx, plain)
 	assert.ErrorIs(t, err, store.ErrNotFound,
 		"a consumed challenge must not be reusable")

@@ -13,8 +13,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// submitTwoRuns inserts two minimal runs and returns their IDs in
-// chronological order. Helper used by every drift-store test below.
 func submitTwoRuns(t *testing.T, s *store.Store, orgID uuid.UUID) (uuid.UUID, uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
@@ -48,8 +46,6 @@ func TestGetPreviousRunFindings_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, firstID, priorID,
 		"prior run id must be the immediately-preceding run for this org")
-	// Postgres JSONB normalizes whitespace and key order on read; compare
-	// semantically by unmarshaling rather than string-matching the body.
 	var parsed []map[string]any
 	require.NoError(t, json.Unmarshal(findings, &parsed),
 		"prior findings must be valid JSON the detector can decode")
@@ -92,7 +88,6 @@ func TestRecordDriftEvents_AndListByOrg(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, events, 2, "list must surface every recorded transition")
 
-	// Pass→fail filter — the page-someone case.
 	regs, err := s.ListDriftEvents(ctx, org.ID, store.ListDriftOptions{From: "pass", To: "fail"})
 	require.NoError(t, err)
 	if assert.Len(t, regs, 1) {
@@ -104,9 +99,6 @@ func TestRecordDriftEvents_AndListByOrg(t *testing.T) {
 }
 
 func TestRecordDriftEvents_EmptySliceIsNoOp(t *testing.T) {
-	// Common-case path: a run with no transitions must not start a tx.
-	// We don't have a great way to assert "no tx began" but we can at
-	// least confirm zero rows materialize.
 	s := openTestStore(t)
 	ctx := context.Background()
 	org, _ := s.CreateOrganization(ctx, "Empty", uniqueSlug("empty"))
@@ -119,7 +111,6 @@ func TestRecordDriftEvents_EmptySliceIsNoOp(t *testing.T) {
 }
 
 func TestListDriftEvents_ScopesByOrg(t *testing.T) {
-	// A drift event for org A must NOT surface in org B's list.
 	s := openTestStore(t)
 	ctx := context.Background()
 	a, _ := s.CreateOrganization(ctx, "A", uniqueSlug("a"))

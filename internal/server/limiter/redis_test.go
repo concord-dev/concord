@@ -15,10 +15,6 @@ import (
 	"github.com/concord-dev/concord/internal/server/limiter"
 )
 
-// requireRedis skips the test unless CONCORD_TEST_REDIS_ADDR points at a
-// reachable Redis. We deliberately don't auto-start one — CI provides
-// redis as a service container; local dev runs `make pg` style
-// docker-compose to bring redis up alongside Postgres.
 func requireRedis(t *testing.T) *redis.Client {
 	t.Helper()
 	addr := os.Getenv("CONCORD_TEST_REDIS_ADDR")
@@ -40,8 +36,6 @@ func requireRedis(t *testing.T) *redis.Client {
 	return rdb
 }
 
-// uniquePrefix gives every test its own Redis keyspace so re-runs and
-// parallel runs don't contaminate each other.
 func uniquePrefix(t *testing.T) string {
 	t.Helper()
 	return "concord:rl-test:" + t.Name() + ":" + time.Now().Format("150405.000000") + ":"
@@ -101,7 +95,6 @@ func TestRedisBucket_EmptyKeyShortCircuits(t *testing.T) {
 
 func TestRedisBucket_RefillsOverTime(t *testing.T) {
 	rdb := requireRedis(t)
-	// 1 token per 100ms so the test completes quickly.
 	b, err := limiter.NewRedisBucket(rdb, limiter.RedisBucketOptions{
 		Config:  limiter.Config{Rate: limiter.Every(100 * time.Millisecond), Burst: 1},
 		Prefix:  uniquePrefix(t),
@@ -114,16 +107,12 @@ func TestRedisBucket_RefillsOverTime(t *testing.T) {
 	denied, _ := b.Allow("k")
 	assert.False(t, denied, "second is rate-limited")
 
-	// Wait > 1 token's worth of time and re-attempt.
 	time.Sleep(150 * time.Millisecond)
 	ok, _ = b.Allow("k")
 	assert.True(t, ok, "after refill window a new token is available")
 }
 
 func TestRedisBucket_ConcurrentAtomicSpend(t *testing.T) {
-	// Atomicity check: with burst=10 and Rate set so refill is negligible
-	// during the test, exactly 10 of 200 concurrent Allow calls must
-	// succeed. If Lua atomicity is broken we'd see >10 or <10 passes.
 	rdb := requireRedis(t)
 	b, err := limiter.NewRedisBucket(rdb, limiter.RedisBucketOptions{
 		Config:  limiter.Config{Rate: limiter.Every(time.Hour), Burst: 10},
@@ -150,9 +139,6 @@ func TestRedisBucket_ConcurrentAtomicSpend(t *testing.T) {
 }
 
 func TestRedisBucket_FailsClosedOnUnreachableRedis(t *testing.T) {
-	// A standalone client pointed at a port nothing listens on. Each
-	// Allow must return (false, ≥1s) and AllowE must surface
-	// ErrUnavailable so FailoverBucket can route around it.
 	rdb := redis.NewClient(&redis.Options{
 		Addr:        "127.0.0.1:1", // reserved port
 		DialTimeout: 100 * time.Millisecond,

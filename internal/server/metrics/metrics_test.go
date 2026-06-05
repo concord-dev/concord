@@ -13,8 +13,6 @@ import (
 	"github.com/concord-dev/concord/internal/server/metrics"
 )
 
-// helloHandler is the minimal handler used by middleware tests. Registered
-// under a real ServeMux so r.Pattern gets populated the way it would in prod.
 func helloHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /hi", func(w http.ResponseWriter, _ *http.Request) {
@@ -68,8 +66,6 @@ func TestMiddleware_5xxRecordedDistinctly(t *testing.T) {
 }
 
 func TestMiddleware_UnmatchedRoutesShareOnePatternLabel(t *testing.T) {
-	// Hostile clients hitting random URLs must not blow up cardinality:
-	// every 404 should fold into a single pattern="unmatched" series.
 	m := metrics.New()
 	srv := httptest.NewServer(m.Middleware(helloHandler()))
 	t.Cleanup(srv.Close)
@@ -99,8 +95,6 @@ func TestRecordBusDrop_PartitionsByKind(t *testing.T) {
 func TestScrape_IncludesGoAndProcessCollectors(t *testing.T) {
 	m := metrics.New()
 	body := scrape(t, m)
-	// The standard collectors are table-stakes for operator dashboards;
-	// failing this means somebody removed them from registration.
 	assert.Contains(t, body, "go_goroutines")
 	assert.Contains(t, body, "process_cpu_seconds_total")
 }

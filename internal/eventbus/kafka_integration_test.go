@@ -16,11 +16,6 @@ import (
 	"github.com/concord-dev/concord/internal/kafkax"
 )
 
-// TestKafkaPublisher_RoundTripThroughOutbox is the integration test that
-// proves the entire Phase 2 pipe: Enqueue → Dispatcher → Kafka writer
-// → broker → consumer can read the canonical envelope. Skipped without
-// CONCORD_TEST_KAFKA_BROKERS set; CI provides a Redpanda service
-// container.
 func TestKafkaPublisher_RoundTripThroughOutbox(t *testing.T) {
 	brokersCSV := os.Getenv("CONCORD_TEST_KAFKA_BROKERS")
 	if brokersCSV == "" {
@@ -28,7 +23,6 @@ func TestKafkaPublisher_RoundTripThroughOutbox(t *testing.T) {
 	}
 	brokers := kafkax.ParseBrokers(brokersCSV)
 
-	// Per-run topic so re-runs don't see stale messages.
 	topic := "concord.events.test." + uuid.NewString()[:8]
 	createTopic(t, brokers, topic)
 
@@ -56,7 +50,6 @@ func TestKafkaPublisher_RoundTripThroughOutbox(t *testing.T) {
 	defer cancel()
 	go d.Run(ctx)
 
-	// Enqueue three events.
 	for i := 0; i < 3; i++ {
 		_, err := outbox.Enqueue(ctx, eventbus.Event{
 			OrgID:       orgID,
@@ -68,7 +61,6 @@ func TestKafkaPublisher_RoundTripThroughOutbox(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Read them back from Kafka.
 	r := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:        brokers,
 		Topic:          topic,
@@ -93,7 +85,6 @@ func TestKafkaPublisher_RoundTripThroughOutbox(t *testing.T) {
 	for _, m := range got {
 		assert.Equal(t, orgID.String(), string(m.Key), "partition key must be org_id")
 
-		// Headers must carry the metadata the consumer needs.
 		hmap := map[string]string{}
 		for _, h := range m.Headers {
 			hmap[h.Key] = string(h.Value)
@@ -102,7 +93,6 @@ func TestKafkaPublisher_RoundTripThroughOutbox(t *testing.T) {
 		assert.NotEmpty(t, hmap["event-id"])
 		assert.Equal(t, "00-deadbeef-cafef00d-01", hmap["traceparent"])
 
-		// Body is the canonical envelope.
 		var env map[string]any
 		require.NoError(t, json.Unmarshal(m.Value, &env))
 		assert.EqualValues(t, 1, env["version"])
@@ -111,10 +101,6 @@ func TestKafkaPublisher_RoundTripThroughOutbox(t *testing.T) {
 	}
 }
 
-// createTopic ensures the test topic exists. Redpanda accepts produces
-// without an explicit topic create (auto-create on first produce) but
-// kafka-go's writer is configured with AllowAutoTopicCreation=false so
-// we have to create it ourselves.
 func createTopic(t *testing.T, brokers []string, topic string) {
 	t.Helper()
 	conn, err := kafka.Dial("tcp", brokers[0])

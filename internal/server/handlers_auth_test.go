@@ -62,7 +62,6 @@ func TestLogout_RevokesSession(t *testing.T) {
 	respL, _ := h.do(t, "POST", "/v1/auth/logout", "", got.Token)
 	assert.Equal(t, http.StatusNoContent, respL.StatusCode)
 
-	// Token must now be rejected.
 	respMe, _ := h.do(t, "GET", "/v1/me", "", got.Token)
 	assert.Equal(t, http.StatusUnauthorized, respMe.StatusCode)
 }
@@ -92,7 +91,6 @@ func TestSessionOrgs_ListsUserMemberships(t *testing.T) {
 
 func TestSessionRoute_RejectsAPIToken(t *testing.T) {
 	h := newHarness(t)
-	// API tokens must NOT satisfy session-only routes.
 	resp, body := h.do(t, "GET", "/v1/me", "", h.apiToken)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	assert.Contains(t, string(body), "session token")

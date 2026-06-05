@@ -73,7 +73,6 @@ func TestEvents_StreamsRunCompletedOnSubmit(t *testing.T) {
 	frames := make(chan sseFrame, 32)
 	go func() { defer close(frames); readSSEFrames(resp.Body, frames) }()
 
-	// Submit an agent run — server should broadcast run.completed.
 	h.submitTestRun(t, h.apiToken, "[]")
 
 	deadline := time.After(5 * time.Second)

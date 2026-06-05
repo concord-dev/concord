@@ -8,11 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestMigrateDown_RollsBackAppliedVersion verifies the round-trip: a freshly
-// migrated DB → MigrateDown(1) → schema_migrations is empty → Migrate again
-// → schema_migrations is back. Tests in this package share a single Postgres
-// database; the t.Cleanup re-applies migrations so siblings stay happy
-// regardless of execution order.
 func TestMigrateDown_RollsBackAppliedVersion(t *testing.T) {
 	s := openIsolatedStore(t)
 	ctx := context.Background()
@@ -22,10 +17,6 @@ func TestMigrateDown_RollsBackAppliedVersion(t *testing.T) {
 	require.NotEmpty(t, versions, "openTestStore must leave at least one migration applied")
 	startCount := len(versions)
 
-	// Roll back ALL of them — that's the only invariant we can check
-	// without coupling the test to the current migration count. After
-	// MigrateDown(startCount) every schema-creating object should be
-	// gone, and AppliedMigrationVersions must be empty.
 	require.NoError(t, s.MigrateDown(ctx, startCount))
 
 	versions, err = s.AppliedMigrationVersions(ctx)
@@ -33,9 +24,6 @@ func TestMigrateDown_RollsBackAppliedVersion(t *testing.T) {
 	assert.Empty(t, versions,
 		"schema_migrations must be empty after rolling everything back")
 
-	// Tables should genuinely be gone — query an organization to confirm
-	// the down migration's DROP TABLE ran (not just a schema_migrations
-	// row delete).
 	_, err = s.Pool().Exec(ctx, `SELECT 1 FROM organization LIMIT 1`)
 	assert.Error(t, err,
 		"organization table must be dropped after MigrateDown — a schema_migrations row delete alone isn't enough")
@@ -51,10 +39,6 @@ func TestMigrateDown_RejectsNonPositiveSteps(t *testing.T) {
 	}
 }
 
-// TestMigrateDown_NoOpWhenStepsExceedApplied protects against a UX trap:
-// asking for "roll back 5" against a DB that only has 1 migration should
-// roll back 1, not error. (Tested by inspecting schema_migrations count
-// before and after.)
 func TestMigrateDown_StepsAboveAppliedRollsBackEverything(t *testing.T) {
 	s := openIsolatedStore(t)
 	ctx := context.Background()
@@ -66,11 +50,6 @@ func TestMigrateDown_StepsAboveAppliedRollsBackEverything(t *testing.T) {
 		"asking for more steps than applied must drain schema_migrations, not error")
 }
 
-// TestMigrateDown_RoundTripRestoresSeed exercises the developer scenario:
-// migrate-up, realize the migration is wrong, migrate-down, migrate-up
-// again. After the round-trip the seed rows (roles + permissions) must
-// be present and correct — proving the down→up cycle didn't leave
-// orphan partial state behind.
 func TestMigrateDown_RoundTripRestoresSeed(t *testing.T) {
 	s := openIsolatedStore(t)
 	ctx := context.Background()

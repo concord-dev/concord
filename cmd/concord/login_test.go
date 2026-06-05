@@ -20,10 +20,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// loginTestFixture stands up a live Concord httptest server with one
-// org/user/owner-role tenant pre-seeded. Mirrors the server-package test
-// harness but lives here so CLI tests don't pull internal test code from a
-// sibling package. Returns the credentials we'll feed to `concord login`.
 type loginTestFixture struct {
 	srv       *httptest.Server
 	st        *store.Store
@@ -47,8 +43,6 @@ func newLoginFixture(t *testing.T) *loginTestFixture {
 	require.NoError(t, st.Migrate(ctx))
 	t.Cleanup(st.Close)
 
-	// Path to a real controls dir — required by server.NewConcord. Use
-	// the repo's bundled controls directory.
 	controlsDir, err := filepath.Abs("../../controls")
 	require.NoError(t, err)
 	c, err := server.NewConcord(server.Options{
@@ -84,10 +78,6 @@ func newLoginFixture(t *testing.T) *loginTestFixture {
 	}
 }
 
-// runCmd executes a cobra command tree with the supplied args, returning
-// stdout (combined out+err) and the error. Used to drive login/logout/etc.
-// without going through os.Args. stdin lets us feed the email + password
-// the way an interactive shell would.
 func runCmd(args []string, stdin string) (string, error) {
 	root := newRootCmd()
 	buf := &bytes.Buffer{}
@@ -114,7 +104,6 @@ func TestLogin_WritesCredentialsFileAndPersistsSession(t *testing.T) {
 	require.NoError(t, err, out)
 	assert.Contains(t, out, "logged in as "+fx.userEmail)
 
-	// File should exist with mode 0600.
 	info, err := os.Stat(credsPath)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
@@ -146,7 +135,6 @@ func TestLogin_WrongPasswordReturnsActionableError(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid credentials",
 		"server-side 401 must surface as a human-readable message, not a raw HTTP status")
 
-	// No credentials file must be written on failed login.
 	_, statErr := os.Stat(credsPath)
 	assert.True(t, os.IsNotExist(statErr),
 		"failed login must NOT touch the credentials file — half-written state is worse than no state")
@@ -157,7 +145,6 @@ func TestOrgsUse_RejectsUnknownSlugAndPinsValidOne(t *testing.T) {
 	credsPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("CONCORD_CREDENTIALS_FILE", credsPath)
 
-	// Login first.
 	_, err := runCmd(
 		[]string{"login",
 			"--server", fx.srv.URL,
@@ -167,7 +154,6 @@ func TestOrgsUse_RejectsUnknownSlugAndPinsValidOne(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Bad slug → clear error, DefaultOrg unchanged.
 	_, err = runCmd([]string{"orgs", "use", "no-such-org-anywhere"}, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "don't appear to belong",
@@ -176,7 +162,6 @@ func TestOrgsUse_RejectsUnknownSlugAndPinsValidOne(t *testing.T) {
 	p, _ := file.CurrentProfile()
 	assert.Empty(t, p.DefaultOrg, "failed `orgs use` must leave DefaultOrg untouched")
 
-	// Good slug → pinned.
 	_, err = runCmd([]string{"orgs", "use", fx.orgSlug}, "")
 	require.NoError(t, err)
 	file, _ = credentials.Load()
@@ -212,7 +197,6 @@ func TestWhoami_ReturnsActiveSessionAndOrgs(t *testing.T) {
 	require.NoErrorf(t, json.Unmarshal([]byte(out), &got), "raw output: %q", out)
 	assert.Equal(t, fx.userEmail, got.User.Email)
 	assert.Equal(t, fx.srv.URL, got.Server)
-	// At least our fixture org should be present.
 	found := false
 	for _, o := range got.Orgs {
 		if o.Slug == fx.orgSlug {

@@ -13,9 +13,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// submitRun is a small helper that POSTs an agent submission with the
-// supplied findings JSON literal. Returns the new run id. Used to drive
-// the SubmitRun → drift pipeline without re-encoding the agent envelope.
 func submitRun(t *testing.T, h *harness, auth string, findingsJSON string) string {
 	t.Helper()
 	body := fmt.Sprintf(`{
@@ -67,8 +64,6 @@ func TestSubmitRun_PassToFailTransitionProducesDriftEvent(t *testing.T) {
 }
 
 func TestSubmitRun_StableRunsProduceNoDrift(t *testing.T) {
-	// Same findings, twice. Drift must remain empty — otherwise every
-	// poll-every-hour cron would emit drift on every tick.
 	h := newHarness(t)
 	submitRun(t, h, h.apiToken, `[{"control_id":"a","status":"pass"}]`)
 	submitRun(t, h, h.apiToken, `[{"control_id":"a","status":"pass"}]`)
@@ -104,10 +99,6 @@ func TestSubmitRun_MassRegressionRecordsOneRowPerControl(t *testing.T) {
 }
 
 func TestDriftEndpoint_AppliesFromToFilter(t *testing.T) {
-	// The endpoint's primary use case: an investigator queries
-	//   GET /v1/orgs/{slug}/drift?from=pass&to=fail
-	// to get exactly the regressions. Verifies that the SQL filter
-	// composes the way the docstring claims.
 	h := newHarness(t)
 	submitRun(t, h, h.apiToken,
 		`[{"control_id":"a","status":"pass"},

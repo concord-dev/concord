@@ -16,12 +16,8 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// defaultTestDSN matches docker-compose.yml. Override with
-// CONCORD_TEST_DATABASE_URL when running against a different Postgres.
 const defaultTestDSN = "postgres://concord:concord-dev@localhost:5432/concord?sslmode=disable"
 
-// openTestStore opens a Store against the configured Postgres or skips the
-// test when the DB is unreachable. First call also runs migrations.
 func openTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	dsn := os.Getenv("CONCORD_TEST_DATABASE_URL")
@@ -39,23 +35,12 @@ func openTestStore(t *testing.T) *store.Store {
 	return s
 }
 
-// openIsolatedStore creates a fresh, uniquely-named Postgres database,
-// migrates it up, and returns a Store bound to it. t.Cleanup drops the
-// database afterwards.
-//
-// Destructive tests (MigrateDown, schema-rewind round-trips) must use this
-// helper rather than openTestStore: dropping tables on the shared `concord`
-// database races with tests in the server package, which is in a sibling
-// `go test` process holding live connections against the same schema. A
-// dedicated per-test DB removes that whole class of flake.
 func openIsolatedStore(t *testing.T) *store.Store {
 	t.Helper()
 	baseDSN := os.Getenv("CONCORD_TEST_DATABASE_URL")
 	if baseDSN == "" {
 		baseDSN = defaultTestDSN
 	}
-	// We need a connection to a "control" database (postgres) so we can
-	// CREATE the per-test one. Substitute the path component of the DSN.
 	u, err := url.Parse(baseDSN)
 	require.NoError(t, err, "parsing CONCORD_TEST_DATABASE_URL")
 	u.Path = "/postgres"
@@ -84,7 +69,6 @@ func openIsolatedStore(t *testing.T) *store.Store {
 
 	t.Cleanup(func() {
 		s.Close()
-		// Drop with a fresh control connection — the pool is already closed.
 		dropCtx, dropCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer dropCancel()
 		dropCtl, err := pgx.Connect(dropCtx, ctlDSN)
@@ -93,8 +77,6 @@ func openIsolatedStore(t *testing.T) *store.Store {
 			return
 		}
 		defer dropCtl.Close(dropCtx)
-		// Kick any stragglers before dropping — pgx pool close may not have
-		// fully released yet on slow CI.
 		_, _ = dropCtl.Exec(dropCtx,
 			`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`,
 			dbName)
@@ -106,10 +88,8 @@ func openIsolatedStore(t *testing.T) *store.Store {
 	return s
 }
 
-// uniqueSlug yields a slug guaranteed not to collide across parallel tests.
 func uniqueSlug(p string) string { return fmt.Sprintf("%s-%s", p, uuid.NewString()[:8]) }
 
-// uniqueEmail does the same for emails.
 func uniqueEmail(p string) string {
 	return fmt.Sprintf("%s+%s@example.com", p, uuid.NewString()[:8])
 }

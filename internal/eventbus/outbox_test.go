@@ -26,11 +26,6 @@ import (
 
 const defaultTestDSN = "postgres://concord:concord-dev@localhost:5432/concord?sslmode=disable"
 
-// openIsolatedPool creates a fresh per-test database, runs migrations,
-// and returns the underlying pgxpool. The eventbus tests need raw pool
-// access (the Outbox is pool-bound) so we don't go through Store like
-// the store_test package does — but we still use a unique DB so we
-// don't race the shared concord database.
 func openIsolatedPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
@@ -81,7 +76,6 @@ func openIsolatedPool(t *testing.T) *pgxpool.Pool {
 	return s.Pool()
 }
 
-// seedOrg inserts a minimal organization so event_outbox's FK is satisfied.
 func seedOrg(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID
@@ -134,8 +128,6 @@ func TestOutbox_EnqueuePersistsCanonicalRow(t *testing.T) {
 	assert.True(t, occurred.Equal(got.OccurredAt))
 	assert.Equal(t, 0, got.AttemptCount)
 	assert.Nil(t, got.Published, "fresh row must be unpublished")
-	// Postgres jsonb normalizes whitespace; parse semantically instead of
-	// string-matching the rendered output.
 	var env map[string]any
 	require.NoError(t, json.Unmarshal(got.Payload, &env))
 	assert.Equal(t, eventID.String(), env["event_id"])
@@ -168,8 +160,6 @@ func TestOutbox_EnqueueRejectsMissingOrg(t *testing.T) {
 }
 
 func TestOutbox_EnqueueTxRollsBackWithCallerTx(t *testing.T) {
-	// The whole point of the outbox pattern: if the caller's tx is
-	// rolled back, the event MUST NOT survive.
 	pool := openIsolatedPool(t)
 	orgID := seedOrg(t, pool)
 	outbox := eventbus.NewOutbox(pool)
@@ -201,7 +191,6 @@ func TestOutbox_LagSeconds(t *testing.T) {
 
 	_, err = outbox.Enqueue(context.Background(), eventbus.Event{OrgID: orgID, Kind: "x"})
 	require.NoError(t, err)
-	// Manually back-date created_at so lag is observable without sleeping.
 	_, err = pool.Exec(context.Background(),
 		`UPDATE event_outbox SET created_at = now() - interval '7 seconds' WHERE kind = 'x'`)
 	require.NoError(t, err)
@@ -220,12 +209,10 @@ func TestOutbox_CleanupPublished(t *testing.T) {
 
 	id, err := outbox.Enqueue(ctx, eventbus.Event{OrgID: orgID, Kind: "k"})
 	require.NoError(t, err)
-	// Mark old-published manually.
 	_, err = pool.Exec(ctx,
 		`UPDATE event_outbox SET published_at = now() - interval '30 days' WHERE id = $1`, id)
 	require.NoError(t, err)
 
-	// Add a fresh published row that must survive cleanup.
 	id2, err := outbox.Enqueue(ctx, eventbus.Event{OrgID: orgID, Kind: "k"})
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `UPDATE event_outbox SET published_at = now() WHERE id = $1`, id2)
@@ -242,9 +229,6 @@ func TestOutbox_CleanupPublished(t *testing.T) {
 }
 
 
-// recorderPublisher captures every Publish call so tests can assert on
-// ordering, headers, and counts. The lock is necessary because the
-// dispatcher runs goroutines for cleanup + lag.
 type recorderPublisher struct {
 	mu       sync.Mutex
 	messages []recordedMessage
@@ -292,7 +276,6 @@ func TestDispatcher_PublishesPendingRowsThenMarksThem(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Wait for the dispatcher to drain.
 	require.Eventually(t, func() bool {
 		var pending int
 		_ = pool.QueryRow(ctx,
@@ -315,7 +298,6 @@ func TestDispatcher_RetriesOnPublishFailureThenSucceeds(t *testing.T) {
 	pool := openIsolatedPool(t)
 	orgID := seedOrg(t, pool)
 	outbox := eventbus.NewOutbox(pool)
-	// Fail the first 2 publishes; the 3rd succeeds.
 	rec := &recorderPublisher{failN: 2, err: errors.New("broker boom")}
 
 	d, err := eventbus.NewDispatcher(outbox, rec, eventbus.DispatcherConfig{
@@ -341,7 +323,6 @@ func TestDispatcher_RetriesOnPublishFailureThenSucceeds(t *testing.T) {
 
 	assert.GreaterOrEqual(t, rec.calls.Load(), int64(3), "needed at least 3 attempts (2 fail + 1 succeed)")
 
-	// attempt_count should reflect the 2 failures (the success doesn't bump).
 	var attempts int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT attempt_count FROM event_outbox WHERE id = $1`, id).Scan(&attempts))
@@ -352,7 +333,6 @@ func TestDispatcher_DeadLettersAfterMaxAttempts(t *testing.T) {
 	pool := openIsolatedPool(t)
 	orgID := seedOrg(t, pool)
 	outbox := eventbus.NewOutbox(pool)
-	// Fail forever.
 	rec := &recorderPublisher{failN: 1_000_000, err: errors.New("always fails")}
 
 	deadCount := atomic.Int64{}
@@ -380,9 +360,6 @@ func TestDispatcher_DeadLettersAfterMaxAttempts(t *testing.T) {
 		return attempts >= 3
 	}, 5*time.Second, 10*time.Millisecond, "must accumulate MaxAttempts failures")
 
-	// Hold the test long enough that any further claim attempts would
-	// keep climbing — they must NOT, because attempt_count >= MaxAttempts
-	// filters the row out of claimBatch.
 	time.Sleep(150 * time.Millisecond)
 
 	var finalAttempts int
@@ -397,9 +374,6 @@ func TestDispatcher_DeadLettersAfterMaxAttempts(t *testing.T) {
 }
 
 func TestDispatcher_TwoInstancesDoNotDoublePublish(t *testing.T) {
-	// SELECT FOR UPDATE SKIP LOCKED is the contract that lets multiple
-	// dispatcher replicas cooperate. Prove it: enqueue 100 events, run
-	// two dispatchers, assert each row was published exactly once.
 	pool := openIsolatedPool(t)
 	orgID := seedOrg(t, pool)
 	outbox := eventbus.NewOutbox(pool)

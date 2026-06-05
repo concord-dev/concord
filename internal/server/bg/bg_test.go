@@ -39,14 +39,9 @@ func TestWait_ReturnsContextErrorWhenTasksOutlastTheDeadline(t *testing.T) {
 }
 
 func TestGo_NestedSpawnsAreTrackedByTheSameWaitGroup(t *testing.T) {
-	// Real call sites (e.g. webhook fireWebhooks → deliverOne) nest: a
-	// tracked goroutine spawns more tracked goroutines. Wait must wait
-	// for the inner ones too, not just the outer.
 	r := bg.New()
 	var outer, inner atomic.Bool
 	r.Go(func() {
-		// Outer simulates fireWebhooks doing prep work, then fanning out
-		// to per-receiver deliveries that take longer.
 		time.Sleep(20 * time.Millisecond)
 		r.Go(func() {
 			time.Sleep(50 * time.Millisecond)
@@ -61,19 +56,13 @@ func TestGo_NestedSpawnsAreTrackedByTheSameWaitGroup(t *testing.T) {
 }
 
 func TestGo_RecoversFromPanicsInsteadOfCrashingTheProcess(t *testing.T) {
-	// A misbehaving webhook receiver / TLS bug must not take down the
-	// whole server. Goroutines panic-recover with a slog line.
 	r := bg.New()
 	r.Go(func() { panic("simulated webhook failure") })
 
-	// If the goroutine did NOT recover, the runtime would crash the test
-	// process. Surviving Wait() proves recovery works.
 	require.NoError(t, r.Wait(context.Background()))
 }
 
 func TestWait_IsCallableMultipleTimes(t *testing.T) {
-	// Belt-and-braces: cmd/server has two shutdown paths (signal + error)
-	// that might both reach Concord.Shutdown. Wait must be idempotent.
 	r := bg.New()
 	r.Go(func() { time.Sleep(5 * time.Millisecond) })
 	require.NoError(t, r.Wait(context.Background()))
@@ -81,9 +70,6 @@ func TestWait_IsCallableMultipleTimes(t *testing.T) {
 }
 
 func TestGo_IsSafeForConcurrentSubmitters(t *testing.T) {
-	// Real call sites are HTTP handlers running concurrently. Spawning
-	// from multiple goroutines must not race on the underlying WaitGroup
-	// (the data race would surface under -race).
 	r := bg.New()
 	var n atomic.Int32
 	var submitters sync.WaitGroup

@@ -13,10 +13,6 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// openStore is a small lookalike of internal/store/testutil_test.go's
-// helper — the auditpart_test package can't import the store test
-// helpers, but the test only needs a migrated DB, so this duplication
-// is fine.
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
 	dsn := os.Getenv("CONCORD_TEST_DATABASE_URL")
@@ -64,8 +60,6 @@ func TestEnsureMonthsAhead_IsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, first)
 
-	// Second call must NOT mark anything as created — the partitions
-	// from the first call are still there.
 	second, err := r.EnsureMonthsAhead(ctx)
 	require.NoError(t, err)
 	require.Len(t, second, len(first))
@@ -76,10 +70,6 @@ func TestEnsureMonthsAhead_IsIdempotent(t *testing.T) {
 }
 
 func TestListAuditPartitions_ReflectsRotatorWork(t *testing.T) {
-	// Sanity: after EnsureMonthsAhead, the partitions actually exist
-	// in pg_inherits and can be queried back. Without this, an
-	// operator runbook ("verify the rotator is keeping up") has no
-	// programmatic check.
 	s := openStore(t)
 	r, _ := auditpart.New(s, auditpart.Config{MonthsAhead: 0}, auditpart.Metrics{})
 	_, err := r.EnsureMonthsAhead(context.Background())
@@ -106,8 +96,6 @@ func TestRotator_RejectsNilStore(t *testing.T) {
 }
 
 func TestRotator_RunReturnsOnContextCancel(t *testing.T) {
-	// Just a smoke test: Run must exit promptly when ctx is cancelled,
-	// even though the next-tick timer is set to 24h.
 	s := openStore(t)
 	r, _ := auditpart.New(s, auditpart.Config{}, auditpart.Metrics{})
 
@@ -121,16 +109,11 @@ func TestRotator_RunReturnsOnContextCancel(t *testing.T) {
 	cancel()
 	select {
 	case <-done:
-		// good
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not exit within 5s of ctx cancel")
 	}
 }
 
-// monthsBetween returns the number of whole months from a to b. We use
-// it to assert range_end is exactly one month past range_start —
-// guarding against off-by-one calendar arithmetic in the PL/pgSQL
-// helper (which uses interval '1 month' that handles year wrap).
 func monthsBetween(a, b time.Time) int {
 	a = a.UTC()
 	b = b.UTC()

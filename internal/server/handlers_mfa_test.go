@@ -13,14 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fullMFAEnroll walks the enrollment flow against the live handlers and
-// returns (totpSecret, recoveryCodes). The harness user ends up
-// MFA-enrolled with a verified TOTP secret + 10 recovery codes.
 func fullMFAEnroll(t *testing.T, h *harness) (string, []string) {
 	t.Helper()
 	sessionToken := h.login(t)
 
-	// Start enrollment.
 	resp, raw := h.do(t, "POST", "/v1/me/mfa/totp/enroll", "", sessionToken)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "enroll: %s", raw)
 	var enrollRes struct {
@@ -29,11 +25,9 @@ func fullMFAEnroll(t *testing.T, h *harness) (string, []string) {
 	require.NoError(t, json.Unmarshal(raw, &enrollRes))
 	require.NotEmpty(t, enrollRes.Secret)
 
-	// Produce a real TOTP code for the issued secret.
 	code, err := totp.GenerateCode(enrollRes.Secret, time.Now())
 	require.NoError(t, err)
 
-	// Complete enrollment.
 	verifyBody := fmt.Sprintf(`{"code":%q}`, code)
 	resp, raw = h.do(t, "POST", "/v1/me/mfa/totp/verify", verifyBody, sessionToken)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "verify: %s", raw)
@@ -52,7 +46,6 @@ func TestMFA_EnrollVerifyAndLoginEndToEnd(t *testing.T) {
 	h := newHarness(t)
 	secret, _ := fullMFAEnroll(t, h)
 
-	// First leg: password — expect mfa_required.
 	body := fmt.Sprintf(`{"email":%q,"password":%q}`, h.user.Email, h.password)
 	resp, raw := h.do(t, "POST", "/v1/auth/login", body, "")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -64,7 +57,6 @@ func TestMFA_EnrollVerifyAndLoginEndToEnd(t *testing.T) {
 	assert.True(t, first.MFARequired, "post-enrollment login must short-circuit into MFA branch")
 	assert.NotEmpty(t, first.MFAToken)
 
-	// Second leg: TOTP code.
 	code, err := totp.GenerateCode(secret, time.Now())
 	require.NoError(t, err)
 	second := fmt.Sprintf(`{"mfa_token":%q,"code":%q}`, first.MFAToken, code)
@@ -91,7 +83,6 @@ func TestMFA_LoginWithRecoveryCodeConsumesIt(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &first))
 
-	// Use the first recovery code.
 	second := fmt.Sprintf(`{"mfa_token":%q,"recovery_code":%q}`, first.MFAToken, codes[0])
 	resp, raw = h.do(t, "POST", "/v1/auth/login/mfa", second, "")
 	require.Equalf(t, http.StatusCreated, resp.StatusCode, "recovery login: %s", raw)
@@ -101,7 +92,6 @@ func TestMFA_LoginWithRecoveryCodeConsumesIt(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &sessionRes))
 	assert.True(t, sessionRes.UsedRecoveryCode, "response must flag that a recovery code was consumed")
 
-	// Re-attempting with the same code must fail — one-time semantics.
 	body2 := fmt.Sprintf(`{"email":%q,"password":%q}`, h.user.Email, h.password)
 	resp, raw = h.do(t, "POST", "/v1/auth/login", body2, "")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -114,7 +104,6 @@ func TestMFA_LoginWithRecoveryCodeConsumesIt(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
 		"re-use of an already-consumed recovery code must be rejected")
 
-	// 9 codes remain (we consumed 1).
 	n, err := h.st.CountUnusedRecoveryCodes(context.Background(), h.user.ID)
 	require.NoError(t, err)
 	assert.Equal(t, 9, n)
@@ -142,7 +131,6 @@ func TestMFA_DisableRequiresPassword(t *testing.T) {
 	secret, _ := fullMFAEnroll(t, h)
 	_ = secret
 
-	// Need a session — go through the MFA login dance.
 	loginBody := fmt.Sprintf(`{"email":%q,"password":%q}`, h.user.Email, h.password)
 	resp, raw := h.do(t, "POST", "/v1/auth/login", loginBody, "")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -159,20 +147,17 @@ func TestMFA_DisableRequiresPassword(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &sess))
 
-	// Wrong password → 401, MFA stays enrolled.
 	resp, _ = h.do(t, "POST", "/v1/me/mfa/disable", `{"password":"nope"}`, sess.Token)
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	enrolled, _ := h.st.IsUserMFAEnrolled(context.Background(), h.user.ID)
 	assert.True(t, enrolled, "wrong password must NOT disable MFA")
 
-	// Right password → 204, MFA gone.
 	disableBody := fmt.Sprintf(`{"password":%q}`, h.password)
 	resp, _ = h.do(t, "POST", "/v1/me/mfa/disable", disableBody, sess.Token)
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 	enrolled, _ = h.st.IsUserMFAEnrolled(context.Background(), h.user.ID)
 	assert.False(t, enrolled, "successful disable must wipe enrollment")
 
-	// And now a fresh login goes single-factor (201, no mfa_required).
 	resp, raw = h.do(t, "POST", "/v1/auth/login", loginBody, "")
 	require.Equal(t, http.StatusCreated, resp.StatusCode, string(raw))
 }

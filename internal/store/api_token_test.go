@@ -42,7 +42,6 @@ func TestRevokeAPIToken_BlocksFutureUse(t *testing.T) {
 	_, err := s.ResolveAPIToken(ctx, plain)
 	assert.ErrorIs(t, err, store.ErrNotFound)
 
-	// Revoked tokens disappear from ListAPITokens.
 	toks, _ := s.ListAPITokens(ctx, org.ID)
 	assert.Empty(t, toks)
 }

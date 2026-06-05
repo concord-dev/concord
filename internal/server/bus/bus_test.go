@@ -12,8 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestBus_PublishFansOutToSameTenant covers the happy-path fan-out: two
-// subscribers on tenant A both receive an event published for tenant A.
 func TestBus_PublishFansOutToSameTenant(t *testing.T) {
 	b := bus.New()
 	tenant := uuid.New()
@@ -37,8 +35,6 @@ func TestBus_PublishFansOutToSameTenant(t *testing.T) {
 	}
 }
 
-// TestBus_NoCrossTenantLeak ensures tenant isolation: an event published for
-// tenant A must not appear on tenant B's subscription.
 func TestBus_NoCrossTenantLeak(t *testing.T) {
 	b := bus.New()
 	a, bnt := uuid.New(), uuid.New()
@@ -59,13 +55,9 @@ func TestBus_NoCrossTenantLeak(t *testing.T) {
 	case <-chB:
 		t.Fatal("tenant B should not have received tenant A's event")
 	case <-time.After(50 * time.Millisecond):
-		// expected
 	}
 }
 
-// TestBus_UnsubscribeDeregisters proves the unsubscribe func removes the
-// subscription from the bus. We don't assert the channel is closed — that
-// would race with concurrent Publish; callers stop reading via ctx instead.
 func TestBus_UnsubscribeDeregisters(t *testing.T) {
 	b := bus.New()
 	tenant := uuid.New()
@@ -75,7 +67,6 @@ func TestBus_UnsubscribeDeregisters(t *testing.T) {
 	unsub()
 	assert.Equal(t, 0, b.SubscriberCount(tenant))
 
-	// After unsubscribe, future publishes must not be delivered.
 	b.Publish(bus.Event{Kind: bus.RunStarted, OrgID: tenant, RunID: uuid.New()})
 	select {
 	case got, ok := <-ch:
@@ -83,14 +74,9 @@ func TestBus_UnsubscribeDeregisters(t *testing.T) {
 			t.Fatalf("received event %v after unsubscribe", got)
 		}
 	case <-time.After(50 * time.Millisecond):
-		// expected — channel stays open but empty
 	}
 }
 
-// TestBus_SlowSubscriberIsDroppedNotBlocking is the cardinal property of the
-// bus: a subscriber that doesn't drain its channel must not stall the
-// publisher. We register a 1-buffer subscriber, fire many events, and assert
-// that Publish never blocks longer than a few ms.
 func TestBus_SlowSubscriberIsDroppedNotBlocking(t *testing.T) {
 	b := bus.New()
 	tenant := uuid.New()
@@ -106,17 +92,11 @@ func TestBus_SlowSubscriberIsDroppedNotBlocking(t *testing.T) {
 	}()
 	select {
 	case <-done:
-		// expected — publisher must not block
 	case <-time.After(2 * time.Second):
 		t.Fatal("Publish stalled on a slow subscriber")
 	}
 }
 
-// TestBus_ConcurrentPublishersAndSubscribers stresses the lock discipline.
-// 50 concurrent publishers + 10 concurrent subscribers; assert no data race
-// and that every subscriber receives at least one event before unsubscribing.
-// We pre-generate run IDs outside the goroutines because google/uuid's
-// global reader isn't lock-free; the race we care about is the bus, not UUID.
 func TestBus_ConcurrentPublishersAndSubscribers(t *testing.T) {
 	b := bus.New()
 	tenant := uuid.New()

@@ -17,13 +17,10 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// parseJSON is local rather than living in testutil_test.go to keep the
-// shared harness narrow — each test file owns its own helpers.
 func parseJSON(b []byte, v any) error { return json.Unmarshal(b, v) }
 
 func TestAuditPackage_OwnerDownloadsBundleThroughHTTP(t *testing.T) {
 	h := newHarness(t)
-	// Seed a run so the bundle has findings + a runs row.
 	submitBody := `{
 		"agent":{"version":"smoke"},
 		"started_at":"2026-06-04T11:00:00Z","completed_at":"2026-06-04T11:00:01Z",
@@ -56,18 +53,13 @@ func TestAuditPackage_OwnerDownloadsBundleThroughHTTP(t *testing.T) {
 }
 
 func TestAuditPackage_ExportEmitsAuditEventForTraceability(t *testing.T) {
-	// SOC 2: every export of compliance evidence must itself be logged.
 	h := newHarness(t)
 	sess := h.login(t)
 	resp, _ := h.do(t, "GET", "/v1/orgs/"+h.org.Slug+"/audit-package", "", sess)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	// Drain the body so the handler completes its post-write audit call.
 	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 
-	// Wait briefly — the audit event is written inline after the ZIP
-	// stream completes (it's NOT off a goroutine, so a quick poll is
-	// enough; this exists for race-detector friendliness on slow CI).
 	rows, err := h.st.Pool().Query(context.Background(),
 		`SELECT action, target_id, details FROM audit_event
 		 WHERE action LIKE 'audit_package.%' AND org_id = $1`,
@@ -82,7 +74,6 @@ func TestAuditPackage_ExportEmitsAuditEventForTraceability(t *testing.T) {
 }
 
 func TestAuditPackage_MemberWithoutAuditReadIs403(t *testing.T) {
-	// Viewers don't have audit:read; they must not be able to export.
 	h := newHarness(t)
 	ctx := context.Background()
 

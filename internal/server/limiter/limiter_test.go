@@ -24,7 +24,6 @@ func TestMemoryBucket_AllowsUpToBurstThenDenies(t *testing.T) {
 }
 
 func TestMemoryBucket_KeysAreIndependent(t *testing.T) {
-	// alice exhausting her bucket must not affect bob.
 	b := limiter.NewMemoryBucket(limiter.Config{Rate: limiter.Every(time.Minute), Burst: 1})
 
 	ok, _ := b.Allow("alice")
@@ -37,8 +36,6 @@ func TestMemoryBucket_KeysAreIndependent(t *testing.T) {
 }
 
 func TestMemoryBucket_EmptyKeyShortCircuits(t *testing.T) {
-	// Anonymous callers without an extractable identity must not collapse
-	// into one shared bucket — that would be a self-DoS during traffic spikes.
 	b := limiter.NewMemoryBucket(limiter.Config{Rate: limiter.Every(time.Minute), Burst: 1})
 	for i := 0; i < 100; i++ {
 		ok, _ := b.Allow("")
@@ -47,7 +44,6 @@ func TestMemoryBucket_EmptyKeyShortCircuits(t *testing.T) {
 }
 
 func TestMemoryBucket_IdleKeysEvictedOnNextTouch(t *testing.T) {
-	// Use a fake clock so we don't have to actually sleep through the TTL.
 	cur := time.Now()
 	b := limiter.NewMemoryBucket(limiter.Config{Rate: limiter.Every(time.Second), Burst: 1, TTL: 5 * time.Second})
 	limiter.SetClockForTest(b, func() time.Time { return cur })
@@ -77,6 +73,4 @@ func TestMemoryBucket_ConcurrentAllowIsSafe(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	// The assertion here is "no race / no panic". Burst + replenishment
-	// makes the exact count nondeterministic.
 }

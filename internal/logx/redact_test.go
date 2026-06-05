@@ -76,9 +76,6 @@ func TestRedacting_GroupAttrsAreRecursed(t *testing.T) {
 }
 
 func TestRedacting_WithAttrsAlsoRedacts(t *testing.T) {
-	// A logger pre-bound via .With("token", ...) must still go
-	// through the redactor — without this guarantee, middleware that
-	// attaches request-scoped attrs would leak tokens.
 	log, buf := newCapturingLogger(t)
 	log.With(slog.String("token", "concord_pre_bound")).Info("downstream",
 		slog.String("user", "alice"))
@@ -113,8 +110,6 @@ func TestRedacting_ExtraKeysAppendToDefault(t *testing.T) {
 }
 
 func TestRedacting_EnabledDelegatesToInner(t *testing.T) {
-	// At LevelWarn the inner JSON handler shouldn't emit a Debug
-	// line, and the wrapper must not change that.
 	buf := &bytes.Buffer{}
 	json := slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn})
 	log := slog.New(logx.NewRedactingHandler(json, nil))
@@ -128,9 +123,6 @@ func TestRedacting_EnabledDelegatesToInner(t *testing.T) {
 }
 
 func TestRedacting_MessageIsNeverInspected(t *testing.T) {
-	// Documented non-feature: the message text is NOT scanned. This
-	// test pins that contract so a future "helpful" change doesn't
-	// quietly start redacting log messages.
 	log, buf := newCapturingLogger(t)
 	log.Info("attempted login with token=concord_abc")
 	out := buf.String()
@@ -138,11 +130,6 @@ func TestRedacting_MessageIsNeverInspected(t *testing.T) {
 		"message text passes through verbatim — callers must not put secrets there")
 }
 
-// TestRedacting_HandlerContractCompliance is the slogtest-style smoke:
-// a redacted attr must still produce a parsable JSON record with the
-// expected envelope (time, level, msg). We assert structural shape
-// rather than diff against slog's text output because slog's record
-// ordering isn't guaranteed.
 func TestRedacting_HandlerContractCompliance(t *testing.T) {
 	log, buf := newCapturingLogger(t)
 	log.LogAttrs(context.Background(), slog.LevelInfo, "checked",

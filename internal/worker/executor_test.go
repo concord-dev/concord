@@ -29,8 +29,6 @@ import (
 
 const defaultTestDSN = "postgres://concord:concord-dev@localhost:5432/concord?sslmode=disable"
 
-// openIsolatedStore creates a fresh per-test database with migrations
-// applied. Mirrors the pattern in internal/store and internal/eventbus.
 func openIsolatedStore(t *testing.T) *store.Store {
 	t.Helper()
 	baseDSN := os.Getenv("CONCORD_TEST_DATABASE_URL")
@@ -87,16 +85,10 @@ func seedOrgAndWebhook(t *testing.T, s *store.Store, allowed []string) (uuid.UUI
 		Enabled:    true,
 	})
 	require.NoError(t, err)
-	// The Executor signs against wh.Secret; CreateWebhook only returns
-	// the plaintext once, so stash it on the returned struct.
 	wh.Secret = secret
 	return org.ID, wh
 }
 
-// recordingReceiver is a test HTTP server that records every received
-// request and returns a configurable status. Used to drive the
-// Executor's HTTP path without touching the network. Safe for
-// concurrent use by multiple retriers.
 type recordingReceiver struct {
 	srv     *httptest.Server
 	mu      sync.Mutex
@@ -157,8 +149,6 @@ func TestExecutor_2xxMarksSucceeded(t *testing.T) {
 	assert.Equal(t, store.DeliverySucceeded, status)
 	assert.EqualValues(t, 1, rec.calls.Load())
 
-	// Verify the HMAC signature the receiver got matches what an
-	// independent verifier would compute.
 	recMac := hmac.New(sha256.New, []byte(wh.Secret))
 	recMac.Write(body)
 	want := "sha256=" + hex.EncodeToString(recMac.Sum(nil))
@@ -167,7 +157,6 @@ func TestExecutor_2xxMarksSucceeded(t *testing.T) {
 	rec.mu.Unlock()
 	assert.Equal(t, want, gotSig)
 
-	// Row state should reflect success.
 	d, err := s.GetWebhookDelivery(context.Background(), id)
 	require.NoError(t, err)
 	assert.Equal(t, store.DeliverySucceeded, d.Status)
@@ -175,7 +164,6 @@ func TestExecutor_2xxMarksSucceeded(t *testing.T) {
 	assert.NotNil(t, d.SucceededAt)
 	assert.Nil(t, d.NextAttemptAt)
 
-	// attempts_log should contain one entry.
 	var log []map[string]any
 	require.NoError(t, json.Unmarshal(d.AttemptsLog, &log))
 	assert.Len(t, log, 1)
@@ -231,7 +219,6 @@ func TestExecutor_DeadAfterMaxAttempts(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Three attempts → on the third, transition to 'dead'.
 	for i := 0; i < 3; i++ {
 		_, err := exec.Attempt(context.Background(), nil, id, "x", rec.URL(), wh.Secret, []byte("{}"), false)
 		require.NoError(t, err)
@@ -258,7 +245,6 @@ func TestExecutor_NetworkErrorIsClassifiedAndCaptured(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Connect to a port nothing listens on → network error.
 	status, err := exec.Attempt(context.Background(), nil, id, "x", "http://127.0.0.1:1", wh.Secret, []byte("{}"), false)
 	require.NoError(t, err)
 	assert.Equal(t, store.DeliveryFailed, status)
@@ -271,12 +257,10 @@ func TestExecutor_NetworkErrorIsClassifiedAndCaptured(t *testing.T) {
 
 func TestExecutor_BackoffForAttempt(t *testing.T) {
 	cfg := worker.ExecutorConfig{BackoffBase: time.Second, BackoffMax: 60 * time.Second}
-	// 1 → 1s, 2 → 2s, 3 → 4s, 4 → 8s, 5 → 16s.
 	for i, want := range map[int]time.Duration{1: time.Second, 2: 2 * time.Second, 3: 4 * time.Second, 4: 8 * time.Second, 5: 16 * time.Second} {
 		got := worker.BackoffForAttempt(cfg, i)
 		assert.Equal(t, want, got, "attempt %d", i)
 	}
-	// Cap at BackoffMax.
 	cap := worker.BackoffForAttempt(cfg, 30)
 	assert.Equal(t, 60*time.Second, cap, "capped at BackoffMax")
 }

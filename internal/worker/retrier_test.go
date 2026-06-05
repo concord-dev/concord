@@ -19,8 +19,6 @@ func TestRetrier_RetriesFailedDeliveriesUntilSuccess(t *testing.T) {
 	s := openIsolatedStore(t)
 	orgID, wh := seedOrgAndWebhook(t, s, nil)
 
-	// Receiver: first 2 calls 500, then 200. Counts how many times
-	// each is hit.
 	rec := newRecordingReceiver(func(seq int64) (int, string) {
 		if seq <= 2 {
 			return 500, "boom"
@@ -29,14 +27,11 @@ func TestRetrier_RetriesFailedDeliveriesUntilSuccess(t *testing.T) {
 	})
 	defer rec.Close()
 
-	// Seed a row whose backoff is already elapsed so the Retrier picks
-	// it up on the next tick.
 	ctx := context.Background()
 	id, _, err := s.UpsertDelivery(ctx, store.UpsertDeliveryParams{
 		WebhookID: wh.ID, EventID: uuid.New(), OrgID: orgID, EventKind: "x",
 	})
 	require.NoError(t, err)
-	// Transition the row to 'failed' with next_attempt_at in the past.
 	_, err = s.MarkDeliveryFailed(ctx, id, store.AttemptResult{
 		AttemptedAt: time.Now(),
 		HTTPStatus:  500,
@@ -45,7 +40,6 @@ func TestRetrier_RetriesFailedDeliveriesUntilSuccess(t *testing.T) {
 	}, -1*time.Second, 5)
 	require.NoError(t, err)
 
-	// Force webhook URL to point at the test receiver.
 	_, err = s.Pool().Exec(ctx, `UPDATE webhook SET url = $1 WHERE id = $2`, rec.URL(), wh.ID)
 	require.NoError(t, err)
 
@@ -84,10 +78,6 @@ func TestRetrier_RetriesFailedDeliveriesUntilSuccess(t *testing.T) {
 }
 
 func TestRetrier_TwoInstancesDoNotDoubleFire(t *testing.T) {
-	// SELECT FOR UPDATE SKIP LOCKED is the contract. Prove that two
-	// concurrent retriers against the same DB never deliver the same
-	// row twice by seeding N rows, running both, then asserting the
-	// receiver count == N.
 	s := openIsolatedStore(t)
 	orgID, wh := seedOrgAndWebhook(t, s, nil)
 
@@ -105,7 +95,6 @@ func TestRetrier_TwoInstancesDoNotDoubleFire(t *testing.T) {
 			WebhookID: wh.ID, EventID: uuid.New(), OrgID: orgID, EventKind: "x",
 		})
 		require.NoError(t, err)
-		// Force into 'failed' with an elapsed backoff.
 		_, err = s.MarkDeliveryFailed(ctx, id, store.AttemptResult{
 			AttemptedAt: time.Now(),
 			HTTPStatus:  500,
@@ -149,10 +138,6 @@ func TestRetrier_TwoInstancesDoNotDoubleFire(t *testing.T) {
 }
 
 func TestConsumer_DBLevelIdempotencyOnDoubleProcess(t *testing.T) {
-	// Simulate a Kafka redelivery: the Consumer is fed the SAME
-	// event_id twice; the second iteration must be a no-op because
-	// the (webhook_id, event_id) row already exists with status
-	// 'succeeded'.
 	s := openIsolatedStore(t)
 	orgID, wh := seedOrgAndWebhook(t, s, nil)
 	rec := newRecordingReceiver(func(int64) (int, string) { return 200, "ok" })
@@ -168,9 +153,6 @@ func TestConsumer_DBLevelIdempotencyOnDoubleProcess(t *testing.T) {
 
 	eventID := uuid.New()
 
-	// Simulate the consumer's deliverFirstAttempt path: UpsertDelivery
-	// → first time returns created=true, then Executor runs. Second
-	// time UpsertDelivery returns created=false; consumer code skips.
 	var calls atomic.Int64
 	for i := 0; i < 2; i++ {
 		id, created, err := s.UpsertDelivery(ctx, store.UpsertDeliveryParams{
@@ -178,7 +160,6 @@ func TestConsumer_DBLevelIdempotencyOnDoubleProcess(t *testing.T) {
 		})
 		require.NoError(t, err)
 		if !created {
-			// Mirror the consumer's behaviour for terminal states.
 			existing, err := s.GetWebhookDelivery(ctx, id)
 			require.NoError(t, err)
 			if existing.Status == store.DeliverySucceeded || existing.Status == store.DeliveryDead {
@@ -190,8 +171,6 @@ func TestConsumer_DBLevelIdempotencyOnDoubleProcess(t *testing.T) {
 		calls.Add(1)
 	}
 
-	// Receiver should have been called exactly ONCE despite two
-	// consumer iterations.
 	assert.EqualValues(t, 1, rec.calls.Load(),
 		"duplicate event_id must not double-fire the receiver")
 	assert.EqualValues(t, 1, calls.Load(),

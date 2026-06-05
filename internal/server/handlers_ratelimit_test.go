@@ -16,8 +16,6 @@ import (
 	"github.com/concord-dev/concord/internal/server/limiter"
 )
 
-// tightLimitsForTest builds a Limits bundle with very small buckets so a
-// handful of requests is enough to trip the 429 path.
 func tightAuthLimits(burst int) auth.Limits {
 	cfg := limiter.Config{Rate: limiter.Every(time.Minute), Burst: burst}
 	return auth.Limits{
@@ -35,7 +33,6 @@ func tightPublicLimits(burst int) public.Limits {
 
 func TestLogin_ReturnsTooManyRequestsAfterBurstExceeded(t *testing.T) {
 	h := newHarness(t)
-	// Burst 2 → 3rd request from the same source must be 429.
 	h.c.SetLimitsForTest(tightAuthLimits(2), tightPublicLimits(100))
 	h.rebuildServer(t)
 
@@ -69,15 +66,10 @@ func TestPasswordReset_ReturnsTooManyRequestsAfterBurstExceeded(t *testing.T) {
 }
 
 func TestInviteAccept_ReturnsTooManyRequestsAfterBurstExceeded(t *testing.T) {
-	// An attacker grinding token guesses against /v1/invitations/accept must
-	// hit a 429 wall before they get to try many candidates.
 	h := newHarness(t)
 	h.c.SetLimitsForTest(tightAuthLimits(100), tightPublicLimits(2))
 	h.rebuildServer(t)
 
-	// Any garbage token works — we're testing the rate gate, not the
-	// invitation flow. Below-burst requests get the normal 404 / 400; the
-	// burst+1th request gets 429 regardless of body validity.
 	body := `{"token":"nope-this-doesnt-exist-as-a-real-invitation"}`
 	for i := 0; i < 2; i++ {
 		resp, _ := h.do(t, "POST", "/v1/invitations/accept", body, "")
@@ -90,8 +82,6 @@ func TestInviteAccept_ReturnsTooManyRequestsAfterBurstExceeded(t *testing.T) {
 }
 
 func TestLogin_RateLimitDoesNotApplyToValidSuccess(t *testing.T) {
-	// Sanity check: a generous bucket lets a real login through end-to-end.
-	// This protects us from accidentally regressing the limiter to deny-all.
 	h := newHarness(t)
 	h.c.SetLimitsForTest(tightAuthLimits(5), tightPublicLimits(100))
 	h.rebuildServer(t)

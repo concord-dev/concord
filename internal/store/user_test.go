@@ -22,12 +22,10 @@ func TestCreateUser_WithPassword(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, email, u.Email)
 
-	// Password verification should succeed.
 	got, err := s.VerifyUserPassword(ctx, email, "hunter2")
 	require.NoError(t, err)
 	assert.Equal(t, u.ID, got.ID)
 
-	// Wrong password is ErrNotFound (no user enumeration).
 	_, err = s.VerifyUserPassword(ctx, email, "nope")
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }

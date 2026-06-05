@@ -114,5 +114,3 @@ func TestDeleteWebhook_CannotCrossOrg(t *testing.T) {
 	assert.ErrorIs(t, s.DeleteWebhook(ctx, b.ID, wh.ID), store.ErrNotFound)
 }
 
-// TestDeleteOrg_CascadesEverywhere verifies the ON DELETE CASCADE chain so
-// the soft tenant-deletion path doesn't leak rows across the join tables.

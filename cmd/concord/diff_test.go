@@ -73,7 +73,6 @@ func TestRenderDiffMarkdown_GroupsByCategory(t *testing.T) {
 	assert.Contains(t, out, "## ➖ Removed controls (1)")
 	assert.Contains(t, out, "`GONE-1`")
 
-	// Pipe in title must be escaped.
 	assert.Contains(t, out, `New control \| with pipe`)
 	assert.NotContains(t, out, "| New control | with pipe |", "raw pipe would break the table")
 }
