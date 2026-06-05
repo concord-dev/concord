@@ -32,6 +32,7 @@ type entry struct {
 	source  string
 	version string
 	path    string
+	allowedEnv []string
 }
 
 type client struct {
@@ -111,11 +112,17 @@ func (m *Manager) scanDir(dir string) error {
 		sort.Strings(versionDirs)
 		ver := versionDirs[len(versionDirs)-1]
 
-		bin := filepath.Join(dir, src.Name(), ver, "concord-plugin-"+src.Name())
+		versionDir := filepath.Join(dir, src.Name(), ver)
+		bin := filepath.Join(versionDir, "concord-plugin-"+src.Name())
 		if _, err := os.Stat(bin); err != nil {
 			continue
 		}
-		m.discovered[src.Name()] = &entry{source: src.Name(), version: ver, path: bin}
+		m.discovered[src.Name()] = &entry{
+			source:     src.Name(),
+			version:    ver,
+			path:       bin,
+			allowedEnv: readAllowedEnv(versionDir),
+		}
 	}
 	return nil
 }
@@ -174,12 +181,14 @@ func (m *Manager) Get(_ context.Context, source string) (*PluginCollector, error
 }
 
 func (m *Manager) spawn(e *entry) (*client, error) {
+	cmd := exec.Command(e.path)
+	cmd.Env = scopedEnv(e.allowedEnv)
 	gpc := goplugin.NewClient(&goplugin.ClientConfig{
 		HandshakeConfig: sdkplugin.HandshakeConfig,
 		Plugins: map[string]goplugin.Plugin{
 			sdkplugin.PluginName: &sdkplugin.CollectorPlugin{},
 		},
-		Cmd:              exec.Command(e.path),
+		Cmd:              cmd,
 		AllowedProtocols: []goplugin.Protocol{goplugin.ProtocolGRPC},
 		Managed:          true,
 		Logger:           hclog.NewNullLogger(),

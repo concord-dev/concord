@@ -75,6 +75,10 @@ func Install(ctx context.Context, ref string, opts InstallOptions) (*InstalledPl
 		return nil, err
 	}
 
+	if err := writeCapabilitiesSidecar(filepath.Dir(binaryPath), binaryPath); err != nil {
+		fmt.Fprintf(progress, "  → warning: capabilities sidecar not written: %v\n", err)
+	}
+
 	if err := writeLockEntry(opts.LockfilePath, source, pulled, verify, opts.AllowSignerChange); err != nil {
 		return nil, err
 	}
@@ -214,6 +218,24 @@ func writeLockEntry(path, source string, pulled *ociart.PullResult, verify *ocia
 		InstalledAt: time.Now().UTC().Format(time.RFC3339),
 	})
 	return lockfile.Save(path, lf)
+}
+
+// writeCapabilitiesSidecar spawns the newly-installed binary once to capture
+// its self-declared RequiredEnv + OptionalEnv, then records them next to the
+// binary so future Discover() calls can scope the env without a probe.
+func writeCapabilitiesSidecar(versionDir, binPath string) error {
+	mgr := New(Options{Dirs: []string{filepath.Dir(filepath.Dir(versionDir))}})
+	if err := mgr.Discover(); err != nil {
+		return err
+	}
+	defer func() { _ = mgr.Shutdown(context.Background()) }()
+
+	source := filepath.Base(filepath.Dir(versionDir))
+	caps, err := mgr.Capabilities(context.Background(), source)
+	if err != nil {
+		return err
+	}
+	return WriteAllowedEnv(versionDir, caps.RequiredEnv, caps.OptionalEnv)
 }
 
 func resolveInstallRoot(root string) (string, error) {
