@@ -170,3 +170,44 @@ func TestGitHubAction_Writes(t *testing.T) {
 	assert.True(t, written)
 	assert.Contains(t, readFile(t, dest), "concord check")
 }
+
+func TestControl_WritesYAMLRegoAndFixtures(t *testing.T) {
+	dest := t.TempDir()
+	r, err := scaffold.Control(dest, scaffold.ControlInput{
+		Pack: "mycorp", ID: "MYCORP-1.1", Title: "Sample control",
+		Framework: "mycorp", Severity: "high", Author: "platform",
+	}, false)
+	require.NoError(t, err)
+
+	assert.FileExists(t, r.YAML)
+	assert.FileExists(t, r.Rego)
+	assert.FileExists(t, r.PassFix)
+	assert.FileExists(t, r.FailFix)
+
+	yaml := readFile(t, r.YAML)
+	assert.Contains(t, yaml, "id: MYCORP-1.1")
+	assert.Contains(t, yaml, "severity: high")
+	assert.Contains(t, yaml, "package: concord.mycorp.mycorp_1_1")
+
+	rego := readFile(t, r.Rego)
+	assert.Contains(t, rego, "package concord.mycorp.mycorp_1_1")
+	assert.Contains(t, rego, "import rego.v1")
+}
+
+func TestControl_RefusesToOverwriteWithoutForce(t *testing.T) {
+	dest := t.TempDir()
+	_, err := scaffold.Control(dest, scaffold.ControlInput{Pack: "p", ID: "X"}, false)
+	require.NoError(t, err)
+
+	_, err = scaffold.Control(dest, scaffold.ControlInput{Pack: "p", ID: "X"}, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already exists")
+}
+
+func TestControl_RequiresPackAndID(t *testing.T) {
+	dest := t.TempDir()
+	_, err := scaffold.Control(dest, scaffold.ControlInput{ID: "X"}, false)
+	require.Error(t, err)
+	_, err = scaffold.Control(dest, scaffold.ControlInput{Pack: "p"}, false)
+	require.Error(t, err)
+}
