@@ -8,10 +8,18 @@ import (
 )
 
 type Config struct {
-	APIVersion string      `json:"apiVersion,omitempty"`
-	Kind       string      `json:"kind,omitempty"`
-	Metadata   Metadata    `json:"metadata,omitempty"`
-	Controls   ControlsCfg `json:"controls,omitempty"`
+	APIVersion string         `json:"apiVersion,omitempty"`
+	Kind       string         `json:"kind,omitempty"`
+	Metadata   Metadata       `json:"metadata,omitempty"`
+	Controls   ControlsCfg    `json:"controls,omitempty"`
+	Frameworks []FrameworkRef `json:"frameworks,omitempty" yaml:"frameworks,omitempty"`
+}
+
+// FrameworkRef is one workspace-level framework dependency.
+type FrameworkRef struct {
+	Source  string `json:"source"            yaml:"source"`
+	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+	Reason  string `json:"reason,omitempty"  yaml:"reason,omitempty"`
 }
 
 type Metadata struct {

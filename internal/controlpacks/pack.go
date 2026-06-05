@@ -3,8 +3,12 @@
 package controlpacks
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -88,4 +92,38 @@ func (p *Pack) EvidenceSourceNames() []string {
 // PackDir is the on-disk location for an installed pack.
 func PackDir(installRoot, framework, version string) string {
 	return filepath.Join(installRoot, framework, version)
+}
+
+// ParsePackTarball reads pack.yaml from a gzipped tar byte slice without writing to disk.
+func ParsePackTarball(tgz []byte) (*Pack, error) {
+	gz, err := gzip.NewReader(bytes.NewReader(tgz))
+	if err != nil {
+		return nil, fmt.Errorf("opening gzip: %w", err)
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return nil, errors.New("pack.yaml not found in tarball")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading tar header: %w", err)
+		}
+		if filepath.Base(hdr.Name) != PackFile {
+			continue
+		}
+		raw, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, fmt.Errorf("reading pack.yaml: %w", err)
+		}
+		var p Pack
+		if err := yaml.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("parsing pack.yaml: %w", err)
+		}
+		if err := p.Validate(); err != nil {
+			return nil, fmt.Errorf("validating pack.yaml: %w", err)
+		}
+		return &p, nil
+	}
 }

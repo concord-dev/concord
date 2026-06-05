@@ -28,5 +28,9 @@ Audits become continuous instead of episodic.`,
 	cmd.AddCommand(newOrgsCmd())
 	cmd.AddCommand(newPluginCmd())
 	cmd.AddCommand(newControlpackCmd())
+	cmd.AddCommand(newAddCmd())
+	cmd.AddCommand(newRemoveCmd())
+	cmd.AddCommand(newInstallCmd())
+	cmd.AddCommand(newOutdatedCmd())
 	return cmd
 }
