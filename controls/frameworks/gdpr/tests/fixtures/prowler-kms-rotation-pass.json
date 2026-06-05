@@ -1,0 +1,20 @@
+{
+  "fetched_at": "2026-06-05T00:00:00Z",
+  "provider": "aws",
+  "finding_count": 1,
+  "pass_count": 1,
+  "fail_count": 0,
+  "manual_count": 0,
+  "failures_by_check": {},
+  "failures_by_severity": {},
+  "findings": [
+    {
+      "check_id": "prowler-kms_cmk_rotation_enabled",
+      "title": "Customer-managed KMS keys have rotation enabled",
+      "status": "PASS",
+      "severity": "informational",
+      "resource_arn": "arn:aws:kms:eu-west-1:111111111111:key/abc",
+      "compliance": {"gdpr_eu": ["Article 32"]}
+    }
+  ]
+}

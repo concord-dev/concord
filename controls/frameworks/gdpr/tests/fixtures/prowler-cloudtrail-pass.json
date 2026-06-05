@@ -1,0 +1,28 @@
+{
+  "fetched_at": "2026-06-05T00:00:00Z",
+  "provider": "aws",
+  "finding_count": 2,
+  "pass_count": 2,
+  "fail_count": 0,
+  "manual_count": 0,
+  "failures_by_check": {},
+  "failures_by_severity": {},
+  "findings": [
+    {
+      "check_id": "prowler-cloudtrail_multi_region_enabled",
+      "title": "Multi-region CloudTrail enabled",
+      "status": "PASS",
+      "severity": "informational",
+      "resource_arn": "arn:aws:cloudtrail:us-east-1:111111111111:trail/global",
+      "compliance": {"gdpr_eu": ["Article 30", "Article 33"]}
+    },
+    {
+      "check_id": "prowler-cloudtrail_log_file_validation_enabled",
+      "title": "CloudTrail log file validation enabled",
+      "status": "PASS",
+      "severity": "informational",
+      "resource_arn": "arn:aws:cloudtrail:us-east-1:111111111111:trail/global",
+      "compliance": {"gdpr_eu": ["Article 30"]}
+    }
+  ]
+}

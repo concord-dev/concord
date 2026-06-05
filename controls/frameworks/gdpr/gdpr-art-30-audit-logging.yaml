@@ -1,0 +1,69 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: GDPR-ART-30-AUDIT-LOGGING
+  name: audit-logging-enabled
+  title: Cloud audit logging captures every account action with file-integrity validation
+  framework: gdpr
+  category: Records of processing
+  severity: high
+  tags:
+    - gdpr
+    - audit-log
+    - prowler
+  owners:
+    - team: security
+
+spec:
+  description: |
+    GDPR Article 30 — records of processing activities — and Article 33
+    — breach notification within 72h — both presume the controller can
+    reconstruct what happened. CloudTrail / Cloud Audit / Azure
+    Activity Log are the foundation: without them, neither RoPA nor
+    incident response is possible.
+
+  rationale: |
+    File-integrity validation matters specifically because Art. 30
+    records may be subpoenaed. An attacker who can rewrite the audit
+    trail can launder their actions; integrity validation makes that
+    detectable.
+
+  evidence:
+    - id: prowler
+      source: prowler
+      params:
+        provider: aws
+        compliance: gdpr_eu
+        services:
+          - cloudtrail
+      fixture: ./tests/fixtures/prowler-cloudtrail-pass.json
+
+  policy:
+    engine: rego
+    package: concord.gdpr.prowler
+    file: ./policies/prowler.rego
+
+  remediation:
+    runbook: docs/remediation/gdpr-art-30-audit-logging.md
+    auto_fix: false
+    estimated_effort: 30m
+
+  mappings:
+    gdpr:
+      - "Article 30"
+      - "Article 33"
+    iso27001:
+      - A.12.4.1
+      - A.12.4.2
+    nist_800_53:
+      - AU-2
+      - AU-9
+    soc2:
+      - CC7.2
+    cis_aws_v2:
+      - "3.1"
+      - "3.2"
+
+  status: stable
+  blocking: true

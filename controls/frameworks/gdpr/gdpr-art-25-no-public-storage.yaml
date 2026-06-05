@@ -1,0 +1,63 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: GDPR-ART-25-NO-PUBLIC-STORAGE
+  name: no-public-storage
+  title: No object-storage buckets allow public access
+  framework: gdpr
+  category: Privacy by design
+  severity: critical
+  tags:
+    - gdpr
+    - privacy-by-default
+    - prowler
+  owners:
+    - team: security
+
+spec:
+  description: |
+    GDPR Article 25 — "data protection by design and by default" —
+    requires the default setting to be the most privacy-preserving.
+    A publicly-readable bucket is the canonical violation: an operator
+    accidentally exposes a file that contains personal data.
+
+  rationale: |
+    The most common GDPR breach pattern in the wild is "S3 bucket left
+    public" — Capital One, Verizon, Dow Jones, etc. Defense in depth:
+    detect at the resource level even when the application layer claims
+    to protect data.
+
+  evidence:
+    - id: prowler
+      source: prowler
+      params:
+        provider: aws
+        compliance: gdpr_eu
+        services:
+          - s3
+      fixture: ./tests/fixtures/prowler-no-public-storage-pass.json
+
+  policy:
+    engine: rego
+    package: concord.gdpr.prowler
+    file: ./policies/prowler.rego
+
+  remediation:
+    runbook: docs/remediation/gdpr-art-25-no-public-storage.md
+    auto_fix: false
+    estimated_effort: 10m
+
+  mappings:
+    gdpr:
+      - "Article 25"
+      - "Article 32(1)(b)"
+    iso27001:
+      - A.9.4.1
+    cis_aws_v2:
+      - "2.1.5"
+    soc2:
+      - CC6.1
+
+  status: stable
+  blocking: true

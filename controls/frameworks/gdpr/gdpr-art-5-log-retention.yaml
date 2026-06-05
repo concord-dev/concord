@@ -1,0 +1,69 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: GDPR-ART-5-LOG-RETENTION
+  name: log-retention-bounded
+  title: CloudWatch / Cloud Logging log groups retain personal data for at most 90 days
+  framework: gdpr
+  category: Data minimisation
+  severity: medium
+  tags:
+    - gdpr
+    - retention
+    - data-minimisation
+    - steampipe
+  owners:
+    - team: security
+
+spec:
+  description: |
+    GDPR Article 5(1)(c) (data minimisation) and 5(1)(e) (storage
+    limitation) together require personal data to be kept "no longer
+    than is necessary for the purposes for which it is processed".
+    Log groups frequently contain personal data (IPs, user IDs,
+    request paths); a default of "retain forever" is a regulatory
+    risk.
+
+  rationale: |
+    Default CloudWatch retention is "never expire". Most lawful bases
+    for processing personal data don't survive past 90 days of
+    operational logs (security logs may be longer; pin those in a
+    different log group and tag accordingly). Failing this control
+    means a regulator who asks "why are you still holding personal
+    data from 2 years ago" gets a worse answer than they should.
+
+  evidence:
+    - id: log_groups
+      source: steampipe
+      params:
+        query: |
+          SELECT name, retention_in_days, region
+          FROM aws_cloudwatch_log_group
+          ORDER BY name
+      fixture: ./tests/fixtures/log-groups-pass.json
+
+  policy:
+    engine: rego
+    package: concord.gdpr.log_retention
+    file: ./policies/log_retention.rego
+
+  remediation:
+    runbook: docs/remediation/gdpr-art-5-log-retention.md
+    auto_fix: true
+    estimated_effort: 5m
+
+  mappings:
+    gdpr:
+      - "Article 5(1)(c)"
+      - "Article 5(1)(e)"
+    iso27001:
+      - A.12.4.2
+      - A.18.1.3
+    nist_800_53:
+      - SI-12
+    soc2:
+      - CC7.3
+
+  status: stable
+  blocking: false

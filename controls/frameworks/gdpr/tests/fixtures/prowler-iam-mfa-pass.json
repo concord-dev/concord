@@ -1,0 +1,28 @@
+{
+  "fetched_at": "2026-06-05T00:00:00Z",
+  "provider": "aws",
+  "finding_count": 2,
+  "pass_count": 2,
+  "fail_count": 0,
+  "manual_count": 0,
+  "failures_by_check": {},
+  "failures_by_severity": {},
+  "findings": [
+    {
+      "check_id": "prowler-iam_root_mfa_enabled",
+      "title": "Root account has MFA enabled",
+      "status": "PASS",
+      "severity": "informational",
+      "resource_arn": "arn:aws:iam::111111111111:root",
+      "compliance": {"gdpr_eu": ["Article 32"]}
+    },
+    {
+      "check_id": "prowler-iam_user_mfa_enabled_console_access",
+      "title": "All console-enabled IAM users have MFA",
+      "status": "PASS",
+      "severity": "informational",
+      "resource_arn": "arn:aws:iam::111111111111:user/admin",
+      "compliance": {"gdpr_eu": ["Article 32"]}
+    }
+  ]
+}

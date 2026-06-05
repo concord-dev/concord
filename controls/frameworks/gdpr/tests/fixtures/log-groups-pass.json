@@ -1,0 +1,10 @@
+{
+  "fetched_at": "2026-06-05T00:00:00Z",
+  "query": "SELECT name, retention_in_days, region FROM aws_cloudwatch_log_group",
+  "row_count": 3,
+  "rows": [
+    {"name": "/aws/lambda/api", "retention_in_days": 30, "region": "eu-west-1"},
+    {"name": "/aws/rds/instance/prod/audit", "retention_in_days": 90, "region": "eu-west-1"},
+    {"name": "/aws/ecs/web", "retention_in_days": 14, "region": "eu-west-1"}
+  ]
+}
