@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/concord-dev/concord/internal/config"
+	"github.com/concord-dev/concord/internal/controlpacks"
 	"github.com/concord-dev/concord/internal/controls"
 	"github.com/concord-dev/concord/internal/evidence"
 	"github.com/concord-dev/concord/internal/evidence/wiring"
@@ -43,12 +44,16 @@ func newCheckCmd() *cobra.Command {
 				return err
 			}
 
-			loaded, err := controls.Load(controlsDir)
+			roots, err := controlRoots(controlsDir)
+			if err != nil {
+				return err
+			}
+			loaded, err := controls.LoadFrom(roots)
 			if err != nil {
 				return fmt.Errorf("loading controls: %w", err)
 			}
 			if len(loaded) == 0 {
-				return fmt.Errorf("no controls found in %s", controlsDir)
+				return fmt.Errorf("no controls found in %s or any installed pack", controlsDir)
 			}
 
 			built := wiring.BuildRegistry(context.Background(), wiring.Opts{
@@ -101,6 +106,23 @@ func newCheckCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress prelude (Mode + Checking lines)")
 	addPushFlags(cmd, &push)
 	return cmd
+}
+
+// controlRoots returns the on-disk directories controls.LoadFrom should walk:
+// the user's --controls dir (when present) plus every installed control pack.
+func controlRoots(controlsDir string) ([]string, error) {
+	var roots []string
+	if controlsDir != "" {
+		if info, err := os.Stat(controlsDir); err == nil && info.IsDir() {
+			roots = append(roots, controlsDir)
+		}
+	}
+	discovered, err := controlpacks.Discover("")
+	if err != nil {
+		return nil, fmt.Errorf("discovering installed control packs: %w", err)
+	}
+	roots = append(roots, controlpacks.ControlsDirs(discovered)...)
+	return roots, nil
 }
 
 func openOutput(path string) (io.Writer, func(), error) {

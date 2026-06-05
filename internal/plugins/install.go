@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
+
+	"github.com/concord-dev/concord/internal/lockfile"
+	"github.com/concord-dev/concord/internal/ociart"
 )
 
 // InstallOptions tune Install. Zero values are sensible defaults.
@@ -26,105 +28,66 @@ type InstallOptions struct {
 	ProgressW         io.Writer
 }
 
+// InstalledPlugin describes a successfully installed plugin.
+type InstalledPlugin struct {
+	Source     string
+	Version    string
+	Artifact   string
+	Digest     string
+	Platform   string
+	BinaryPath string
+}
+
 // Install pulls, verifies, and locks a plugin OCI artifact.
-func Install(ctx context.Context, ref string, opts InstallOptions) (*PullResult, error) {
+func Install(ctx context.Context, ref string, opts InstallOptions) (*InstalledPlugin, error) {
 	progress := opts.ProgressW
 	if progress == nil {
 		progress = io.Discard
 	}
 
 	fmt.Fprintf(progress, "Pulling %s...\n", ref)
-	pulled, err := PullPlugin(ctx, ref, PullOptions{
-		InstallRoot: opts.InstallRoot,
-		Platform:    opts.Platform,
-		PlainHTTP:   opts.PlainHTTP,
+	pulled, err := ociart.Pull(ctx, ref, ociart.PullOptions{
+		Platform:  opts.Platform,
+		PlainHTTP: opts.PlainHTTP,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("pulling %s: %w", ref, err)
 	}
-	fmt.Fprintf(progress, "  → digest %s\n", pulled.Digest)
-	fmt.Fprintf(progress, "  → installed %s\n", pulled.BinaryPath)
 
-	verify, err := runVerification(ctx, pulled, opts, progress)
+	source := ociart.Annotation(pulled.Annotations, ociart.AnnotationPluginSource)
+	if source == "" {
+		source = defaultSourceFromArtifact(pulled.Artifact)
+	}
+	if source == "" {
+		return nil, fmt.Errorf("artifact missing %s annotation; cannot determine plugin source", ociart.AnnotationPluginSource)
+	}
+
+	binaryPath, err := writeBinary(opts.InstallRoot, source, pulled.Tag, pulled.Layer.Bytes)
 	if err != nil {
-		_ = os.Remove(pulled.BinaryPath)
+		return nil, err
+	}
+	fmt.Fprintf(progress, "  → digest %s\n", pulled.Digest)
+	fmt.Fprintf(progress, "  → installed %s\n", binaryPath)
+
+	verify, err := verifyArtifact(ctx, pulled, opts, progress)
+	if err != nil {
+		_ = os.Remove(binaryPath)
 		return nil, err
 	}
 
-	if err := writeLockEntry(opts.LockfilePath, pulled, verify, opts.AllowSignerChange); err != nil {
+	if err := writeLockEntry(opts.LockfilePath, source, pulled, verify, opts.AllowSignerChange); err != nil {
 		return nil, err
 	}
 	fmt.Fprintln(progress, "  → lockfile updated")
-	return pulled, nil
-}
 
-func runVerification(ctx context.Context, pulled *PullResult, opts InstallOptions, progress io.Writer) (*VerifyResult, error) {
-	if opts.SkipSignature {
-		fmt.Fprintln(progress, "  → signature verification SKIPPED (--no-verify)")
-		return nil, nil
-	}
-	signedRef := pulled.Artifact + "@" + pulled.Digest
-	repo := opts.GitHubRepo
-	if repo == "" {
-		repo = guessGitHubRepoFromArtifact(pulled.Artifact)
-	}
-	verifyOpts := VerifyOptions{
-		Identity:  opts.ExpectedIdentity,
-		CosignBin: opts.CosignBin,
-	}
-	if verifyOpts.Identity == "" && repo != "" {
-		verifyOpts.IdentityRegexp = IdentityRegexpForGitHubRepo(repo)
-	}
-	if verifyOpts.Identity == "" && verifyOpts.IdentityRegexp == "" {
-		if opts.RequireSignature {
-			return nil, errors.New("--require-signature was set, but no identity could be determined from artifact reference (pass --identity or --identity-regexp)")
-		}
-		fmt.Fprintln(progress, "  → signature verification SKIPPED (cannot determine signer identity)")
-		return nil, nil
-	}
-
-	result, err := VerifySignature(ctx, signedRef, verifyOpts)
-	switch {
-	case errors.Is(err, ErrCosignMissing):
-		if opts.RequireSignature {
-			return nil, fmt.Errorf("--require-signature was set, but cosign is not on PATH: %w", err)
-		}
-		fmt.Fprintln(progress, "  → signature verification SKIPPED (cosign not on PATH)")
-		return nil, nil
-	case err != nil:
-		return nil, fmt.Errorf("verifying signature: %w", err)
-	}
-	fmt.Fprintf(progress, "  → signature OK (signer=%s)\n", result.Identity)
-	return result, nil
-}
-
-func writeLockEntry(path string, pulled *PullResult, verify *VerifyResult, allowSignerChange bool) error {
-	if path == "" {
-		path = LockfilePath
-	}
-	lf, err := LoadLockfile(path)
-	if err != nil {
-		return err
-	}
-	signer := ""
-	if verify != nil {
-		signer = verify.Identity
-	}
-	if prev := lf.Lookup(pulled.Source); prev != nil && !allowSignerChange {
-		if err := AssertSignerContinuity(prev.Signer, signer); err != nil {
-			return err
-		}
-	}
-	lf.Upsert(LockedPlugin{
-		Source:      pulled.Source,
-		Artifact:    pulled.Artifact,
-		Version:     pulled.Version,
-		Digest:      pulled.Digest,
-		Signer:      signer,
-		Platform:    pulled.Platform,
-		InstalledAt: time.Now().UTC().Format(time.RFC3339),
-	})
-	return SaveLockfile(path, lf)
+	return &InstalledPlugin{
+		Source:     source,
+		Version:    pulled.Tag,
+		Artifact:   pulled.Artifact,
+		Digest:     pulled.Digest,
+		Platform:   pulled.Platform,
+		BinaryPath: binaryPath,
+	}, nil
 }
 
 // Uninstall removes the binary on disk and drops the lockfile entry.
@@ -139,22 +102,142 @@ func Uninstall(source string, opts InstallOptions) error {
 	}
 	lockPath := opts.LockfilePath
 	if lockPath == "" {
-		lockPath = LockfilePath
+		lockPath = lockfile.Path
 	}
-	lf, err := LoadLockfile(lockPath)
+	lf, err := lockfile.Load(lockPath)
 	if err != nil {
 		return err
 	}
-	if !lf.Remove(source) {
+	if !lf.RemovePlugin(source) {
 		return fmt.Errorf("no lockfile entry for source %q", source)
 	}
-	return SaveLockfile(lockPath, lf)
+	return lockfile.Save(lockPath, lf)
 }
 
-func guessGitHubRepoFromArtifact(artifact string) string {
-	const prefix = "ghcr.io/"
-	if !strings.HasPrefix(artifact, prefix) {
-		return ""
+func writeBinary(installRoot, source, version string, content []byte) (string, error) {
+	root, err := resolveInstallRoot(installRoot)
+	if err != nil {
+		return "", err
 	}
-	return strings.TrimPrefix(artifact, prefix)
+	dest := filepath.Join(root, source, version, "concord-plugin-"+source)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return "", fmt.Errorf("creating install dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".concord-plugin.*")
+	if err != nil {
+		return "", fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.Write(content); err != nil {
+		tmp.Close()
+		return "", fmt.Errorf("writing binary: %w", err)
+	}
+	if err := tmp.Chmod(0o755); err != nil {
+		tmp.Close()
+		return "", fmt.Errorf("chmod binary: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("closing temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, dest); err != nil {
+		return "", fmt.Errorf("renaming binary into place: %w", err)
+	}
+	return dest, nil
+}
+
+func verifyArtifact(ctx context.Context, pulled *ociart.PullResult, opts InstallOptions, progress io.Writer) (*ociart.VerifyResult, error) {
+	if opts.SkipSignature {
+		fmt.Fprintln(progress, "  → signature verification SKIPPED (--no-verify)")
+		return nil, nil
+	}
+	signedRef := pulled.Artifact + "@" + pulled.Digest
+	repo := opts.GitHubRepo
+	if repo == "" {
+		repo = ociart.DefaultGitHubRepoFromArtifact(pulled.Artifact)
+	}
+	verifyOpts := ociart.VerifyOptions{
+		Identity:  opts.ExpectedIdentity,
+		CosignBin: opts.CosignBin,
+	}
+	if verifyOpts.Identity == "" && repo != "" {
+		verifyOpts.IdentityRegexp = ociart.IdentityRegexpForGitHubRepo(repo)
+	}
+	if verifyOpts.Identity == "" && verifyOpts.IdentityRegexp == "" {
+		if opts.RequireSignature {
+			return nil, errors.New("--require-signature was set, but no identity could be determined from artifact reference (pass --identity or --identity-regexp)")
+		}
+		fmt.Fprintln(progress, "  → signature verification SKIPPED (cannot determine signer identity)")
+		return nil, nil
+	}
+
+	result, err := ociart.Verify(ctx, signedRef, verifyOpts)
+	switch {
+	case errors.Is(err, ociart.ErrCosignMissing):
+		if opts.RequireSignature {
+			return nil, fmt.Errorf("--require-signature was set, but cosign is not on PATH: %w", err)
+		}
+		fmt.Fprintln(progress, "  → signature verification SKIPPED (cosign not on PATH)")
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("verifying signature: %w", err)
+	}
+	fmt.Fprintf(progress, "  → signature OK (signer=%s)\n", result.Identity)
+	return result, nil
+}
+
+func writeLockEntry(path, source string, pulled *ociart.PullResult, verify *ociart.VerifyResult, allowSignerChange bool) error {
+	if path == "" {
+		path = lockfile.Path
+	}
+	lf, err := lockfile.Load(path)
+	if err != nil {
+		return err
+	}
+	signer := ""
+	if verify != nil {
+		signer = verify.Identity
+	}
+	if prev := lf.LookupPlugin(source); prev != nil && !allowSignerChange {
+		if err := ociart.AssertSignerContinuity(prev.Signer, signer); err != nil {
+			return err
+		}
+	}
+	lf.UpsertPlugin(lockfile.LockedPlugin{
+		Source:      source,
+		Artifact:    pulled.Artifact,
+		Version:     pulled.Tag,
+		Digest:      pulled.Digest,
+		Signer:      signer,
+		Platform:    pulled.Platform,
+		InstalledAt: time.Now().UTC().Format(time.RFC3339),
+	})
+	return lockfile.Save(path, lf)
+}
+
+func resolveInstallRoot(root string) (string, error) {
+	if root != "" {
+		return root, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolving home dir: %w", err)
+	}
+	return filepath.Join(home, ".concord", "plugins"), nil
+}
+
+func defaultSourceFromArtifact(artifact string) string {
+	base := artifact
+	for i := len(base) - 1; i >= 0; i-- {
+		if base[i] == '/' {
+			base = base[i+1:]
+			break
+		}
+	}
+	const prefix = "concord-plugin-"
+	if len(base) > len(prefix) && base[:len(prefix)] == prefix {
+		return base[len(prefix):]
+	}
+	return ""
 }

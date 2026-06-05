@@ -1,4 +1,4 @@
-package plugins
+package ociart
 
 import (
 	"bytes"
@@ -10,9 +10,7 @@ import (
 	"strings"
 )
 
-const (
-	defaultOIDCIssuer = "https://token.actions.githubusercontent.com"
-)
+const defaultOIDCIssuer = "https://token.actions.githubusercontent.com"
 
 // ErrCosignMissing is returned when cosign is required but not on PATH.
 var ErrCosignMissing = errors.New("cosign binary not found on PATH")
@@ -31,8 +29,8 @@ type VerifyResult struct {
 	OIDCIssuer string
 }
 
-// VerifySignature runs `cosign verify` against ref with keyless verification.
-func VerifySignature(ctx context.Context, ref string, opts VerifyOptions) (*VerifyResult, error) {
+// Verify runs `cosign verify` against ref with keyless verification.
+func Verify(ctx context.Context, ref string, opts VerifyOptions) (*VerifyResult, error) {
 	bin := opts.CosignBin
 	if bin == "" {
 		bin = "cosign"
@@ -65,21 +63,20 @@ func VerifySignature(ctx context.Context, ref string, opts VerifyOptions) (*Veri
 		return nil, fmt.Errorf("cosign verify failed: %w · %s", err, truncate(stderr.String(), 512))
 	}
 
-	identity := extractIdentity(stdout.String(), stderr.String())
-	return &VerifyResult{Identity: identity, OIDCIssuer: issuer}, nil
+	return &VerifyResult{
+		Identity:   extractIdentity(stdout.String(), stderr.String()),
+		OIDCIssuer: issuer,
+	}, nil
 }
 
 // IdentityRegexpForGitHubRepo builds the keyless-identity regex Concord pins by default.
 func IdentityRegexpForGitHubRepo(repo string) string {
-	return fmt.Sprintf(`^https://github\.com/%s/\.github/workflows/.*@refs/tags/.*$`, regexpEscape(repo))
+	return fmt.Sprintf(`^https://github\.com/%s/\.github/workflows/.*@refs/tags/.*$`, regexp.QuoteMeta(repo))
 }
 
 // AssertSignerContinuity refuses an upgrade when the new signer differs from the locked one.
 func AssertSignerContinuity(prev, next string) error {
-	if prev == "" || next == "" {
-		return nil
-	}
-	if prev == next {
+	if prev == "" || next == "" || prev == next {
 		return nil
 	}
 	return fmt.Errorf("signer identity changed: %q → %q (re-run with --allow-signer-change to accept)", prev, next)
@@ -114,8 +111,7 @@ func scanForJSONField(s, key string) string {
 	if idx < 0 {
 		return ""
 	}
-	tail := s[idx+len(key):]
-	tail = strings.TrimLeft(tail, " ")
+	tail := strings.TrimLeft(s[idx+len(key):], " ")
 	if !strings.HasPrefix(tail, `"`) {
 		return ""
 	}
@@ -133,14 +129,4 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
-}
-
-func regexpEscape(s string) string { return regexp.QuoteMeta(s) }
-
-// VerifyRefForPlugin verifies a plugin OCI ref published under github.com/<repo>.
-func VerifyRefForPlugin(ctx context.Context, ref, githubRepo string, expectedIdentity string) (*VerifyResult, error) {
-	if expectedIdentity != "" {
-		return VerifySignature(ctx, ref, VerifyOptions{Identity: expectedIdentity})
-	}
-	return VerifySignature(ctx, ref, VerifyOptions{IdentityRegexp: IdentityRegexpForGitHubRepo(githubRepo)})
 }
