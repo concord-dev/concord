@@ -30,6 +30,10 @@ func newWatchCmd() *cobra.Command {
 		once         bool
 		slackWebhook string
 		genericHook  string
+		frameworks   []string
+		severities   []string
+		tags         []string
+		controlIDs   []string
 		push         pushOpts
 	)
 	cmd := &cobra.Command{
@@ -55,8 +59,19 @@ for an always-on agent.`,
 			if err != nil {
 				return fmt.Errorf("loading controls: %w", err)
 			}
-			if len(loaded) == 0 {
+			totalLoaded := len(loaded)
+			if totalLoaded == 0 {
 				return fmt.Errorf("no controls found in %s", controlsDir)
+			}
+			filter := controls.Filter{
+				Frameworks: frameworks,
+				Severities: severities,
+				Tags:       tags,
+				IDs:        controlIDs,
+			}
+			loaded = filter.Apply(loaded)
+			if len(loaded) == 0 {
+				return fmt.Errorf("filter excluded every control (%d loaded, 0 matched)", totalLoaded)
 			}
 			push.resolveFromCredentials()
 			fmt.Fprintf(os.Stderr, "watching %d control(s) every %s; output → %s\n",
@@ -115,6 +130,10 @@ for an always-on agent.`,
 	cmd.Flags().BoolVar(&once, "once", false, "Run a single iteration and exit (suitable for cron)")
 	cmd.Flags().StringVar(&slackWebhook, "slack-webhook", "", "Slack incoming-webhook URL to receive state-change events")
 	cmd.Flags().StringVar(&genericHook, "webhook", "", "Generic HTTP endpoint to receive each event as JSON")
+	cmd.Flags().StringSliceVar(&frameworks, "framework", nil, "Only watch controls whose metadata.framework matches (repeatable)")
+	cmd.Flags().StringSliceVar(&severities, "severity", nil, "Only watch controls of these severities (repeatable)")
+	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Only watch controls carrying any of these tags (repeatable)")
+	cmd.Flags().StringSliceVar(&controlIDs, "control-id", nil, "Only watch controls with these ids (repeatable)")
 	addPushFlags(cmd, &push)
 	return cmd
 }

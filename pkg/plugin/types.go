@@ -21,6 +21,10 @@ type Capabilities struct {
 	OptionalEnv    []string
 	Permissions    Permissions
 	DocsURL        string
+	// EmbedsBinaries lists upstream tools bundled inside the plugin's OCI
+	// artifact (e.g. "prowler@v5.7.5"). Advisory; consumed by `concord
+	// doctor` so users see "bundled" instead of "missing on PATH".
+	EmbedsBinaries []string
 }
 
 // Permissions advertises a plugin's runtime needs. Host-side enforcement lives at internal/plugins/env.go.

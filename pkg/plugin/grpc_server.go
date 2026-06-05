@@ -35,7 +35,8 @@ func (s *grpcServer) Capabilities(_ context.Context, _ *pluginv1.CapabilitiesReq
 			Filesystem: c.Permissions.Filesystem,
 			Subprocess: c.Permissions.Subprocess,
 		},
-		DocsUrl: c.DocsURL,
+		DocsUrl:        c.DocsURL,
+		EmbedsBinaries: c.EmbedsBinaries,
 	}, nil
 }
 

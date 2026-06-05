@@ -37,6 +37,7 @@ type Capabilities struct {
 	OptionalEnv     []string
 	Permissions     Permissions
 	DocsURL         string
+	EmbedsBinaries  []string
 }
 
 // Permissions advertises a plugin's runtime needs.
@@ -74,6 +75,7 @@ func (p *PluginCollector) Capabilities(ctx context.Context) (Capabilities, error
 		RequiredEnv:     resp.RequiredEnv,
 		OptionalEnv:     resp.OptionalEnv,
 		DocsURL:         resp.DocsUrl,
+		EmbedsBinaries:  resp.EmbedsBinaries,
 	}
 	if resp.Permissions != nil {
 		out.Permissions.Network = resp.Permissions.Network

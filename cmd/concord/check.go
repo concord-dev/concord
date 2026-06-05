@@ -28,6 +28,10 @@ func newCheckCmd() *cobra.Command {
 		format       string
 		outputPath   string
 		quiet        bool
+		frameworks   []string
+		severities   []string
+		tags         []string
+		controlIDs   []string
 		push         pushOpts
 	)
 	cmd := &cobra.Command{
@@ -52,8 +56,19 @@ func newCheckCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("loading controls: %w", err)
 			}
-			if len(loaded) == 0 {
+			totalLoaded := len(loaded)
+			if totalLoaded == 0 {
 				return fmt.Errorf("no controls found in %s or any installed pack", controlsDir)
+			}
+			filter := controls.Filter{
+				Frameworks: frameworks,
+				Severities: severities,
+				Tags:       tags,
+				IDs:        controlIDs,
+			}
+			loaded = filter.Apply(loaded)
+			if len(loaded) == 0 {
+				return fmt.Errorf("filter excluded every control (%d loaded, 0 matched)", totalLoaded)
 			}
 
 			built := wiring.BuildRegistry(context.Background(), wiring.Opts{
@@ -65,6 +80,9 @@ func newCheckCmd() *cobra.Command {
 			reg := built.Registry
 			if !quiet {
 				describeMode(os.Stderr, reg, fixturesOnly)
+				if !filter.Empty() {
+					fmt.Fprintf(os.Stderr, "Filter: %d of %d control(s) matched\n", len(loaded), totalLoaded)
+				}
 				fmt.Fprintf(os.Stderr, "Checking %d control(s)...\n\n", len(loaded))
 			}
 
@@ -104,6 +122,10 @@ func newCheckCmd() *cobra.Command {
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text|json|oscal|markdown|trust-portal")
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Write findings to this file (default: stdout)")
 	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress prelude (Mode + Checking lines)")
+	cmd.Flags().StringSliceVar(&frameworks, "framework", nil, "Only evaluate controls whose metadata.framework matches (repeatable)")
+	cmd.Flags().StringSliceVar(&severities, "severity", nil, "Only evaluate controls of these severities (repeatable)")
+	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Only evaluate controls carrying any of these tags (repeatable)")
+	cmd.Flags().StringSliceVar(&controlIDs, "control-id", nil, "Only evaluate controls with these ids (repeatable)")
 	addPushFlags(cmd, &push)
 	return cmd
 }

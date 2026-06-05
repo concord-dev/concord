@@ -26,6 +26,12 @@ message CapabilitiesResponse {
   repeated string optional_env = 7;
   Permissions permissions = 8;
   string docs_url = 9;
+  // embeds_binaries lists upstream tool binaries (e.g. "prowler@v5.7.5",
+  // "steampipe@v0.24.0") that the plugin ships inside its own OCI artifact
+  // and resolves to its install directory at runtime. Advisory; used by
+  // `concord doctor` to surface "prowler (bundled)" instead of "prowler
+  // from PATH". Empty when the plugin is pure-Go-native.
+  repeated string embeds_binaries = 10;
 }
 
 message Permissions {

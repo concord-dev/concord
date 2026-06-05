@@ -186,16 +186,20 @@ func (d *doctor) runPluginCollectors() {
 			d.fail(src, "capabilities: "+err.Error())
 			continue
 		}
+		label := src
+		if len(caps.EmbedsBinaries) > 0 {
+			label = fmt.Sprintf("%s (bundled: %s)", src, strings.Join(caps.EmbedsBinaries, ", "))
+		}
 		if missing := missingEnv(caps.RequiredEnv); len(missing) > 0 {
-			d.warn(src, "missing required env: "+strings.Join(missing, ", "))
+			d.warn(label, "missing required env: "+strings.Join(missing, ", "))
 			continue
 		}
 		pc, err := mgr.Get(d.ctx, src)
 		if err != nil {
-			d.fail(src, "spawn: "+err.Error())
+			d.fail(label, "spawn: "+err.Error())
 			continue
 		}
-		d.runProbe(src, pc, "see "+caps.DocsURL)
+		d.runProbe(label, pc, "see "+caps.DocsURL)
 	}
 }
 
