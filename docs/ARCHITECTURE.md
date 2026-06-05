@@ -241,6 +241,41 @@ on the in-process bus (for SSE) and enqueue an outbox row — webhook
 fan-out happens **only** in the worker now. Deploying the worker is a
 prerequisite for any webhook to fire.
 
+## Operations (Phase 6)
+
+- **audit_event partitioning** — Migration 0005 converts `audit_event`
+  to `PARTITION BY RANGE (occurred_at)` with one monthly partition.
+  PK is `(id, occurred_at)` so the partition key is covered.
+  Bootstrap creates current month + 6 months forward. The PL/pgSQL
+  helper `concord_ensure_audit_partition(month TIMESTAMPTZ)` is the
+  single idempotent entry point — operators call it directly from
+  psql, the server calls it from a background task.
+
+- **Partition rotator** — `internal/server/auditpart.Rotator` runs
+  inside `concord-server`. Daily tick (±10% jitter) calls
+  `EnsureMonthsAhead`, which creates every missing partition from
+  now through `now + MonthsAhead months`. Default `MonthsAhead=3` so
+  even a wedged process has weeks of buffer. Lifecycle tied to the
+  Concord struct: starts in `NewConcord`, stops in `Shutdown`.
+
+- **Runbook** — `docs/runbook.md` is the on-call playbook. Nine
+  sections cover the canonical incidents: dispatcher lag, wedged
+  receiver, breaker thrashing, partition rotator failure, idempotency
+  cache outage, rate limiter degradation, operator-token rotation,
+  metric reading, and useful psql one-liners.
+
+- **Grafana dashboard** — `deploy/grafana/concord.json` is a pre-built
+  12-panel board covering the SLOs in the runbook (HTTP error rate,
+  p99 latency by route, outbox lag + throughput + publish duration,
+  worker attempts + dead totals, breaker state changes, rate-limiter
+  errors, idempotency outcomes, DB pool saturation, rotator health).
+
+- **Prometheus alerts** — `deploy/prometheus/alerts.yml` ships 12 rules
+  in 4 groups (availability, outbox, worker, infra). Each carries a
+  `severity` label (page | warn), an Alertmanager-friendly summary,
+  and a `runbook:` annotation pointing at the right `docs/runbook.md`
+  anchor.
+
 ## Reliability hardening (Phase 5)
 
 Three production-grade upgrades shipped together:
@@ -434,5 +469,6 @@ Run locally with `make lint && make test-race && make vuln`.
 | 3     | `cmd/concord-worker` binary + Kafka consumer + `webhook_delivery` table — DONE |
 | 4     | DLQ inspection + replay endpoints under `/operator/v1/dlq/*` — DONE |
 | 5     | Idempotency-Key, circuit breakers, PII redaction — DONE |
+| 6     | Audit partitioning + rotator + runbook + Grafana + alerts — DONE |
 | 5     | Idempotency-Key for POST mutations, circuit breakers, audit partitioning, PII redaction |
 | 6     | Operator runbook + Grafana dashboards + Prometheus alerts |

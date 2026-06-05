@@ -1,0 +1,203 @@
+{
+  "title": "Concord",
+  "description": "Concord SaaS API + worker — Phase 6 operator dashboard. Panels mirror the SLOs listed in docs/runbook.md.",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "tags": ["concord"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {"text": "Prometheus", "value": "Prometheus"}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "HTTP error rate (5m)",
+      "description": "Share of HTTP responses with status >= 500 over the last 5 minutes. Should hover near 0; sustained >1% is a paging condition.",
+      "datasource": "${datasource}",
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "orange", "value": 0.01},
+              {"color": "red", "value": 0.05}
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(concord_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(concord_http_requests_total[5m])), 1)",
+          "legendFormat": "5xx rate"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "HTTP p99 latency by route",
+      "description": "p99 wall time per matched route. Use the route pattern (not URL) so high-cardinality 404s collapse into the 'unmatched' series.",
+      "datasource": "${datasource}",
+      "gridPos": {"h": 8, "w": 18, "x": 6, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(concord_http_request_duration_seconds_bucket[5m])) by (le, pattern))",
+          "legendFormat": "{{pattern}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Outbox lag (oldest pending row)",
+      "description": "Age of the oldest unpublished, non-abandoned event_outbox row. >60s sustained is the runbook §1 trigger.",
+      "datasource": "${datasource}",
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 5},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "orange", "value": 30},
+              {"color": "red", "value": 60}
+            ]
+          }
+        }
+      },
+      "targets": [{"expr": "max(concord_outbox_lag_seconds)"}]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Outbox throughput (5m)",
+      "description": "Published vs failed publish attempts. A growing 'failed' line with flat 'published' = dispatcher is wedged.",
+      "datasource": "${datasource}",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10},
+      "fieldConfig": {"defaults": {"unit": "rps"}},
+      "targets": [
+        {"expr": "sum(rate(concord_outbox_published_total[5m]))", "legendFormat": "published"},
+        {"expr": "sum(rate(concord_outbox_failed_total[5m]))", "legendFormat": "failed (retry pending)"},
+        {"expr": "sum(rate(concord_outbox_dead_total[5m]))", "legendFormat": "dead (operator needed)"}
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Outbox publish duration",
+      "description": "Wall-time of one Publish call to Kafka. p99 climbing means the broker is sluggish.",
+      "datasource": "${datasource}",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum(rate(concord_outbox_publish_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p50"},
+        {"expr": "histogram_quantile(0.99, sum(rate(concord_outbox_publish_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p99"}
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Worker attempts by outcome",
+      "description": "succeeded vs non_2xx vs network_error. A growing non_2xx is 'receivers are broken'; growing network_error is 'we can't reach them'.",
+      "datasource": "${datasource}",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18},
+      "fieldConfig": {"defaults": {"unit": "rps"}},
+      "targets": [
+        {"expr": "sum by (outcome) (rate(concord_worker_attempts_total[5m]))", "legendFormat": "{{outcome}}"}
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Worker dead deliveries (cum.)",
+      "description": "Cumulative deliveries that hit max-attempts. A step-function jump means a receiver went dark; runbook §2.",
+      "datasource": "${datasource}",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
+      "targets": [
+        {"expr": "sum by (kind) (concord_worker_dead_total)", "legendFormat": "{{kind}}"}
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Circuit breaker state changes",
+      "description": "Transitions to open / half-open / closed. Heavy 'open' traffic = a receiver is failing fast; runbook §3.",
+      "datasource": "${datasource}",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 26},
+      "fieldConfig": {"defaults": {"unit": "cps"}},
+      "targets": [
+        {"expr": "sum by (state) (rate(concord_worker_breaker_state_changes_total[5m]))", "legendFormat": "{{state}}"}
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Rate limiter primary errors",
+      "description": "Times the Redis-backed limiter failed and the per-pod fallback served the request.",
+      "datasource": "${datasource}",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 26},
+      "fieldConfig": {"defaults": {"unit": "cps"}},
+      "targets": [
+        {"expr": "sum by (gate) (rate(concord_limiter_primary_errors_total[5m]))", "legendFormat": "{{gate}}"}
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Idempotency outcomes",
+      "description": "hits = cached replay (the happy path); mismatch = caller bug; pending = retried while in-flight; redis_errors = degraded to pass-through.",
+      "datasource": "${datasource}",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 34},
+      "fieldConfig": {"defaults": {"unit": "cps"}},
+      "targets": [
+        {"expr": "rate(concord_idempotency_hits_total[5m])", "legendFormat": "hits"},
+        {"expr": "rate(concord_idempotency_mismatch_total[5m])", "legendFormat": "mismatch (caller bug)"},
+        {"expr": "rate(concord_idempotency_pending_total[5m])", "legendFormat": "pending (409)"},
+        {"expr": "rate(concord_idempotency_redis_errors_total[5m])", "legendFormat": "redis errors"}
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "DB pool saturation",
+      "description": "(acquired / max) — climbing toward 1.0 means handlers are starving.",
+      "datasource": "${datasource}",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 34},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "max": 1, "min": 0}},
+      "targets": [
+        {"expr": "concord_db_pool_acquired_connections / clamp_min(concord_db_pool_max_connections, 1)", "legendFormat": "saturation"}
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Audit partition rotator health",
+      "description": "Ticks per day — should be ~1. Errors > 0 is the runbook §4 trigger.",
+      "datasource": "${datasource}",
+      "gridPos": {"h": 5, "w": 12, "x": 0, "y": 42},
+      "fieldConfig": {
+        "defaults": {"unit": "short"}
+      },
+      "targets": [
+        {"expr": "increase(concord_audit_partition_rotator_ticks_total[1d])", "legendFormat": "ticks/day"},
+        {"expr": "increase(concord_audit_partition_rotator_errors_total[1d])", "legendFormat": "errors/day"}
+      ]
+    }
+  ]
+}

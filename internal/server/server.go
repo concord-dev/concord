@@ -43,6 +43,7 @@ import (
 	"github.com/concord-dev/concord/internal/notify/mail"
 	"github.com/concord-dev/concord/internal/otelx"
 	"github.com/concord-dev/concord/internal/server/bg"
+	"github.com/concord-dev/concord/internal/server/auditpart"
 	"github.com/concord-dev/concord/internal/server/bus"
 	"github.com/concord-dev/concord/internal/server/handlers/auth"
 	"github.com/concord-dev/concord/internal/server/handlers/public"
@@ -83,6 +84,12 @@ type Concord struct {
 	// when no Redis client was wired, in which case the middleware is
 	// a no-op pass-through.
 	idempotency func(http.Handler) http.Handler
+
+	// auditRotator keeps next-month's audit_event partition alive
+	// ahead of the rollover. Daily tick, idempotent; nil when the
+	// caller didn't wire one (tests that don't care).
+	auditRotator     *auditpart.Rotator
+	auditRotCancel   context.CancelFunc
 }
 
 // Options is the construction surface for cmd/server.
@@ -187,6 +194,24 @@ func NewConcord(opts Options) (*Concord, error) {
 
 	idem := buildIdempotency(opts.RedisLimiter, m)
 
+	rotator, err := auditpart.New(opts.Store, auditpart.Config{
+		MonthsAhead:    3,
+		Interval:       24 * time.Hour,
+		JitterFraction: 0.1,
+	}, auditpart.Metrics{
+		Created: func(name string) { m.AuditPartitionsCreatedTotal.WithLabelValues(name).Inc() },
+		Ensured: func(string) { m.AuditPartitionRotatorTicksTotal.Inc() },
+		Failed:  func(error) { m.AuditPartitionRotatorErrorsTotal.Inc() },
+	})
+	if err != nil {
+		// Clean up the dispatcher we already started so this NewConcord
+		// failure path doesn't leak a goroutine + a cancel func.
+		dispCancel()
+		return nil, fmt.Errorf("audit partition rotator: %w", err)
+	}
+	rotCtx, rotCancel := context.WithCancel(context.Background())
+	go rotator.Run(rotCtx)
+
 	return &Concord{
 		Controls:           loaded,
 		Config:             cfg,
@@ -206,6 +231,8 @@ func NewConcord(opts Options) (*Concord, error) {
 		dispatcher:         dispatcher,
 		dispCancel:         dispCancel,
 		idempotency:        idem,
+		auditRotator:       rotator,
+		auditRotCancel:     rotCancel,
 	}, nil
 }
 
@@ -364,6 +391,9 @@ func (c *Concord) Shutdown(ctx context.Context) error {
 	// re-claimed on the next process start.
 	if c.dispCancel != nil {
 		c.dispCancel()
+	}
+	if c.auditRotCancel != nil {
+		c.auditRotCancel()
 	}
 	return c.bg.Wait(ctx)
 }

@@ -58,6 +58,13 @@ type Metrics struct {
 	IdempotencyMismatchTotal    prometheus.Counter
 	IdempotencyPendingTotal     prometheus.Counter
 	IdempotencyRedisErrorsTotal prometheus.Counter
+
+	// Audit-partition rotator (Phase 6). Ticks counts every successful
+	// EnsureMonthsAhead invocation; Errors counts failed ticks; Created
+	// labels by partition name so an operator can spot the rollover.
+	AuditPartitionRotatorTicksTotal  prometheus.Counter
+	AuditPartitionRotatorErrorsTotal prometheus.Counter
+	AuditPartitionsCreatedTotal      *prometheus.CounterVec
 }
 
 // New builds a Metrics with a private registry and registers every collector
@@ -171,6 +178,18 @@ func New() *Metrics {
 			Name: "concord_idempotency_redis_errors_total",
 			Help: "Idempotency middleware Redis-call failures; the middleware degraded to pass-through on each.",
 		}),
+		AuditPartitionRotatorTicksTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "concord_audit_partition_rotator_ticks_total",
+			Help: "Successful EnsureMonthsAhead invocations from the audit-partition background rotator.",
+		}),
+		AuditPartitionRotatorErrorsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "concord_audit_partition_rotator_errors_total",
+			Help: "Failed EnsureMonthsAhead invocations; rotator retries on the next tick.",
+		}),
+		AuditPartitionsCreatedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "concord_audit_partitions_created_total",
+			Help: "Audit-event monthly partitions newly created by the rotator (does not count idempotent ensures).",
+		}, []string{"name"}),
 	}
 	reg.MustRegister(
 		m.HTTPRequestsTotal,
@@ -190,6 +209,9 @@ func New() *Metrics {
 		m.IdempotencyMismatchTotal,
 		m.IdempotencyPendingTotal,
 		m.IdempotencyRedisErrorsTotal,
+		m.AuditPartitionRotatorTicksTotal,
+		m.AuditPartitionRotatorErrorsTotal,
+		m.AuditPartitionsCreatedTotal,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
