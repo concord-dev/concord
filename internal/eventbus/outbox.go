@@ -114,6 +114,7 @@ func (o *Outbox) claimBatch(ctx context.Context, limit int, maxAttempts int) (pg
 		`SELECT id, event_id, org_id, kind, payload, traceparent, occurred_at, attempt_count
 		 FROM event_outbox
 		 WHERE published_at IS NULL
+		   AND abandoned_at IS NULL
 		   AND attempt_count < $1
 		   AND next_attempt_at <= now()
 		 ORDER BY next_attempt_at, created_at
@@ -181,7 +182,7 @@ func (o *Outbox) LagSeconds(ctx context.Context, maxAttempts int) (float64, erro
 	err := o.pool.QueryRow(ctx,
 		`SELECT EXTRACT(EPOCH FROM (now() - MIN(created_at)))
 		 FROM event_outbox
-		 WHERE published_at IS NULL AND attempt_count < $1`,
+		 WHERE published_at IS NULL AND abandoned_at IS NULL AND attempt_count < $1`,
 		maxAttempts,
 	).Scan(&secs)
 	if err != nil {

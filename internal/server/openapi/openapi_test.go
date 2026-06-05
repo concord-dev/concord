@@ -117,6 +117,12 @@ func TestSpec_CoversEveryExpectedRoute(t *testing.T) {
 		"/operator/v1/roles":                        {"get"},
 		"/operator/v1/permissions":                  {"get"},
 		"/operator/v1/auditors":                     {"get", "post", "delete"},
+		"/operator/v1/dlq/events":                   {"get"},
+		"/operator/v1/dlq/events/{id}":              {"get", "delete"},
+		"/operator/v1/dlq/events/{id}/replay":       {"post"},
+		"/operator/v1/dlq/deliveries":               {"get"},
+		"/operator/v1/dlq/deliveries/{id}":          {"get", "delete"},
+		"/operator/v1/dlq/deliveries/{id}/replay":   {"post"},
 	}
 
 	for path, methods := range wantRoutes {

@@ -40,6 +40,7 @@ type WebhookDelivery struct {
 	LastAttemptedAt *time.Time
 	NextAttemptAt   *time.Time
 	SucceededAt     *time.Time
+	AbandonedAt     *time.Time
 
 	// WebhookURL + WebhookSecret are populated by ClaimPendingDeliveries
 	// and ClaimFirstAttempts so the caller can POST without an extra
@@ -167,11 +168,13 @@ func (s *Store) ClaimPendingDeliveries(ctx context.Context, limit int) (pgx.Tx, 
 		        d.status, d.attempt_count, d.last_http_status,
 		        COALESCE(d.last_error,''), d.attempts_log,
 		        d.created_at, d.last_attempted_at, d.next_attempt_at,
-		        d.succeeded_at,
+		        d.succeeded_at, d.abandoned_at,
 		        w.url, w.secret
 		 FROM webhook_delivery d
 		 JOIN webhook w ON w.id = d.webhook_id AND w.enabled
-		 WHERE d.status = 'failed' AND d.next_attempt_at <= now()
+		 WHERE d.status = 'failed'
+		   AND d.abandoned_at IS NULL
+		   AND d.next_attempt_at <= now()
 		 ORDER BY d.next_attempt_at, d.created_at
 		 LIMIT $1
 		 FOR UPDATE OF d SKIP LOCKED`,
@@ -188,7 +191,7 @@ func (s *Store) ClaimPendingDeliveries(ctx context.Context, limit int) (pgx.Tx, 
 		var d WebhookDelivery
 		if err := rows.Scan(&d.ID, &d.WebhookID, &d.EventID, &d.OrgID, &d.EventKind,
 			&d.Status, &d.AttemptCount, &d.LastHTTPStatus, &d.LastError, &d.AttemptsLog,
-			&d.CreatedAt, &d.LastAttemptedAt, &d.NextAttemptAt, &d.SucceededAt,
+			&d.CreatedAt, &d.LastAttemptedAt, &d.NextAttemptAt, &d.SucceededAt, &d.AbandonedAt,
 			&d.WebhookURL, &d.WebhookSecret); err != nil {
 			_ = tx.Rollback(ctx)
 			return nil, nil, fmt.Errorf("store: scan pending: %w", err)
@@ -266,15 +269,122 @@ func (s *Store) GetWebhookDelivery(ctx context.Context, id uuid.UUID) (WebhookDe
 		`SELECT id, webhook_id, event_id, org_id, event_kind, status,
 		        attempt_count, last_http_status, COALESCE(last_error,''),
 		        attempts_log, created_at, last_attempted_at, next_attempt_at,
-		        succeeded_at
+		        succeeded_at, abandoned_at
 		 FROM webhook_delivery WHERE id = $1`, id,
 	).Scan(&d.ID, &d.WebhookID, &d.EventID, &d.OrgID, &d.EventKind, &d.Status,
 		&d.AttemptCount, &d.LastHTTPStatus, &d.LastError,
 		&d.AttemptsLog, &d.CreatedAt, &d.LastAttemptedAt, &d.NextAttemptAt,
-		&d.SucceededAt)
+		&d.SucceededAt, &d.AbandonedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return WebhookDelivery{}, ErrNotFound
 	}
 	return d, err
+}
+
+// ListDeadDeliveriesFilters narrows the DLQ list query. Zero values are
+// "no filter". Limit defaults to 50, capped at 500.
+type ListDeadDeliveriesFilters struct {
+	OrgID  *uuid.UUID
+	Kind   string
+	Limit  int
+	Offset int
+}
+
+// ListDeadDeliveries returns dead, non-abandoned rows newest-first.
+// "Dead" here means status='dead' — the retrier won't touch these any
+// more (the claim query filters on status='failed'). Operators inspect
+// + replay them via /operator/v1/dlq/deliveries.
+func (s *Store) ListDeadDeliveries(ctx context.Context, f ListDeadDeliveriesFilters) ([]WebhookDelivery, error) {
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	offset := f.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	q := `SELECT id, webhook_id, event_id, org_id, event_kind, status,
+	             attempt_count, last_http_status, COALESCE(last_error,''),
+	             attempts_log, created_at, last_attempted_at, next_attempt_at,
+	             succeeded_at, abandoned_at
+	      FROM webhook_delivery
+	      WHERE status = 'dead' AND abandoned_at IS NULL`
+	args := []any{}
+	if f.OrgID != nil {
+		q += " AND org_id = $" + intToArg(len(args)+1)
+		args = append(args, *f.OrgID)
+	}
+	if f.Kind != "" {
+		q += " AND event_kind = $" + intToArg(len(args)+1)
+		args = append(args, f.Kind)
+	}
+	q += " ORDER BY created_at DESC LIMIT $" + intToArg(len(args)+1) +
+		" OFFSET $" + intToArg(len(args)+2)
+	args = append(args, limit, offset)
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []WebhookDelivery
+	for rows.Next() {
+		var d WebhookDelivery
+		if err := rows.Scan(&d.ID, &d.WebhookID, &d.EventID, &d.OrgID, &d.EventKind, &d.Status,
+			&d.AttemptCount, &d.LastHTTPStatus, &d.LastError,
+			&d.AttemptsLog, &d.CreatedAt, &d.LastAttemptedAt, &d.NextAttemptAt,
+			&d.SucceededAt, &d.AbandonedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// ReplayDelivery transitions a dead row back to 'failed' with attempt_count=0
+// and next_attempt_at=now() so the retrier picks it up on its next tick.
+// Also clears abandoned_at so a previously-abandoned row can be revived.
+// Returns ErrNotFound when the row doesn't exist or is already succeeded.
+func (s *Store) ReplayDelivery(ctx context.Context, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE webhook_delivery
+		 SET status          = 'failed',
+		     attempt_count   = 0,
+		     last_error      = NULL,
+		     next_attempt_at = now(),
+		     abandoned_at    = NULL
+		 WHERE id = $1 AND status IN ('dead','failed')`,
+		id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// AbandonDelivery marks a dead row as "operator gave up". The retrier
+// skips abandoned rows. Operators can revive via ReplayDelivery.
+// Returns ErrNotFound when the row doesn't exist or has already
+// succeeded.
+func (s *Store) AbandonDelivery(ctx context.Context, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE webhook_delivery
+		 SET abandoned_at = now()
+		 WHERE id = $1 AND status IN ('dead','failed','delivering')
+		   AND abandoned_at IS NULL`,
+		id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 

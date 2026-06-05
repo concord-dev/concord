@@ -304,5 +304,155 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  # ─── Dead-letter queue (Phase 4) ───────────────────────────────────
+  /operator/v1/dlq/events:
+    get:
+      summary: List dead event_outbox rows
+      description: |
+        Returns event_outbox rows whose attempt_count has reached the
+        dispatcher's max-attempts ceiling — the producer-side dead-letter
+        cohort. Pagination via `limit` (1..500, default 50) and `offset`.
+        Optional `org_id` and `kind` filters.
+      operationId: operatorListDLQEvents
+      security: [{ operatorToken: [] }]
+      parameters:
+        - { name: limit,  in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: org_id, in: query, schema: { type: string, format: uuid } }
+        - { name: kind,   in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Dead event_outbox rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events: { type: array, items: { type: object } }
+                  limit:  { type: integer }
+                  offset: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /operator/v1/dlq/events/{id}:
+    get:
+      summary: Fetch one dead event_outbox row
+      operationId: operatorGetDLQEvent
+      security: [{ operatorToken: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Full row including payload, last_error, attempt history
+          content:
+            application/json:
+              schema: { type: object }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Abandon a dead event (reversible)
+      description: |
+        Stamps `abandoned_at`. The dispatcher's claim query skips
+        abandoned rows. Forensic columns (payload, last_error) stay
+        intact. Reversible — `POST .../replay` clears the abandon flag.
+      operationId: operatorAbandonDLQEvent
+      security: [{ operatorToken: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Abandoned }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /operator/v1/dlq/events/{id}/replay:
+    post:
+      summary: Replay a dead event
+      description: |
+        Resets `attempt_count = 0`, `last_error = NULL`,
+        `next_attempt_at = now()`, and clears `abandoned_at`. The
+        dispatcher picks the row up on its next tick.
+      operationId: operatorReplayDLQEvent
+      security: [{ operatorToken: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Replay scheduled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:       { type: string, format: uuid }
+                  replayed: { type: boolean }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /operator/v1/dlq/deliveries:
+    get:
+      summary: List dead webhook_delivery rows
+      description: |
+        Returns webhook_delivery rows in status='dead' — the
+        consumer-side dead-letter cohort. Same pagination + filters as
+        /operator/v1/dlq/events.
+      operationId: operatorListDLQDeliveries
+      security: [{ operatorToken: [] }]
+      parameters:
+        - { name: limit,  in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: org_id, in: query, schema: { type: string, format: uuid } }
+        - { name: kind,   in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Dead webhook_delivery rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deliveries: { type: array, items: { type: object } }
+                  limit:      { type: integer }
+                  offset:     { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /operator/v1/dlq/deliveries/{id}:
+    get:
+      summary: Fetch one dead webhook delivery
+      operationId: operatorGetDLQDelivery
+      security: [{ operatorToken: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Full row including attempts_log
+          content:
+            application/json:
+              schema: { type: object }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Abandon a dead delivery (reversible)
+      operationId: operatorAbandonDLQDelivery
+      security: [{ operatorToken: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Abandoned }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /operator/v1/dlq/deliveries/{id}/replay:
+    post:
+      summary: Replay a dead webhook delivery
+      description: |
+        Transitions the row from 'dead' back to 'failed' with
+        `attempt_count = 0` and `next_attempt_at = now()`. The retrier
+        picks it up on its next tick.
+      operationId: operatorReplayDLQDelivery
+      security: [{ operatorToken: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Replay scheduled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:       { type: string, format: uuid }
+                  replayed: { type: boolean }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 # Default security: every operation falls back to bearerAuth unless its own
 # `security:` overrides. Public endpoints declare `security: []`.

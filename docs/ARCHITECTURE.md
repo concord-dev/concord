@@ -241,6 +241,38 @@ on the in-process bus (for SSE) and enqueue an outbox row — webhook
 fan-out happens **only** in the worker now. Deploying the worker is a
 prerequisite for any webhook to fire.
 
+## Dead-letter handling (Phase 4)
+
+Two dead-letter populations need operator attention:
+
+- **`event_outbox`** rows where `attempt_count >= 20` AND
+  `published_at IS NULL` — Kafka was unreachable too long for the
+  dispatcher's retry budget.
+- **`webhook_delivery`** rows where `status='dead'` — a specific
+  receiver stayed broken past the retrier's `MaxAttempts` (default 5).
+
+Both surfaces expose the same shape under `/operator/v1/dlq/*`:
+
+```
+GET    /events            list  (filters: org_id, kind, limit, offset)
+GET    /events/{id}       inspect  (full payload + last_error + attempt_count)
+POST   /events/{id}/replay reset attempt_count=0, clear abandoned_at,
+                          schedule for the next dispatcher tick
+DELETE /events/{id}       abandon (set abandoned_at = now())
+```
+
+`/deliveries` mirrors `/events`. Migration 0004 adds an
+`abandoned_at TIMESTAMPTZ NULL` column to both tables; dispatcher /
+retrier claim queries gain `AND abandoned_at IS NULL`. Replay clears
+the flag so abandon is reversible — operators that change their mind
+can put a row back in flight without losing forensic columns
+(`attempts_log`, `last_error`, `payload`).
+
+Every mutating call writes to `audit_event` with `actor_kind=operator`,
+`action ∈ {dlq.event.replay, dlq.event.abandon, dlq.delivery.replay,
+dlq.delivery.abandon}` and the target row id — so a compliance auditor
+can reconstruct every operator intervention.
+
 ## Background work
 
 The current model is in-process via `internal/server/bg.Runner`:
@@ -357,6 +389,6 @@ Run locally with `make lint && make test-race && make vuln`.
 | 1     | Redis-backed rate limiter (interface + impl + fallback) — DONE |
 | 2     | Transactional outbox + Kafka producer for `concord.events` — DONE |
 | 3     | `cmd/concord-worker` binary + Kafka consumer + `webhook_delivery` table — DONE |
-| 4     | DLQ inspection + replay endpoints |
+| 4     | DLQ inspection + replay endpoints under `/operator/v1/dlq/*` — DONE |
 | 5     | Idempotency-Key for POST mutations, circuit breakers, audit partitioning, PII redaction |
 | 6     | Operator runbook + Grafana dashboards + Prometheus alerts |

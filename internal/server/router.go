@@ -151,6 +151,23 @@ func mountOperator(mux *http.ServeMux, h *operator.Handlers, mw *middleware.Midd
 	mux.Handle("GET /operator/v1/auditors", gate(http.HandlerFunc(h.ListAuditors)))
 	mux.Handle("POST /operator/v1/auditors", gate(http.HandlerFunc(h.GrantAuditor)))
 	mux.Handle("DELETE /operator/v1/auditors", gate(http.HandlerFunc(h.RevokeAuditor)))
+
+	// Dead-letter queue inspection + replay — Phase 4. Two surfaces:
+	// /dlq/events covers event_outbox rows that exhausted the
+	// dispatcher's retry budget; /dlq/deliveries covers webhook_delivery
+	// rows the retrier abandoned at status='dead'. Replay clears the
+	// retry state so the dispatcher/retrier picks the row up again;
+	// abandon is a reversible "operator gave up" marker that hides the
+	// row from both background loops without losing forensic columns.
+	mux.Handle("GET /operator/v1/dlq/events", gate(http.HandlerFunc(h.ListDLQEvents)))
+	mux.Handle("GET /operator/v1/dlq/events/{id}", gate(http.HandlerFunc(h.GetDLQEvent)))
+	mux.Handle("POST /operator/v1/dlq/events/{id}/replay", gate(http.HandlerFunc(h.ReplayDLQEvent)))
+	mux.Handle("DELETE /operator/v1/dlq/events/{id}", gate(http.HandlerFunc(h.AbandonDLQEvent)))
+
+	mux.Handle("GET /operator/v1/dlq/deliveries", gate(http.HandlerFunc(h.ListDLQDeliveries)))
+	mux.Handle("GET /operator/v1/dlq/deliveries/{id}", gate(http.HandlerFunc(h.GetDLQDelivery)))
+	mux.Handle("POST /operator/v1/dlq/deliveries/{id}/replay", gate(http.HandlerFunc(h.ReplayDLQDelivery)))
+	mux.Handle("DELETE /operator/v1/dlq/deliveries/{id}", gate(http.HandlerFunc(h.AbandonDLQDelivery)))
 }
 
 func mountSession(mux *http.ServeMux, h *auth.Handlers, mw *middleware.Middleware) {
