@@ -26,5 +26,6 @@ Audits become continuous instead of episodic.`,
 	cmd.AddCommand(newLogoutCmd())
 	cmd.AddCommand(newWhoamiCmd())
 	cmd.AddCommand(newOrgsCmd())
+	cmd.AddCommand(newPluginCmd())
 	return cmd
 }
