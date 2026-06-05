@@ -9,41 +9,22 @@ import (
 	"github.com/concord-dev/concord/internal/store"
 )
 
-// RetrierConfig configures the poll cadence + batch envelope of the
-// failed-delivery retrier. The Executor's MaxAttempts cap means a
-// single row only flows through the Retrier a bounded number of times.
+// RetrierConfig tunes the failed-delivery poll loop. Zero fields fall back to defaults.
 type RetrierConfig struct {
-	// PollInterval is the gap between idle-tick polls. Default 1s —
-	// the first-attempt path covers low-latency delivery; the Retrier
-	// is for the slow, "receiver is currently broken" cohort.
-	PollInterval time.Duration
-
-	// BusyInterval is the shorter gap between ticks when the previous
-	// tick processed a full batch. Default 50ms.
-	BusyInterval time.Duration
-
-	// ErrorInterval is the sleep after a tick that errored out
-	// (claim or DB error). Default 2s.
+	PollInterval  time.Duration
+	BusyInterval  time.Duration
 	ErrorInterval time.Duration
-
-	// BatchSize is the per-tick claim cap. Default 25.
-	BatchSize int
+	BatchSize     int
 }
 
-// RetrierMetrics are the bumps the retrier feeds back. All optional.
+// RetrierMetrics is the set of optional bumps the Retrier pushes.
 type RetrierMetrics struct {
 	Tick      func()
 	Claimed   func(n int)
 	TickError func(err error)
 }
 
-// Retrier is the long-running goroutine that re-attempts failed
-// webhook_delivery rows whose backoff has elapsed. Construct via
-// NewRetrier; start with Run(ctx); cancel ctx to stop.
-//
-// Safe to run multiple instances against the same Postgres: the
-// claim query uses SELECT FOR UPDATE SKIP LOCKED so each replica picks
-// rows the others aren't touching.
+// Retrier polls webhook_delivery for failed rows whose backoff elapsed and re-runs Attempt.
 type Retrier struct {
 	store    *store.Store
 	executor *Executor
@@ -51,8 +32,7 @@ type Retrier struct {
 	metrics  RetrierMetrics
 }
 
-// NewRetrier wires the dependencies. Returns an error on nil store or
-// executor — both are required.
+// NewRetrier returns a Retrier with defaults applied. store + executor required.
 func NewRetrier(s *store.Store, executor *Executor, cfg RetrierConfig, metrics RetrierMetrics) (*Retrier, error) {
 	if s == nil {
 		return nil, errors.New("worker: NewRetrier needs a Store")
@@ -80,9 +60,7 @@ func NewRetrier(s *store.Store, executor *Executor, cfg RetrierConfig, metrics R
 	}, nil
 }
 
-// Run is the main loop. Mirrors the eventbus Dispatcher shape: claim a
-// batch under a tx → process each row → commit or roll back. Sleep
-// scales with the tick outcome (busy = re-poll fast, error = back off).
+// Run is the main loop. Blocks until ctx is cancelled.
 func (r *Retrier) Run(ctx context.Context) {
 	slog.Info("worker retrier: starting",
 		slog.Duration("poll", r.cfg.PollInterval),
@@ -113,8 +91,6 @@ func (r *Retrier) Run(ctx context.Context) {
 	}
 }
 
-// tick processes one batch. Returns (full, err) — full=true when the
-// claim filled BatchSize, so the caller re-polls immediately.
 func (r *Retrier) tick(ctx context.Context) (bool, error) {
 	if r.metrics.Tick != nil {
 		r.metrics.Tick()
@@ -134,8 +110,6 @@ func (r *Retrier) tick(ctx context.Context) (bool, error) {
 	for _, d := range batch {
 		body, err := r.rebuildEnvelopeBody(d)
 		if err != nil {
-			// Marshal of an empty envelope is essentially infallible;
-			// log + skip rather than failing the whole tx.
 			slog.Error("worker retrier: rebuild envelope failed — skipping",
 				slog.String("delivery_id", d.ID.String()),
 				slog.String("err", err.Error()))
@@ -152,27 +126,15 @@ func (r *Retrier) tick(ctx context.Context) (bool, error) {
 	return len(batch) == r.cfg.BatchSize, nil
 }
 
-// rebuildEnvelopeBody reconstructs the bytes that go on the wire for a
-// retry. The original envelope was stored in the outbox.payload, not
-// in webhook_delivery — so we reconstruct from the delivery row's
-// fields. The receiver dedupes on event_id, so reconstructing is fine
-// as long as the same event_id is preserved.
-//
-// In a future iteration we could persist the envelope bytes on the
-// delivery row to make retries byte-identical to the first attempt
-// (some receivers may verify signatures incorporating field order).
-// For now, reconstruction is correct because the HMAC is computed
-// over the bytes we send, not the original.
+// rebuildEnvelopeBody reconstructs the wire body for a retry. event_id stays
+// stable; receivers dedupe on it, so byte-identity with the first attempt
+// isn't required.
 func (r *Retrier) rebuildEnvelopeBody(d store.WebhookDelivery) ([]byte, error) {
-	// Minimal envelope; matches eventbus.Envelope shape so receivers
-	// don't see schema drift between first-attempt and retry.
 	env := map[string]any{
-		"version":  1,
-		"event_id": d.EventID.String(),
-		"org_id":   d.OrgID.String(),
-		"kind":     d.EventKind,
-		// occurred_at is the row's created_at — the closest available
-		// proxy when we don't have the original timestamp.
+		"version":     1,
+		"event_id":    d.EventID.String(),
+		"org_id":      d.OrgID.String(),
+		"kind":        d.EventKind,
 		"occurred_at": d.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
 	return marshalCompact(env)
