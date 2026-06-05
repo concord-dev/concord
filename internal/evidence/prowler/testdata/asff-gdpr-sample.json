@@ -1,0 +1,60 @@
+{
+  "Findings": [
+    {
+      "Id": "prowler-aws-s3-bucket-public-access-1234",
+      "GeneratorId": "prowler-s3_bucket_public_access",
+      "AwsAccountId": "111111111111",
+      "Title": "S3 bucket allows public access",
+      "Description": "Bucket public-data has public read enabled, violating GDPR Art. 32 confidentiality.",
+      "Severity": {"Label": "HIGH"},
+      "Compliance": {
+        "Status": "FAILED",
+        "AssociatedStandards": [{"StandardsId": "gdpr_eu"}, {"StandardsId": "cis_3.0_aws"}],
+        "RelatedRequirements": ["Article 32", "CIS 2.1.5"]
+      },
+      "Resources": [
+        {"Id": "arn:aws:s3:::public-data", "Type": "AwsS3Bucket", "Region": "eu-west-1"}
+      ],
+      "ProductFields": {"Service": "s3"},
+      "Remediation": {
+        "Recommendation": {"Text": "Block all public access on the bucket via PutPublicAccessBlock."}
+      }
+    },
+    {
+      "Id": "prowler-aws-rds-encryption-5678",
+      "GeneratorId": "prowler-rds_instance_storage_encrypted",
+      "AwsAccountId": "111111111111",
+      "Title": "RDS instance storage is encrypted",
+      "Description": "RDS instance prod-db has storage encryption enabled.",
+      "Severity": {"Label": "INFORMATIONAL"},
+      "Compliance": {
+        "Status": "PASSED",
+        "AssociatedStandards": [{"StandardsId": "gdpr_eu"}],
+        "RelatedRequirements": ["Article 32"]
+      },
+      "Resources": [
+        {"Id": "arn:aws:rds:eu-west-1:111111111111:db:prod-db", "Type": "AwsRdsDbInstance", "Region": "eu-west-1"}
+      ],
+      "ProductFields": {"Service": "rds"},
+      "Remediation": {"Recommendation": {"Text": ""}}
+    },
+    {
+      "Id": "prowler-aws-cloudtrail-enabled-9999",
+      "GeneratorId": "prowler-cloudtrail_multi_region_enabled",
+      "AwsAccountId": "111111111111",
+      "Title": "CloudTrail multi-region trail is enabled",
+      "Description": "A multi-region CloudTrail trail covers every region with log file validation.",
+      "Severity": {"Label": "INFORMATIONAL"},
+      "Compliance": {
+        "Status": "PASSED",
+        "AssociatedStandards": [{"StandardsId": "gdpr_eu"}, {"StandardsId": "nist_800_53_revision_5"}],
+        "RelatedRequirements": ["Article 30", "AU-2"]
+      },
+      "Resources": [
+        {"Id": "arn:aws:cloudtrail:us-east-1:111111111111:trail/global", "Type": "AwsCloudTrailTrail", "Region": "us-east-1"}
+      ],
+      "ProductFields": {"Service": "cloudtrail"},
+      "Remediation": {"Recommendation": {"Text": ""}}
+    }
+  ]
+}
