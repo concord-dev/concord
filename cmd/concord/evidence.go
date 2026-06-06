@@ -2,13 +2,15 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -39,27 +41,28 @@ func newEvidenceCmd() *cobra.Command {
 func newEvidenceAttachCmd() *cobra.Command {
 	var (
 		serverURL, orgSlug, token string
-		filePath, notes           string
+		filePath, notes, finding  string
 	)
 	cmd := &cobra.Command{
 		Use:   "attach",
-		Short: "Upload an evidence document (PDF, screenshot, runbook) as a sha256-addressed attachment",
+		Short: "Upload an evidence document (PDF, screenshot, runbook) — streamed and sha256-verified",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fs, err := resolveFindingsServer(serverURL, orgSlug, token)
 			if err != nil {
 				return err
 			}
-			a, err := uploadEvidenceFile(cmd.Context(), fs, filePath, notes)
+			a, err := uploadEvidenceFile(cmd.Context(), fs, filePath, finding, notes)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stdout, "attached %s (%d bytes, sha256=%s)\n",
-				a.Filename, a.ByteSize, a.SHA256)
+			fmt.Fprintf(os.Stdout, "attached %s (%d bytes, sha256=%s, id=%s)\n",
+				a.Filename, a.ByteSize, a.SHA256, a.ID)
 			return nil
 		},
 	}
 	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
 	cmd.Flags().StringVar(&filePath, "file", "", "Local path to the document (required)")
+	cmd.Flags().StringVar(&finding, "finding", "", "Optional finding id to attach the document to (FIND-abc...)")
 	cmd.Flags().StringVar(&notes, "notes", "", "Optional notes describing what this evidence proves")
 	_ = cmd.MarkFlagRequired("file")
 	return cmd
@@ -72,31 +75,75 @@ type evidenceAttachmentDTO struct {
 	ByteSize int64  `json:"byte_size"`
 }
 
-func uploadEvidenceFile(ctx context.Context, fs findingsServer, path, notes string) (evidenceAttachmentDTO, error) {
+// uploadEvidenceFile streams the file body to /v1/orgs/{slug}/attachments
+// with the filename in the X-Concord-Filename header. The platform
+// computes sha256 server-side and returns the attachment descriptor.
+func uploadEvidenceFile(ctx context.Context, fs findingsServer, path, finding, notes string) (evidenceAttachmentDTO, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return evidenceAttachmentDTO{}, fmt.Errorf("open document: %w", err)
 	}
 	defer f.Close()
-	h := sha256.New()
-	n, err := io.Copy(h, f)
+	st, err := f.Stat()
 	if err != nil {
-		return evidenceAttachmentDTO{}, fmt.Errorf("hash document: %w", err)
+		return evidenceAttachmentDTO{}, err
 	}
-	body := map[string]any{
-		"sha256":    hex.EncodeToString(h.Sum(nil)),
-		"filename":  path,
-		"byte_size": n,
+	q := url.Values{}
+	if finding != "" {
+		q.Set("finding_id", finding)
 	}
 	if notes != "" {
-		body["notes"] = notes
+		q.Set("notes", notes)
+	}
+	endpoint := fs.url + "/v1/orgs/" + fs.orgSlug + "/attachments"
+	if len(q) > 0 {
+		endpoint += "?" + q.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, f)
+	if err != nil {
+		return evidenceAttachmentDTO{}, err
+	}
+	req.ContentLength = st.Size()
+	req.Header.Set("Authorization", "Bearer "+fs.token)
+	req.Header.Set("X-Concord-Filename", filepath.Base(path))
+	if ct := contentTypeFor(path); ct != "" {
+		req.Header.Set("Content-Type", ct)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return evidenceAttachmentDTO{}, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return evidenceAttachmentDTO{}, fmt.Errorf("upload %d: %s", resp.StatusCode, body)
 	}
 	var a evidenceAttachmentDTO
-	if err := apiSend(ctx, fs, "POST",
-		"/v1/orgs/"+fs.orgSlug+"/evidence-attachments", body, &a); err != nil {
+	if err := json.Unmarshal(body, &a); err != nil {
 		return evidenceAttachmentDTO{}, err
 	}
 	return a, nil
+}
+
+func contentTypeFor(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".pdf":
+		return "application/pdf"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".md":
+		return "text/markdown"
+	case ".txt":
+		return "text/plain"
+	case ".json":
+		return "application/json"
+	case ".yaml", ".yml":
+		return "application/yaml"
+	}
+	return "application/octet-stream"
 }
 
 func newEvidenceFreshnessCmd() *cobra.Command {
