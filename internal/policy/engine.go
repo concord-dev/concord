@@ -30,23 +30,28 @@ func (e *Engine) EvaluateFile(ctx context.Context, regoFile, pkg string, input m
 }
 
 func (e *Engine) EvaluateSource(ctx context.Context, src, pkg string, input map[string]any) (Result, error) {
-	deny, err := query(ctx, src, fmt.Sprintf("data.%s.deny", pkg), input)
+	return e.EvaluateWithModules(ctx, map[string]string{"policy.rego": src}, pkg, input)
+}
+
+// EvaluateWithModules runs the deny/warn queries against pkg using every module in mods.
+// Use this when the policy imports library helpers that live in separate files.
+func (e *Engine) EvaluateWithModules(ctx context.Context, mods map[string]string, pkg string, input map[string]any) (Result, error) {
+	deny, err := query(ctx, mods, fmt.Sprintf("data.%s.deny", pkg), input)
 	if err != nil {
 		return Result{}, fmt.Errorf("deny query: %w", err)
 	}
-	warn, _ := query(ctx, src, fmt.Sprintf("data.%s.warn", pkg), input)
-
+	warn, _ := query(ctx, mods, fmt.Sprintf("data.%s.warn", pkg), input)
 	sort.Strings(deny)
 	sort.Strings(warn)
 	return Result{Deny: deny, Warn: warn, Pass: len(deny) == 0}, nil
 }
 
-func query(ctx context.Context, src, q string, input map[string]any) ([]string, error) {
-	r := rego.New(
-		rego.Query(q),
-		rego.Module("policy.rego", src),
-		rego.Input(input),
-	)
+func query(ctx context.Context, mods map[string]string, q string, input map[string]any) ([]string, error) {
+	opts := []func(*rego.Rego){rego.Query(q), rego.Input(input)}
+	for name, src := range mods {
+		opts = append(opts, rego.Module(name, src))
+	}
+	r := rego.New(opts...)
 	rs, err := r.Eval(ctx)
 	if err != nil {
 		return nil, err

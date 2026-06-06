@@ -20,8 +20,8 @@ func newScaffoldRootCmd() *cobra.Command {
 
 func newScaffoldControlCmd() *cobra.Command {
 	var (
-		dest, pack, id, title, framework, severity, author, description string
-		force                                                            bool
+		dest, pack, id, title, framework, severity, author, description, tmplFlag string
+		force                                                                     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "control",
@@ -29,6 +29,10 @@ func newScaffoldControlCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dest == "" {
 				dest = "."
+			}
+			tmpl, err := scaffold.ParseTemplate(tmplFlag)
+			if err != nil {
+				return err
 			}
 			r, err := scaffold.Control(dest, scaffold.ControlInput{
 				Pack:        pack,
@@ -38,6 +42,7 @@ func newScaffoldControlCmd() *cobra.Command {
 				Severity:    severity,
 				Author:      author,
 				Description: description,
+				Template:    tmpl,
 			}, force)
 			if err != nil {
 				return err
@@ -47,9 +52,12 @@ func newScaffoldControlCmd() *cobra.Command {
 			fmt.Fprintf(os.Stdout, "  %s\n", r.Rego)
 			fmt.Fprintf(os.Stdout, "  %s\n", r.PassFix)
 			fmt.Fprintf(os.Stdout, "  %s\n", r.FailFix)
+			for _, p := range r.LibFiles {
+				fmt.Fprintf(os.Stdout, "  %s\n", p)
+			}
 			fmt.Fprintln(os.Stdout, "Next steps:")
-			fmt.Fprintln(os.Stdout, "  - flesh out the description, evidence source/type, and Rego rules")
-			fmt.Fprintln(os.Stdout, "  - validate with `concord check --controls .`")
+			fmt.Fprintln(os.Stdout, "  - flesh out evidence params and the deny rules in the rego file")
+			fmt.Fprintln(os.Stdout, "  - validate with `concord control validate ./controls/<id>.yaml`")
 			return nil
 		},
 	}
@@ -61,6 +69,8 @@ func newScaffoldControlCmd() *cobra.Command {
 	cmd.Flags().StringVar(&severity, "severity", "medium", "Severity: low|medium|high|critical")
 	cmd.Flags().StringVar(&author, "author", "", "Owning team or author (default: concord-dev)")
 	cmd.Flags().StringVar(&description, "description", "", "Long-form description (multi-line OK)")
+	cmd.Flags().StringVar(&tmplFlag, "template", "generic",
+		"Template: generic|aws-resource|gcp-resource|azure-resource|k8s-resource|github-policy|policy-attestation|vendor-cert|composite")
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite existing files")
 	_ = cmd.MarkFlagRequired("pack")
 	_ = cmd.MarkFlagRequired("id")

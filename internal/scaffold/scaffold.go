@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/concord-dev/concord/internal/scaffold/lib"
 )
 
 type Result struct {
@@ -134,14 +136,16 @@ type ControlInput struct {
 	Severity    string
 	Author      string
 	Description string
+	Template    ControlTemplate
 }
 
-// ControlResult records the four files written by Control.
+// ControlResult records the files written by Control.
 type ControlResult struct {
-	YAML     string
-	Rego     string
-	PassFix  string
-	FailFix  string
+	YAML       string
+	Rego       string
+	PassFix    string
+	FailFix    string
+	LibFiles   []string
 }
 
 // Control writes a control YAML + Rego skeleton + pass/fail fixture pair under destDir.
@@ -200,25 +204,37 @@ func Control(destDir string, in ControlInput, force bool) (ControlResult, error)
 
 	evidenceKey := regoPackagePiece(slug)
 	regoPackage := fmt.Sprintf("concord.%s.%s", regoPackagePiece(in.Pack), evidenceKey)
-	yamlBody := renderControlYAML(in, slug, title, framework, severity, author, description, regoPackage)
-	regoBody := renderControlRego(regoPackage, in.ID, evidenceKey)
-	passFixture := renderControlFixture(evidenceKey, true)
-	failFixture := renderControlFixture(evidenceKey, false)
+	parts := partsFor(in.Template, regoPackage, in.ID, evidenceKey)
+
+	yamlBody := renderControlYAMLWithParts(in, slug, title, framework, severity, author, description, regoPackage, parts)
 
 	for path, body := range map[string]string{
 		r.YAML:    yamlBody,
-		r.Rego:    regoBody,
-		r.PassFix: passFixture,
-		r.FailFix: failFixture,
+		r.Rego:    parts.regoBody,
+		r.PassFix: parts.passBody,
+		r.FailFix: parts.failBody,
 	} {
 		if err := writeBytes(path, []byte(body)); err != nil {
 			return r, fmt.Errorf("writing %s: %w", path, err)
 		}
 	}
+
+	libPaths, err := writeLibFiles(destDir, force)
+	if err != nil {
+		return r, fmt.Errorf("writing rego helper library: %w", err)
+	}
+	r.LibFiles = libPaths
 	return r, nil
 }
 
-func renderControlYAML(in ControlInput, slug, title, framework, severity, author, description, regoPackage string) string {
+func renderControlYAMLWithParts(in ControlInput, slug, title, framework, severity, author, description, regoPackage string, parts templateParts) string {
+	paramsBlock := ""
+	if parts.evidenceParams != "" {
+		paramsBlock = "      params:\n" + indentBlock(parts.evidenceParams, "        ") + "\n"
+		if strings.Contains(parts.evidenceParams, "    - id:") {
+			paramsBlock = parts.evidenceParams + "\n"
+		}
+	}
 	return fmt.Sprintf(`apiVersion: concord.dev/v1
 kind: Control
 
@@ -238,10 +254,10 @@ spec:
 
   evidence:
     - id: %s
-      source: TODO
-      type: TODO
+      source: %s
+      type: %s
       fixture: ../tests/fixtures/%s-pass.json
-
+%s
   policy:
     engine: rego
     package: %s
@@ -254,51 +270,39 @@ spec:
 
   status: draft
   blocking: false
-`, in.ID, slug, title, framework, severity, author, description, slug, slug, regoPackage, slug, slug)
+`, in.ID, slug, title, framework, severity, author, description,
+		parts.evidenceID, parts.evidenceSrc, parts.evidenceType, slug,
+		paramsBlock, regoPackage, slug, slug)
 }
 
-func renderControlRego(pkg, controlID, evidenceKey string) string {
-	return fmt.Sprintf(`package %s
-
-import rego.v1
-
-# %s — TODO: describe the rule.
-# input.%s is the normalized evidence payload from the control's collector.
-
-deny contains msg if {
-    not input.%s
-    msg := "no evidence collected for %s"
-}
-
-deny contains msg if {
-    some item in input.%s.items
-    not item.compliant
-    msg := sprintf("%s: %%q is non-compliant", [item.id])
-}
-`, pkg, controlID, evidenceKey, evidenceKey, controlID, evidenceKey, controlID)
-}
-
-func renderControlFixture(slug string, pass bool) string {
-	if pass {
-		return fmt.Sprintf(`{
-  "%s": {
-    "fetched_at": "2026-01-01T00:00:00Z",
-    "items": [
-      { "id": "example-1", "compliant": true }
-    ]
-  }
-}
-`, slug)
+func indentBlock(s, prefix string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i, ln := range lines {
+		lines[i] = prefix + ln
 	}
-	return fmt.Sprintf(`{
-  "%s": {
-    "fetched_at": "2026-01-01T00:00:00Z",
-    "items": [
-      { "id": "example-1", "compliant": false }
-    ]
-  }
+	return strings.Join(lines, "\n")
 }
-`, slug)
+
+func writeLibFiles(destDir string, force bool) ([]string, error) {
+	files, err := lib.Files()
+	if err != nil {
+		return nil, err
+	}
+	var written []string
+	for name, body := range files {
+		path := filepath.Join(destDir, "policies", "lib", name)
+		if !force {
+			if _, err := os.Stat(path); err == nil {
+				written = append(written, path)
+				continue
+			}
+		}
+		if err := writeBytes(path, []byte(body)); err != nil {
+			return written, err
+		}
+		written = append(written, path)
+	}
+	return written, nil
 }
 
 func regoSlug(id string) string {
