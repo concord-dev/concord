@@ -147,6 +147,27 @@ func (m *Manager) Has(source string) bool {
 	return ok
 }
 
+// FindRemediator looks up a discovered plugin entry under one of two
+// names: source itself, or source+"-remediator" (the binary-naming
+// convention for plugins that ship a Remediator). Returns the entry
+// or nil if not found.
+func (m *Manager) FindRemediator(source string) *RemediatorEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	candidates := []string{source + "-remediator", source}
+	for _, name := range candidates {
+		if e, ok := m.discovered[name]; ok {
+			return &RemediatorEntry{
+				Source:     e.source,
+				Version:    e.version,
+				Path:       e.path,
+				AllowedEnv: e.allowedEnv,
+			}
+		}
+	}
+	return nil
+}
+
 // Ensure pre-warms each named source by spawning its plugin.
 func (m *Manager) Ensure(ctx context.Context, sources []string) error {
 	var errs []error

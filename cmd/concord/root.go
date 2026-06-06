@@ -42,5 +42,6 @@ Audits become continuous instead of episodic.`,
 	cmd.AddCommand(newVendorCmd())
 	cmd.AddCommand(newRunsCmd())
 	cmd.AddCommand(newProjectCmd())
+	cmd.AddCommand(newRemediateCmd())
 	return cmd
 }
