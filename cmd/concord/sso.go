@@ -21,7 +21,7 @@ func newSSOCmd() *cobra.Command {
 		Short: "Configure and inspect SSO (OIDC) for an org",
 	}
 	cmd.AddCommand(newSSOConfigCmd(), newSSOShowCmd(), newSSOTestCmd(), newSSODeleteCmd(),
-		newSSOGroupsCmd())
+		newSSOGroupsCmd(), newSSOSCIMCmd())
 	return cmd
 }
 
@@ -368,5 +368,149 @@ Each --map argument has the form "group=role-uuid":
 	cmd.Flags().StringVar(&flagOrgSlug, "org-slug", "", "org slug")
 	cmd.Flags().StringVar(&flagToken, "token", "", "API token")
 	cmd.Flags().StringArrayVar(&pairs, "map", nil, `group→role mapping, e.g. "engineering=11111111-...-..." (repeatable)`)
+	return cmd
+}
+
+func newSSOSCIMCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "scim",
+		Short: "Manage SCIM provisioning tokens for the org's SSO provider",
+	}
+	cmd.AddCommand(newSCIMTokenMintCmd(), newSCIMTokenListCmd(), newSCIMTokenRevokeCmd())
+	return cmd
+}
+
+func newSCIMTokenMintCmd() *cobra.Command {
+	var flagServer, flagOrgSlug, flagToken, name string
+	cmd := &cobra.Command{
+		Use:   "mint-token",
+		Short: "Issue a new SCIM bearer token (shown once; paste into the IdP's SCIM app)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fs, err := resolveServer(flagServer, flagOrgSlug, "", flagToken)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(name) == "" {
+				return errors.New("--name is required")
+			}
+			raw, _ := json.Marshal(map[string]any{"name": name})
+			req, _ := http.NewRequest(http.MethodPost,
+				fs.url+"/v1/orgs/"+fs.orgSlug+"/sso/scim/tokens", bytes.NewReader(raw))
+			req.Header.Set("Authorization", "Bearer "+fs.token)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			rawResp, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusCreated {
+				return fmt.Errorf("mint-token %d: %s", resp.StatusCode, rawResp)
+			}
+			var out struct {
+				Token       string `json:"token"`
+				ID          string `json:"id"`
+				ScimBaseURL string `json:"scim_base_url"`
+			}
+			if err := json.Unmarshal(rawResp, &out); err != nil {
+				return err
+			}
+			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintf(tw, "id\t%s\n", out.ID)
+			fmt.Fprintf(tw, "scim_base_url\t%s\n", out.ScimBaseURL)
+			fmt.Fprintf(tw, "token\t%s\n", out.Token)
+			tw.Flush()
+			fmt.Fprintln(cmd.OutOrStdout(),
+				"\nThe token is shown only once. Paste it into your IdP's SCIM app under Authorization → Bearer.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&flagServer, "server", "", "Concord platform base URL")
+	cmd.Flags().StringVar(&flagOrgSlug, "org-slug", "", "org slug")
+	cmd.Flags().StringVar(&flagToken, "token", "", "API token (org admin)")
+	cmd.Flags().StringVar(&name, "name", "", `human-friendly label, e.g. "Okta prod"`)
+	return cmd
+}
+
+func newSCIMTokenListCmd() *cobra.Command {
+	var flagServer, flagOrgSlug, flagToken string
+	cmd := &cobra.Command{
+		Use:   "list-tokens",
+		Short: "List SCIM tokens minted for the org's SSO provider",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fs, err := resolveServer(flagServer, flagOrgSlug, "", flagToken)
+			if err != nil {
+				return err
+			}
+			req, _ := http.NewRequest(http.MethodGet,
+				fs.url+"/v1/orgs/"+fs.orgSlug+"/sso/scim/tokens", nil)
+			req.Header.Set("Authorization", "Bearer "+fs.token)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			rawResp, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("list-tokens %d: %s", resp.StatusCode, rawResp)
+			}
+			var rows []map[string]any
+			if err := json.Unmarshal(rawResp, &rows); err != nil {
+				return err
+			}
+			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintln(tw, "ID\tNAME\tPREFIX\tLAST USED\tREVOKED")
+			for _, r := range rows {
+				lastUsed := "-"
+				if v, ok := r["last_used_at"]; ok && v != nil {
+					lastUsed = fmt.Sprintf("%v", v)
+				}
+				revoked := "-"
+				if v, ok := r["revoked_at"]; ok && v != nil {
+					revoked = fmt.Sprintf("%v", v)
+				}
+				fmt.Fprintf(tw, "%v\t%v\t%v\t%s\t%s\n",
+					r["id"], r["name"], r["token_prefix"], lastUsed, revoked)
+			}
+			tw.Flush()
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&flagServer, "server", "", "Concord platform base URL")
+	cmd.Flags().StringVar(&flagOrgSlug, "org-slug", "", "org slug")
+	cmd.Flags().StringVar(&flagToken, "token", "", "API token (org admin)")
+	return cmd
+}
+
+func newSCIMTokenRevokeCmd() *cobra.Command {
+	var flagServer, flagOrgSlug, flagToken string
+	cmd := &cobra.Command{
+		Use:   "revoke-token <token-id>",
+		Short: "Revoke an SCIM token",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fs, err := resolveServer(flagServer, flagOrgSlug, "", flagToken)
+			if err != nil {
+				return err
+			}
+			req, _ := http.NewRequest(http.MethodDelete,
+				fs.url+"/v1/orgs/"+fs.orgSlug+"/sso/scim/tokens/"+args[0], nil)
+			req.Header.Set("Authorization", "Bearer "+fs.token)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusNoContent {
+				rawResp, _ := io.ReadAll(resp.Body)
+				return fmt.Errorf("revoke %d: %s", resp.StatusCode, rawResp)
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "revoked.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&flagServer, "server", "", "Concord platform base URL")
+	cmd.Flags().StringVar(&flagOrgSlug, "org-slug", "", "org slug")
+	cmd.Flags().StringVar(&flagToken, "token", "", "API token (org admin)")
 	return cmd
 }
