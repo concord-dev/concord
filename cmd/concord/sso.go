@@ -28,42 +28,104 @@ func newSSOCmd() *cobra.Command {
 func newSSOConfigCmd() *cobra.Command {
 	var (
 		flagServer, flagOrgSlug, flagToken string
-		slug, displayName, issuer          string
-		clientID, clientSecret             string
-		defaultRole, groupsClaim           string
-		scopes                             []string
-		jit, disablePasswords              bool
+		kind                                string
+		slug, displayName                   string
+		defaultRole                         string
+		jit, disablePasswords               bool
+
+		// OIDC-specific
+		issuer, clientID, clientSecret string
+		scopes                         []string
+		groupsClaim                    string
+
+		// SAML-specific
+		idpEntityID, idpSSOURL, idpCertPath string
+		audienceURI, nameIDFormat           string
+		samlGroupsAttribute                 string
 	)
 	cmd := &cobra.Command{
 		Use:   "configure",
-		Short: "Create or update the org's OIDC provider",
+		Short: "Create or update the org's SSO provider (OIDC or SAML)",
+		Long: `Configure the org's SSO provider.
+
+For OIDC (default):
+    concord sso configure --kind oidc
+        --display-name "Acme Okta"
+        --issuer https://acme.okta.com
+        --client-id <id> --client-secret <secret>
+
+For SAML:
+    concord sso configure --kind saml
+        --display-name "Acme Okta SAML"
+        --idp-entity-id http://www.okta.com/exk-XXX
+        --idp-sso-url https://acme.okta.com/app/.../sso/saml
+        --idp-cert-file ./okta.cert.pem
+
+The SP keypair for SAML is auto-generated server-side on first
+configure. Download the resulting SP metadata XML at
+    /v1/auth/sso/{slug}/saml/metadata
+and upload it on the IdP side.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fs, err := resolveServer(flagServer, flagOrgSlug, "", flagToken)
 			if err != nil {
 				return err
 			}
-			if clientSecret == "" {
-				clientSecret = os.Getenv("CONCORD_OIDC_CLIENT_SECRET")
+			if displayName == "" {
+				return errors.New("--display-name is required")
 			}
-			if slug == "" || displayName == "" || issuer == "" || clientID == "" || clientSecret == "" {
-				return errors.New("--slug, --display-name, --issuer, --client-id, and --client-secret are required (--client-secret may come from CONCORD_OIDC_CLIENT_SECRET)")
+			if kind == "" {
+				kind = "oidc"
 			}
 			body := map[string]any{
 				"slug":              slug,
+				"kind":              kind,
 				"display_name":      displayName,
-				"issuer_url":        issuer,
-				"client_id":         clientID,
-				"client_secret":     clientSecret,
 				"jit_provision":     jit,
 				"disable_passwords": disablePasswords,
-				"groups_claim":      groupsClaim,
 			}
 			if defaultRole != "" {
 				body["default_role_id"] = defaultRole
 			}
-			if len(scopes) > 0 {
-				body["scopes"] = scopes
+
+			switch kind {
+			case "oidc":
+				if clientSecret == "" {
+					clientSecret = os.Getenv("CONCORD_OIDC_CLIENT_SECRET")
+				}
+				if issuer == "" || clientID == "" || clientSecret == "" {
+					return errors.New("--issuer, --client-id, and --client-secret are required for --kind oidc (or set CONCORD_OIDC_CLIENT_SECRET)")
+				}
+				body["issuer_url"] = issuer
+				body["client_id"] = clientID
+				body["client_secret"] = clientSecret
+				body["groups_claim"] = groupsClaim
+				if len(scopes) > 0 {
+					body["scopes"] = scopes
+				}
+			case "saml":
+				if idpEntityID == "" || idpSSOURL == "" || idpCertPath == "" {
+					return errors.New("--idp-entity-id, --idp-sso-url, and --idp-cert-file are required for --kind saml")
+				}
+				certBytes, err := os.ReadFile(idpCertPath)
+				if err != nil {
+					return fmt.Errorf("read --idp-cert-file: %w", err)
+				}
+				body["idp_entity_id"] = idpEntityID
+				body["idp_sso_url"] = idpSSOURL
+				body["idp_x509_cert"] = string(certBytes)
+				if audienceURI != "" {
+					body["audience_uri"] = audienceURI
+				}
+				if nameIDFormat != "" {
+					body["saml_name_id_format"] = nameIDFormat
+				}
+				if samlGroupsAttribute != "" {
+					body["saml_groups_attribute"] = samlGroupsAttribute
+				}
+			default:
+				return fmt.Errorf(`--kind must be "oidc" or "saml" (got %q)`, kind)
 			}
+
 			raw, _ := json.Marshal(body)
 			req, _ := http.NewRequest(http.MethodPut, fs.url+"/v1/orgs/"+fs.orgSlug+"/sso/provider", bytes.NewReader(raw))
 			req.Header.Set("Authorization", "Bearer "+fs.token)
@@ -78,22 +140,35 @@ func newSSOConfigCmd() *cobra.Command {
 				return fmt.Errorf("configure sso %d: %s", resp.StatusCode, rawResp)
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), "configured.")
+			if kind == "saml" {
+				fmt.Fprintf(cmd.OutOrStdout(), "next: download metadata from %s/v1/auth/sso/%s/saml/metadata and upload it to your IdP\n",
+					fs.url, fs.orgSlug)
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&flagServer, "server", "", "Concord platform base URL")
 	cmd.Flags().StringVar(&flagOrgSlug, "org-slug", "", "org slug")
 	cmd.Flags().StringVar(&flagToken, "token", "", "API token")
+	cmd.Flags().StringVar(&kind, "kind", "oidc", `SSO protocol — "oidc" or "saml"`)
 	cmd.Flags().StringVar(&slug, "slug", "okta", "URL slug for this SSO provider")
 	cmd.Flags().StringVar(&displayName, "display-name", "", "human-friendly name (e.g. Acme Okta)")
+	cmd.Flags().StringVar(&defaultRole, "default-role-id", "", "UUID of the role granted on first JIT login")
+	cmd.Flags().BoolVar(&jit, "jit-provision", true, "auto-create users on first login")
+	cmd.Flags().BoolVar(&disablePasswords, "disable-passwords", false, "block /v1/auth/login (force SSO)")
+	// OIDC flags
 	cmd.Flags().StringVar(&issuer, "issuer", "", "OIDC issuer URL (e.g. https://acme.okta.com)")
 	cmd.Flags().StringVar(&clientID, "client-id", "", "OIDC client id")
 	cmd.Flags().StringVar(&clientSecret, "client-secret", "", "OIDC client secret (or env CONCORD_OIDC_CLIENT_SECRET)")
-	cmd.Flags().StringVar(&defaultRole, "default-role-id", "", "UUID of the role granted on first JIT login")
 	cmd.Flags().StringSliceVar(&scopes, "scopes", nil, "OAuth scopes (default: openid,email,profile)")
-	cmd.Flags().BoolVar(&jit, "jit-provision", true, "auto-create users on first login")
-	cmd.Flags().BoolVar(&disablePasswords, "disable-passwords", false, "block /v1/auth/login (force SSO)")
 	cmd.Flags().StringVar(&groupsClaim, "groups-claim", "groups", "ID-token claim that lists the user's groups")
+	// SAML flags
+	cmd.Flags().StringVar(&idpEntityID, "idp-entity-id", "", "SAML IdP entity ID")
+	cmd.Flags().StringVar(&idpSSOURL, "idp-sso-url", "", "SAML IdP SSO endpoint URL")
+	cmd.Flags().StringVar(&idpCertPath, "idp-cert-file", "", "path to PEM-encoded IdP signing cert")
+	cmd.Flags().StringVar(&audienceURI, "audience-uri", "", "SAML SP audience URI (defaults to the metadata URL)")
+	cmd.Flags().StringVar(&nameIDFormat, "saml-name-id-format", "", "SAML NameID format (default: emailAddress)")
+	cmd.Flags().StringVar(&samlGroupsAttribute, "saml-groups-attribute", "", "SAML attribute name carrying groups (default: groups)")
 	return cmd
 }
 
