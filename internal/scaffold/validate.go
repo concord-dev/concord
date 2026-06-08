@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 	"github.com/concord-dev/concord/internal/policy"
 	"github.com/concord-dev/concord/pkg/controls"
 )
@@ -69,8 +70,7 @@ func ValidateControl(ctx context.Context, yamlPath string) (ValidationReport, er
 	r.RegoLoaded = true
 
 	slug := slugFromYAML(yamlPath)
-	pass := findFixture(packDir, slug, "pass")
-	fail := findFixture(packDir, slug, "fail")
+	pass, fail := fixturesForControl(c, packDir, slug)
 	r.PassFixture = pass
 	r.FailFixture = fail
 
@@ -80,8 +80,9 @@ func ValidateControl(ctx context.Context, yamlPath string) (ValidationReport, er
 		return r, nil
 	}
 	engine := policy.New()
+	evidenceIDs := evidenceIDsFor(c)
 	if pass != "" {
-		res, err := evalFixture(ctx, engine, mods, c.Spec.Policy.Package, pass)
+		res, err := evalFixture(ctx, engine, mods, c.Spec.Policy.Package, pass, evidenceIDs)
 		if err != nil {
 			r.Errors = append(r.Errors, fmt.Sprintf("pass fixture %s: %v", pass, err))
 		} else {
@@ -89,7 +90,7 @@ func ValidateControl(ctx context.Context, yamlPath string) (ValidationReport, er
 		}
 	}
 	if fail != "" {
-		res, err := evalFixture(ctx, engine, mods, c.Spec.Policy.Package, fail)
+		res, err := evalFixture(ctx, engine, mods, c.Spec.Policy.Package, fail, evidenceIDs)
 		if err != nil {
 			r.Errors = append(r.Errors, fmt.Sprintf("fail fixture %s: %v", fail, err))
 		} else {
@@ -105,15 +106,16 @@ func ValidateControl(ctx context.Context, yamlPath string) (ValidationReport, er
 	return r, nil
 }
 
-func evalFixture(ctx context.Context, engine *policy.Engine, mods map[string]string, pkg, fixturePath string) (*FixtureResult, error) {
+func evalFixture(ctx context.Context, engine *policy.Engine, mods map[string]string, pkg, fixturePath string, evidenceIDs []string) (*FixtureResult, error) {
 	raw, err := os.ReadFile(fixturePath)
 	if err != nil {
 		return nil, err
 	}
-	var input map[string]any
-	if err := json.Unmarshal(raw, &input); err != nil {
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
+	input := normaliseFixture(parsed, evidenceIDs)
 	res, err := engine.EvaluateWithModules(ctx, mods, pkg, input)
 	if err != nil {
 		return nil, err
@@ -124,6 +126,42 @@ func evalFixture(ctx context.Context, engine *policy.Engine, mods map[string]str
 		Deny: res.Deny,
 		Warn: res.Warn,
 	}, nil
+}
+
+// normaliseFixture wraps raw evidence under the control's evidence IDs to
+// match the runtime CollectAll behaviour. If the parsed fixture already
+// contains every evidence id at top level it is returned unchanged so the
+// scaffold-emitted pre-wrapped fixtures keep working.
+func normaliseFixture(parsed map[string]any, evidenceIDs []string) map[string]any {
+	if alreadyWrapped(parsed, evidenceIDs) {
+		return parsed
+	}
+	if len(evidenceIDs) == 1 {
+		return map[string]any{evidenceIDs[0]: parsed}
+	}
+	return parsed
+}
+
+func alreadyWrapped(parsed map[string]any, evidenceIDs []string) bool {
+	if len(evidenceIDs) == 0 {
+		return true
+	}
+	for _, id := range evidenceIDs {
+		if _, ok := parsed[id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func evidenceIDsFor(c apiv1.Control) []string {
+	out := make([]string, 0, len(c.Spec.Evidence))
+	for _, ev := range c.Spec.Evidence {
+		if ev.ID != "" {
+			out = append(out, ev.ID)
+		}
+	}
+	return out
 }
 
 func collectModules(packDir, regoPath, regoSrc string) (map[string]string, error) {
@@ -170,3 +208,46 @@ func findFixture(packDir, slug, kind string) string {
 	}
 	return ""
 }
+
+// fixturesForControl resolves pass + fail fixture paths, preferring the YAML's
+// explicit fixture: field and deriving the fail variant from it; otherwise
+// falling back to the <slug>-{pass,fail}.json convention.
+func fixturesForControl(c apiv1.Control, packDir, slug string) (string, string) {
+	for _, ev := range c.Spec.Evidence {
+		if ev.Fixture == "" {
+			continue
+		}
+		passPath := resolveRelative(packDir, ev.Fixture, slug)
+		if passPath == "" {
+			continue
+		}
+		base := filepath.Base(passPath)
+		dir := filepath.Dir(passPath)
+		failName := strings.Replace(base, "-pass.json", "-fail.json", 1)
+		if failName == base {
+			failName = strings.TrimSuffix(base, ".json") + "-fail.json"
+		}
+		failPath := filepath.Join(dir, failName)
+		if _, err := os.Stat(failPath); err != nil {
+			failPath = ""
+		}
+		return passPath, failPath
+	}
+	return findFixture(packDir, slug, "pass"), findFixture(packDir, slug, "fail")
+}
+
+// resolveRelative anchors a fixture path declared in YAML to packDir + controls/.
+func resolveRelative(packDir, fixture, _ string) string {
+	if filepath.IsAbs(fixture) {
+		if _, err := os.Stat(fixture); err == nil {
+			return fixture
+		}
+		return ""
+	}
+	candidate := filepath.Clean(filepath.Join(packDir, "controls", fixture))
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return ""
+}
+
