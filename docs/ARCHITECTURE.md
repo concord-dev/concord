@@ -67,6 +67,8 @@ internal/
   store/           Postgres store layer + migrations
   watcher/         CLI long-poll watcher
 pkg/api/v1/        public types shared with the CLI
+pkg/controls/      control YAML loader + validator
+pkg/evidencetype/  EvidenceType loader + JSON Schema registry (see docs/evidence-types.md)
 ```
 
 ## Request lifecycle

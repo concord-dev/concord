@@ -469,6 +469,8 @@ We standardize on:
 - `github.com/prometheus/client_golang` — metrics
 - `golang.org/x/time/rate` — token bucket (in-memory limiter)
 - `github.com/spf13/cobra` — CLI
+- `github.com/santhosh-tekuri/jsonschema/v6` — JSON Schema (draft 2020-12) validation for EvidenceType schemas (`pkg/evidencetype`)
+- `golang.org/x/mod/semver` — semver comparison for evidence-type version refs
 
 Adding a dep means: updating `go.mod`, `go.sum`, AND mentioning it
 in the relevant ARCHITECTURE.md / STYLE.md section so the next reader
