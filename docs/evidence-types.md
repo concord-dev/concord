@@ -53,7 +53,11 @@ A reference is `id` optionally followed by `@constraint`:
 | `okta/users_mfa@v1.2.0` | exactly v1.2.0 |
 | `okta/users_mfa@^v1` | the highest `v1.x` (same major) |
 
-Version comparison uses `golang.org/x/mod/semver`.
+Version comparison uses `golang.org/x/mod/semver`. Constraints are
+honoured by the registry API (`Registry.Resolve`/`ValidatePayload`) and
+the `concord evidence-type` commands. Note the limitation below: a
+control's `evidence[].type` cannot yet carry an `@constraint`, so
+`concord control validate` resolves to the **latest** registered version.
 
 ## Where they live
 
@@ -76,6 +80,29 @@ against the matching schema. A fixture that has drifted from the declared
 shape fails validation. The check is opt-in: a control whose evidence
 `type` has no registered EvidenceType is left untouched, so existing
 packs keep working until they adopt one.
+
+## Limitations (current MVP)
+
+These are intentional boundaries of the first cut, not bugs:
+
+- **`compatibility` is declared but not yet enforced.** The field is
+  validated against its enum and stored, but nothing diffs a new schema
+  version against the prior one to reject non-additive minor bumps. The
+  backward-compatibility *check* (a `concord evidence-type diff` /
+  registry-diff in pack CI) is future work. Until then, treat
+  `compatibility` as documentation of intent.
+- **Control-side version pinning is not wired.** A control selects an
+  evidence type by its separate `source` + `type` fields; `type` is also
+  the plugin dispatch key, so it cannot yet carry an `@constraint`.
+  `concord control validate` therefore resolves to the latest registered
+  version. Pinning from a control needs a dedicated contract field on the
+  evidence reference; the registry already supports the constraint syntax
+  for when it lands.
+- **Multi-evidence packs with bare fixtures are skipped.** A bare fixture
+  under a control with more than one typed evidence ref cannot be
+  attributed to a single schema, so it is left unchecked rather than
+  validated against the wrong one. Use wrapped fixtures
+  (`{evidence_id: payload, ...}`) to get schema coverage for every ref.
 
 ## Implementation
 
