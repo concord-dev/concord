@@ -8,30 +8,42 @@ import (
 	"path/filepath"
 	"strings"
 
-	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 	"github.com/concord-dev/concord/internal/policy"
+	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 	"github.com/concord-dev/concord/pkg/controls"
+	"github.com/concord-dev/concord/pkg/evidencetype"
 )
 
 // ValidationReport summarises a `concord control validate` run.
 type ValidationReport struct {
-	YAMLPath    string
-	ControlID   string
-	RegoPath    string
-	RegoLoaded  bool
-	PassFixture string
-	FailFixture string
-	PassResult  *FixtureResult
-	FailResult  *FixtureResult
-	Errors      []string
+	YAMLPath     string
+	ControlID    string
+	RegoPath     string
+	RegoLoaded   bool
+	PassFixture  string
+	FailFixture  string
+	PassResult   *FixtureResult
+	FailResult   *FixtureResult
+	SchemaChecks []SchemaCheck
+	Errors       []string
+}
+
+// SchemaCheck records validating one fixture's evidence payload against the
+// EvidenceType schema declared for its (source, type).
+type SchemaCheck struct {
+	Fixture    string
+	EvidenceID string
+	TypeRef    string
+	OK         bool
+	Err        string
 }
 
 // FixtureResult records the outcome of running one fixture through the Rego.
 type FixtureResult struct {
-	Path    string
-	Pass    bool
-	Deny    []string
-	Warn    []string
+	Path string
+	Pass bool
+	Deny []string
+	Warn []string
 }
 
 // AllGreen reports whether every check passed.
@@ -44,6 +56,11 @@ func (r ValidationReport) AllGreen() bool {
 	}
 	if r.FailResult == nil || r.FailResult.Pass {
 		return false
+	}
+	for _, sc := range r.SchemaChecks {
+		if !sc.OK {
+			return false
+		}
 	}
 	return true
 }
@@ -103,7 +120,56 @@ func ValidateControl(ctx context.Context, yamlPath string) (ValidationReport, er
 	if fail == "" {
 		r.Errors = append(r.Errors, "no fail fixture found (expected tests/fixtures/<slug>-fail.json)")
 	}
+
+	reg, regErr := evidencetype.LoadDir(filepath.Join(packDir, "evidence-types"))
+	if regErr != nil {
+		r.Errors = append(r.Errors, fmt.Sprintf("loading evidence types: %v", regErr))
+	} else if reg.Len() > 0 {
+		for _, fx := range []string{pass, fail} {
+			if fx == "" {
+				continue
+			}
+			r.SchemaChecks = append(r.SchemaChecks, schemaChecks(reg, c, fx, evidenceIDs)...)
+		}
+	}
 	return r, nil
+}
+
+// schemaChecks validates each evidence payload in a fixture against the
+// EvidenceType schema declared for its (source, type). Evidence refs without
+// a registered type are skipped, so the check is opt-in per pack.
+func schemaChecks(reg *evidencetype.Registry, c apiv1.Control, fixturePath string, evidenceIDs []string) []SchemaCheck {
+	raw, err := os.ReadFile(fixturePath)
+	if err != nil {
+		return []SchemaCheck{{Fixture: fixturePath, OK: false, Err: err.Error()}}
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return []SchemaCheck{{Fixture: fixturePath, OK: false, Err: "parse: " + err.Error()}}
+	}
+	wrapped := normaliseFixture(parsed, evidenceIDs)
+
+	var out []SchemaCheck
+	for _, ev := range c.Spec.Evidence {
+		if ev.Type == "" {
+			continue
+		}
+		ref := evidencetype.RefFor(ev.Source, ev.Type)
+		if !reg.Has(ref) {
+			continue
+		}
+		payload, ok := wrapped[ev.ID]
+		if !ok {
+			payload = parsed
+		}
+		sc := SchemaCheck{Fixture: fixturePath, EvidenceID: ev.ID, TypeRef: ref, OK: true}
+		if err := reg.ValidatePayload(ref, payload); err != nil {
+			sc.OK = false
+			sc.Err = err.Error()
+		}
+		out = append(out, sc)
+	}
+	return out
 }
 
 func evalFixture(ctx context.Context, engine *policy.Engine, mods map[string]string, pkg, fixturePath string, evidenceIDs []string) (*FixtureResult, error) {
@@ -250,4 +316,3 @@ func resolveRelative(packDir, fixture, _ string) string {
 	}
 	return ""
 }
-

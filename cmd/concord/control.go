@@ -130,6 +130,13 @@ func printValidationReport(r scaffold.ValidationReport, verbose bool) {
 			}
 		}
 	}
+	for _, sc := range r.SchemaChecks {
+		if sc.OK {
+			fmt.Fprintf(os.Stdout, "    schema        %s [%s] — valid against %s\n", filepath.Base(sc.Fixture), sc.EvidenceID, sc.TypeRef)
+		} else {
+			fmt.Fprintf(os.Stdout, "    schema        %s [%s] — INVALID against %s: %s\n", filepath.Base(sc.Fixture), sc.EvidenceID, sc.TypeRef, sc.Err)
+		}
+	}
 	for _, e := range r.Errors {
 		fmt.Fprintf(os.Stdout, "    error         %s\n", e)
 	}
