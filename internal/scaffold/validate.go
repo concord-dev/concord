@@ -138,6 +138,15 @@ func ValidateControl(ctx context.Context, yamlPath string) (ValidationReport, er
 // schemaChecks validates each evidence payload in a fixture against the
 // EvidenceType schema declared for its (source, type). Evidence refs without
 // a registered type are skipped, so the check is opt-in per pack.
+//
+// Payload attribution is deterministic to avoid false failures: a fixture is
+// "wrapped" only when its top-level keys are exactly the evidence ids, in
+// which case each payload is parsed[id]. A "bare" fixture carries a single
+// payload, so it is validated only when exactly one evidence ref has a
+// registered type (otherwise it cannot be attributed unambiguously and is
+// skipped). This sidesteps the wrapped-vs-bare ambiguity of the Rego-input
+// normaliser, which tolerates shape differences that strict schema
+// validation does not.
 func schemaChecks(reg *evidencetype.Registry, c apiv1.Control, fixturePath string, evidenceIDs []string) []SchemaCheck {
 	raw, err := os.ReadFile(fixturePath)
 	if err != nil {
@@ -147,29 +156,58 @@ func schemaChecks(reg *evidencetype.Registry, c apiv1.Control, fixturePath strin
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return []SchemaCheck{{Fixture: fixturePath, OK: false, Err: "parse: " + err.Error()}}
 	}
-	wrapped := normaliseFixture(parsed, evidenceIDs)
+
+	typed := make([]apiv1.EvidenceRef, 0, len(c.Spec.Evidence))
+	for _, ev := range c.Spec.Evidence {
+		if ev.Type != "" && reg.Has(evidencetype.RefFor(ev.Source, ev.Type)) {
+			typed = append(typed, ev)
+		}
+	}
+	if len(typed) == 0 {
+		return nil
+	}
 
 	var out []SchemaCheck
-	for _, ev := range c.Spec.Evidence {
-		if ev.Type == "" {
-			continue
+	if fixtureIsWrapped(parsed, evidenceIDs) {
+		for _, ev := range typed {
+			payload, ok := parsed[ev.ID]
+			if !ok {
+				continue
+			}
+			out = append(out, checkPayload(reg, ev, fixturePath, payload))
 		}
-		ref := evidencetype.RefFor(ev.Source, ev.Type)
-		if !reg.Has(ref) {
-			continue
-		}
-		payload, ok := wrapped[ev.ID]
-		if !ok {
-			payload = parsed
-		}
-		sc := SchemaCheck{Fixture: fixturePath, EvidenceID: ev.ID, TypeRef: ref, OK: true}
-		if err := reg.ValidatePayload(ref, payload); err != nil {
-			sc.OK = false
-			sc.Err = err.Error()
-		}
-		out = append(out, sc)
+		return out
+	}
+	// Bare fixture: a single payload. Attribute it only when unambiguous.
+	if len(typed) == 1 {
+		out = append(out, checkPayload(reg, typed[0], fixturePath, parsed))
 	}
 	return out
+}
+
+func checkPayload(reg *evidencetype.Registry, ev apiv1.EvidenceRef, fixturePath string, payload any) SchemaCheck {
+	ref := evidencetype.RefFor(ev.Source, ev.Type)
+	sc := SchemaCheck{Fixture: fixturePath, EvidenceID: ev.ID, TypeRef: ref, OK: true}
+	if err := reg.ValidatePayload(ref, payload); err != nil {
+		sc.OK = false
+		sc.Err = err.Error()
+	}
+	return sc
+}
+
+// fixtureIsWrapped reports whether a fixture's top-level keys are exactly the
+// evidence ids — the only unambiguous signal that it carries one payload per
+// evidence rather than a single bare payload.
+func fixtureIsWrapped(parsed map[string]any, evidenceIDs []string) bool {
+	if len(evidenceIDs) == 0 || len(parsed) != len(evidenceIDs) {
+		return false
+	}
+	for _, id := range evidenceIDs {
+		if _, ok := parsed[id]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func evalFixture(ctx context.Context, engine *policy.Engine, mods map[string]string, pkg, fixturePath string, evidenceIDs []string) (*FixtureResult, error) {
