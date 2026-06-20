@@ -1,0 +1,45 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: okta/users_mfa
+  version: v1.0.0
+spec:
+  source: okta
+  description: |
+    Active Okta users with their enrolled MFA factors, as collected by the
+    okta plugin's users_mfa evidence type. Controls SOC2-CC6.1 and
+    NIST-800-53-IA-2 evaluate has_strong_mfa over this payload.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [fetched_at, users]
+    properties:
+      fetched_at:
+        type: string
+        format: date-time
+      org_url:
+        type: string
+      users:
+        type: array
+        items:
+          type: object
+          required: [id, email, status, has_strong_mfa]
+          properties:
+            id: {type: string}
+            email: {type: string}
+            name: {type: string}
+            login: {type: string}
+            status: {type: string}
+            has_strong_mfa: {type: boolean}
+            factors:
+              type: array
+              items:
+                type: object
+                required: [type, status]
+                properties:
+                  type: {type: string}
+                  provider: {type: string}
+                  status: {type: string}
+  examples:
+    - ../frameworks/soc2/tests/fixtures/cc6.1-okta-pass.json
