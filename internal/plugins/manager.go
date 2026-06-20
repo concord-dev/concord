@@ -15,8 +15,8 @@ import (
 	hclog "github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
 
-	sdkplugin "github.com/concord-dev/concord/pkg/plugin"
-	pluginv1 "github.com/concord-dev/concord/proto/concord/plugin/v1"
+	sdkplugin "github.com/concord-dev/concord-plugin-sdk/plugin"
+	pluginv1 "github.com/concord-dev/concord-plugin-sdk/proto/concord/plugin/v1"
 )
 
 // Manager discovers plugin binaries on disk and spawns them on demand.

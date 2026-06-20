@@ -11,8 +11,8 @@ import (
 	goplugin "github.com/hashicorp/go-plugin"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	sdkplugin "github.com/concord-dev/concord/pkg/plugin"
-	pluginv1 "github.com/concord-dev/concord/proto/concord/plugin/v1"
+	sdkplugin "github.com/concord-dev/concord-plugin-sdk/plugin"
+	pluginv1 "github.com/concord-dev/concord-plugin-sdk/proto/concord/plugin/v1"
 )
 
 // RemediatorEntry describes a discovered remediator plugin binary on disk.

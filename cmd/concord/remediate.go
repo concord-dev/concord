@@ -16,7 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/concord-dev/concord/internal/plugins"
-	sdkplugin "github.com/concord-dev/concord/pkg/plugin"
+	sdkplugin "github.com/concord-dev/concord-plugin-sdk/plugin"
 )
 
 type remediationAttemptDTO struct {

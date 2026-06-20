@@ -10,6 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/iam v1.35.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.61.0
 	github.com/aws/smithy-go v1.22.0
+	github.com/concord-dev/concord-plugin-sdk v0.0.0-00010101000000-000000000000
 	github.com/fatih/color v1.18.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-hclog v0.14.1
@@ -21,7 +22,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/mod v0.37.0
 	golang.org/x/term v0.43.0
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260523011958-0a33c5d7ca68
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260618152121-87f3d3e198d3
 	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.11
 	oras.land/oras-go/v2 v2.6.0
@@ -91,3 +92,5 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/concord-dev/concord-plugin-sdk => ../concord-plugin-sdk

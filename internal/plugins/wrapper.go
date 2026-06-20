@@ -16,7 +16,7 @@ import (
 
 	"github.com/concord-dev/concord/internal/evidence"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
-	pluginv1 "github.com/concord-dev/concord/proto/concord/plugin/v1"
+	pluginv1 "github.com/concord-dev/concord-plugin-sdk/proto/concord/plugin/v1"
 )
 
 // PluginCollector implements evidence.Collector by forwarding Collect calls to a running plugin process.
