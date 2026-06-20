@@ -41,7 +41,16 @@ func LoadFrom(roots []string) ([]Loaded, error) {
 			if !isControlFile(p) {
 				return nil
 			}
-			c, err := LoadFile(p)
+			raw, err := os.ReadFile(p)
+			if err != nil {
+				return fmt.Errorf("%s: %w", p, err)
+			}
+			if !isControlDoc(raw) {
+				// Sibling concord artifacts (EvidenceType, etc.) share the
+				// tree; skip them rather than fail control loading.
+				return nil
+			}
+			c, err := loadControl(raw)
 			if err != nil {
 				return fmt.Errorf("%s: %w", p, err)
 			}
@@ -61,11 +70,15 @@ func LoadFrom(roots []string) ([]Loaded, error) {
 }
 
 func LoadFile(path string) (apiv1.Control, error) {
-	var c apiv1.Control
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return c, err
+		return apiv1.Control{}, err
 	}
+	return loadControl(raw)
+}
+
+func loadControl(raw []byte) (apiv1.Control, error) {
+	var c apiv1.Control
 	if err := yaml.Unmarshal(raw, &c); err != nil {
 		return c, fmt.Errorf("yaml: %w", err)
 	}
@@ -73,6 +86,20 @@ func LoadFile(path string) (apiv1.Control, error) {
 		return c, err
 	}
 	return c, nil
+}
+
+// isControlDoc reports whether a YAML document's kind is Control (or absent,
+// for backward compatibility with kind-less files). A recognized sibling
+// kind such as EvidenceType returns false so the walker skips it.
+func isControlDoc(raw []byte) bool {
+	var head struct {
+		Kind string `json:"kind"`
+	}
+	if err := yaml.Unmarshal(raw, &head); err != nil {
+		// Let the strict control parse surface the real error.
+		return true
+	}
+	return head.Kind == "" || head.Kind == "Control"
 }
 
 // NeededSources returns the unique, sorted, non-file evidence sources referenced by loaded.
@@ -103,7 +130,7 @@ func isControlFile(p string) bool {
 
 func shouldSkipDir(name string) bool {
 	switch name {
-	case "policies", "tests", "fixtures", "_schema", ".git", "node_modules", "vendor":
+	case "policies", "tests", "fixtures", "_schema", "evidence-types", ".git", "node_modules", "vendor":
 		return true
 	}
 	return false
