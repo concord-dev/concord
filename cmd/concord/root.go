@@ -50,5 +50,6 @@ Audits become continuous instead of episodic.`,
 	cmd.AddCommand(newProvenanceCmd())
 	cmd.AddCommand(newControlCmd())
 	cmd.AddCommand(newEvidenceTypeCmd())
+	cmd.AddCommand(newOSCALCmd())
 	return cmd
 }
