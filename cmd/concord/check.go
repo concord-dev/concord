@@ -10,14 +10,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/concord-dev/concord/pkg/config"
 	"github.com/concord-dev/concord/internal/controlpacks"
-	"github.com/concord-dev/concord/pkg/controls"
 	"github.com/concord-dev/concord/internal/evidence"
 	"github.com/concord-dev/concord/internal/evidence/wiring"
 	"github.com/concord-dev/concord/internal/policy"
-	"github.com/concord-dev/concord/pkg/report"
 	"github.com/concord-dev/concord/internal/runner"
+	"github.com/concord-dev/concord/pkg/config"
+	"github.com/concord-dev/concord/pkg/controls"
+	"github.com/concord-dev/concord/pkg/report"
 )
 
 func newCheckCmd() *cobra.Command {
@@ -107,6 +107,15 @@ func newCheckCmd() *cobra.Command {
 				if err := pushFindings(cmd.Context(), push, findings, started, completed); err != nil {
 					fmt.Fprintln(os.Stderr, "push failed:", err)
 					os.Exit(1)
+				}
+				// Assets are secondary to findings: a push failure here warns
+				// but doesn't fail the run.
+				if built.Manager != nil {
+					if assets := built.Manager.DrainAssets(); len(assets) > 0 {
+						if err := pushAssets(cmd.Context(), push, assets); err != nil {
+							fmt.Fprintln(os.Stderr, "asset push failed:", err)
+						}
+					}
 				}
 			}
 

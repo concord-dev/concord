@@ -15,8 +15,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/concord-dev/concord/internal/cli/credentials"
-	"github.com/concord-dev/concord/pkg/report"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
+	"github.com/concord-dev/concord/pkg/report"
 )
 
 type pushOpts struct {
@@ -124,6 +124,74 @@ func pushFindings(ctx context.Context, opts pushOpts, findings []apiv1.Finding, 
 			ack.RunID, ack.Source, strings.TrimRight(opts.serverURL, "/"), ack.URL)
 	}
 	return nil
+}
+
+// assetPushClient carries an explicit timeout — unlike findings, an asset
+// batch can be large, and we never want a hung server to wedge the agent.
+var assetPushClient = &http.Client{Timeout: 60 * time.Second}
+
+// maxAssetsPerRequest matches the ingest endpoint's per-request cap; larger
+// batches are chunked so a big fleet doesn't get rejected wholesale.
+const maxAssetsPerRequest = 500
+
+// pushAssets submits observed assets to the org's asset-ingest endpoint,
+// chunked to the endpoint's cap. The endpoint is idempotent (keyed on
+// source + external_id), so a re-run safely re-pushes.
+func pushAssets(ctx context.Context, opts pushOpts, assets []apiv1.ObservedAsset) error {
+	opts.resolveFromCredentials()
+	if err := opts.validate(); err != nil {
+		return err
+	}
+	if len(assets) == 0 {
+		return nil
+	}
+	var created, updated, unchanged int
+	for start := 0; start < len(assets); start += maxAssetsPerRequest {
+		end := start + maxAssetsPerRequest
+		if end > len(assets) {
+			end = len(assets)
+		}
+		c, u, n, err := postAssetBatch(ctx, opts, assets[start:end])
+		if err != nil {
+			return err
+		}
+		created, updated, unchanged = created+c, updated+u, unchanged+n
+	}
+	fmt.Fprintf(os.Stderr, "✓ %d asset(s) ingested (created=%d updated=%d unchanged=%d)\n",
+		len(assets), created, updated, unchanged)
+	return nil
+}
+
+func postAssetBatch(ctx context.Context, opts pushOpts, batch []apiv1.ObservedAsset) (created, updated, unchanged int, err error) {
+	body, err := json.Marshal(map[string]any{"assets": batch})
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("encoding assets: %w", err)
+	}
+	url := strings.TrimRight(opts.serverURL, "/") + "/v1/orgs/" + opts.orgSlug + "/assets/ingest"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+opts.token)
+	req.Header.Set("User-Agent", "concord-agent/"+versionString())
+
+	resp, err := assetPushClient.Do(req)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("POST %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return 0, 0, 0, fmt.Errorf("server returned %d: %s", resp.StatusCode, string(respBody))
+	}
+	var ack struct {
+		Created   int `json:"created"`
+		Updated   int `json:"updated"`
+		Unchanged int `json:"unchanged"`
+	}
+	_ = json.Unmarshal(respBody, &ack)
+	return ack.Created, ack.Updated, ack.Unchanged, nil
 }
 
 func (o *pushOpts) resolveFromCredentials() {
