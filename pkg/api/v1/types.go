@@ -75,3 +75,19 @@ type Finding struct {
 	EvaluatedAt time.Time           `json:"evaluated_at"`
 	DurationMs  int64               `json:"duration_ms"`
 }
+
+// ObservedAsset is an asset a collector reported during a run. Its JSON shape
+// matches the platform's asset-ingest item; the agent posts a batch of these
+// to /v1/orgs/{slug}/assets/ingest. Criticality 0 is omitted (unset).
+type ObservedAsset struct {
+	Source             string            `json:"source"`
+	ExternalID         string            `json:"external_id"`
+	Type               string            `json:"type"`
+	Name               string            `json:"name"`
+	ExternalIDs        map[string]string `json:"external_ids,omitempty"`
+	Criticality        int               `json:"criticality,omitempty"`
+	DataClassification string            `json:"data_classification,omitempty"`
+	Environment        string            `json:"environment,omitempty"`
+	Tags               []string          `json:"tags,omitempty"`
+	Metadata           map[string]any    `json:"metadata,omitempty"`
+}

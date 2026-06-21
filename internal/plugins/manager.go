@@ -17,6 +17,8 @@ import (
 
 	sdkplugin "github.com/concord-dev/concord-plugin-sdk/plugin"
 	pluginv1 "github.com/concord-dev/concord-plugin-sdk/proto/concord/plugin/v1"
+
+	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
 // Manager discovers plugin binaries on disk and spawns them on demand.
@@ -26,12 +28,13 @@ type Manager struct {
 	mu         sync.Mutex
 	discovered map[string]*entry
 	running    map[string]*client
+	assets     *assetSink
 }
 
 type entry struct {
-	source  string
-	version string
-	path    string
+	source     string
+	version    string
+	path       string
 	allowedEnv []string
 }
 
@@ -60,7 +63,14 @@ func New(opts Options) *Manager {
 		dirs:       opts.Dirs,
 		discovered: make(map[string]*entry),
 		running:    make(map[string]*client),
+		assets:     newAssetSink(),
 	}
+}
+
+// DrainAssets returns the assets plugins emitted since the last drain, deduped
+// by source + external_id, and resets the accumulator.
+func (m *Manager) DrainAssets() []apiv1.ObservedAsset {
+	return m.assets.drain()
 }
 
 func defaultDirs() []string {
@@ -232,7 +242,7 @@ func (m *Manager) spawn(e *entry) (*client, error) {
 	return &client{
 		gpc:       gpc,
 		collector: stub,
-		wrapper:   NewPluginCollector(e.source, stub, 120*time.Second),
+		wrapper:   NewPluginCollector(e.source, stub, 120*time.Second, m.assets),
 	}, nil
 }
 

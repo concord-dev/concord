@@ -14,9 +14,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	pluginv1 "github.com/concord-dev/concord-plugin-sdk/proto/concord/plugin/v1"
 	"github.com/concord-dev/concord/internal/evidence"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
-	pluginv1 "github.com/concord-dev/concord-plugin-sdk/proto/concord/plugin/v1"
 )
 
 // PluginCollector implements evidence.Collector by forwarding Collect calls to a running plugin process.
@@ -24,6 +24,7 @@ type PluginCollector struct {
 	source  string
 	client  pluginv1.CollectorClient
 	timeout time.Duration
+	sink    *assetSink
 }
 
 // Capabilities is the host-side projection of a plugin's CapabilitiesResponse.
@@ -47,12 +48,13 @@ type Permissions struct {
 	Subprocess bool
 }
 
-// NewPluginCollector wraps a connected gRPC client.
-func NewPluginCollector(source string, client pluginv1.CollectorClient, timeout time.Duration) *PluginCollector {
+// NewPluginCollector wraps a connected gRPC client. sink may be nil, in which
+// case observed assets are discarded.
+func NewPluginCollector(source string, client pluginv1.CollectorClient, timeout time.Duration, sink *assetSink) *PluginCollector {
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
-	return &PluginCollector{source: source, client: client, timeout: timeout}
+	return &PluginCollector{source: source, client: client, timeout: timeout, sink: sink}
 }
 
 // Source returns the source name this collector handles.
@@ -121,7 +123,42 @@ func (p *PluginCollector) Collect(cctx evidence.Context, ref apiv1.EvidenceRef) 
 	if err != nil {
 		return nil, mapGRPCError(err)
 	}
+	if p.sink != nil {
+		p.sink.add(observedAssetsFromProto(p.source, resp.GetObservedAssets()))
+	}
 	return decodeEvidence(resp)
+}
+
+// observedAssetsFromProto stamps every asset with the trusted, host-assigned
+// source (the registered plugin name), ignoring any source the plugin put in
+// the payload — source is half the natural key, so a plugin must not be able
+// to write into another source's namespace.
+func observedAssetsFromProto(source string, in []*pluginv1.ObservedAsset) []apiv1.ObservedAsset {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]apiv1.ObservedAsset, 0, len(in))
+	for _, p := range in {
+		if p == nil {
+			continue
+		}
+		a := apiv1.ObservedAsset{
+			Source:             source,
+			ExternalID:         p.ExternalId,
+			Type:               p.Type,
+			Name:               p.Name,
+			ExternalIDs:        p.ExternalIds,
+			Criticality:        int(p.Criticality),
+			DataClassification: p.DataClassification,
+			Environment:        p.Environment,
+			Tags:               p.Tags,
+		}
+		if p.Metadata != nil {
+			a.Metadata = p.Metadata.AsMap()
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 func paramsToStruct(params map[string]any) (*structpb.Struct, error) {
