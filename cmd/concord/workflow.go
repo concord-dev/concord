@@ -65,6 +65,30 @@ func newWorkflowCmd() *cobra.Command {
 	cmd.AddCommand(newWorkflowListCmd())
 	cmd.AddCommand(newWorkflowShowCmd())
 	cmd.AddCommand(newWorkflowCancelCmd())
+	cmd.AddCommand(newWorkflowGraphCmd())
+	return cmd
+}
+
+func newWorkflowGraphCmd() *cobra.Command {
+	var serverURL, orgSlug, token string
+	cmd := &cobra.Command{
+		Use:   "graph <kind>",
+		Short: "Print a workflow definition's state machine as Graphviz DOT (pipe to `dot -Tpng`)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fs, err := resolveFindingsServer(serverURL, orgSlug, token)
+			if err != nil {
+				return err
+			}
+			dot, err := getWorkflowGraph(cmd.Context(), fs, args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(os.Stdout, dot)
+			return nil
+		},
+	}
+	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
 	return cmd
 }
 
@@ -174,6 +198,17 @@ func getWorkflowDetail(ctx context.Context, fs findingsServer, id string) (workf
 	var detail workflowDetailDTO
 	err := apiGet(ctx, fs, "/v1/orgs/"+fs.orgSlug+"/workflows/"+id, &detail)
 	return detail, err
+}
+
+func getWorkflowGraph(ctx context.Context, fs findingsServer, kind string) (string, error) {
+	var resp struct {
+		Kind string `json:"kind"`
+		DOT  string `json:"dot"`
+	}
+	if err := apiGet(ctx, fs, "/v1/orgs/"+fs.orgSlug+"/workflow-definitions/"+kind+"/graph", &resp); err != nil {
+		return "", err
+	}
+	return resp.DOT, nil
 }
 
 func cancelWorkflow(ctx context.Context, fs findingsServer, id, reason string) (workflowInstanceDTO, error) {

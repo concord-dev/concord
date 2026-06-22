@@ -190,6 +190,27 @@ func TestFindingsCampaign_PostsToProjectScopedRoute(t *testing.T) {
 	}
 }
 
+func TestGetWorkflowGraph_ReturnsDOT(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"kind":"access_review_campaign","dot":"digraph {\n  monitoring;\n}"}`))
+	}))
+	defer srv.Close()
+
+	fs := findingsServer{url: srv.URL, orgSlug: "acme", token: "concord_x"}
+	dot, err := getWorkflowGraph(context.Background(), fs, "access_review_campaign")
+	if err != nil {
+		t.Fatalf("getWorkflowGraph: %v", err)
+	}
+	if gotPath != "/v1/orgs/acme/workflow-definitions/access_review_campaign/graph" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if !strings.Contains(dot, "digraph") || !strings.Contains(dot, "monitoring") {
+		t.Fatalf("dot = %q", dot)
+	}
+}
+
 func TestTruncate_RuneSafe(t *testing.T) {
 	for _, c := range []struct {
 		name string
