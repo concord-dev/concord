@@ -16,10 +16,17 @@ type riskDTO struct {
 	ID                 string    `json:"id"`
 	Title              string    `json:"title"`
 	Description        string    `json:"description,omitempty"`
+	Category           string    `json:"category,omitempty"`
 	InherentLikelihood int       `json:"inherent_likelihood"`
 	InherentImpact     int       `json:"inherent_impact"`
+	InherentScore      int       `json:"inherent_score"`
+	InherentSeverity   string    `json:"inherent_severity"`
 	ResidualLikelihood *int      `json:"residual_likelihood,omitempty"`
 	ResidualImpact     *int      `json:"residual_impact,omitempty"`
+	ResidualScore      *int      `json:"residual_score,omitempty"`
+	ResidualSeverity   string    `json:"residual_severity,omitempty"`
+	AppetiteThreshold  *int      `json:"appetite_threshold,omitempty"`
+	AppetiteBreached   bool      `json:"appetite_breached"`
 	Treatment          string    `json:"treatment"`
 	Status             string    `json:"status"`
 	LinkedFindingIDs   []string  `json:"linked_finding_ids,omitempty"`
@@ -38,6 +45,11 @@ func newRiskCmd() *cobra.Command {
 	cmd.AddCommand(newRiskUpdateCmd())
 	cmd.AddCommand(newRiskLinkCmd())
 	cmd.AddCommand(newRiskUnlinkCmd())
+	cmd.AddCommand(newRiskEventsCmd())
+	cmd.AddCommand(newRiskTreatmentCmd())
+	cmd.AddCommand(newRiskKRICmd())
+	cmd.AddCommand(newRiskAppetiteCmd())
+	cmd.AddCommand(newRiskRollupCmd())
 	return cmd
 }
 
@@ -45,6 +57,7 @@ func newRiskAddCmd() *cobra.Command {
 	var (
 		serverURL, orgSlug, token string
 		title, description        string
+		category                  string
 		likelihood, impact        int
 		treatment                 string
 		linkFindings              []string
@@ -66,6 +79,9 @@ func newRiskAddCmd() *cobra.Command {
 			if description != "" {
 				body["description"] = description
 			}
+			if category != "" {
+				body["category"] = category
+			}
 			if treatment != "" {
 				body["treatment"] = treatment
 			}
@@ -83,6 +99,7 @@ func newRiskAddCmd() *cobra.Command {
 	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
 	cmd.Flags().StringVar(&title, "title", "", "Short risk name (required)")
 	cmd.Flags().StringVar(&description, "description", "", "Long-form narrative")
+	cmd.Flags().StringVar(&category, "category", "", "Risk category/taxonomy (e.g. operational, security)")
 	cmd.Flags().IntVar(&likelihood, "likelihood", 0, "Inherent likelihood, 1-5 (required)")
 	cmd.Flags().IntVar(&impact, "impact", 0, "Inherent impact, 1-5 (required)")
 	cmd.Flags().StringVar(&treatment, "treatment", "", "Treatment strategy: accept|mitigate|transfer|avoid (default mitigate)")
@@ -112,7 +129,7 @@ func newRiskListCmd() *cobra.Command {
 			for _, s := range statusFilter {
 				q.Add("status", s)
 			}
-			path :=  fs.projectBase() + "/risks"
+			path := fs.projectBase() + "/risks"
 			if len(q) > 0 {
 				path += "?" + q.Encode()
 			}
@@ -158,11 +175,12 @@ func newRiskShowCmd() *cobra.Command {
 
 func newRiskUpdateCmd() *cobra.Command {
 	var (
-		serverURL, orgSlug, token   string
-		title, description          string
-		treatment, status           string
-		likelihood, impact          int
-		residualL, residualI        int
+		serverURL, orgSlug, token      string
+		title, description             string
+		category                       string
+		treatment, status              string
+		likelihood, impact             int
+		residualL, residualI           int
 		clearResidualL, clearResidualI bool
 	)
 	cmd := &cobra.Command{
@@ -180,6 +198,9 @@ func newRiskUpdateCmd() *cobra.Command {
 			}
 			if cmd.Flags().Changed("description") {
 				body["description"] = description
+			}
+			if cmd.Flags().Changed("category") {
+				body["category"] = category
 			}
 			if cmd.Flags().Changed("treatment") {
 				body["treatment"] = treatment
@@ -219,6 +240,7 @@ func newRiskUpdateCmd() *cobra.Command {
 	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
 	cmd.Flags().StringVar(&title, "title", "", "New title")
 	cmd.Flags().StringVar(&description, "description", "", "New description")
+	cmd.Flags().StringVar(&category, "category", "", "Risk category/taxonomy")
 	cmd.Flags().StringVar(&treatment, "treatment", "", "Treatment: accept|mitigate|transfer|avoid")
 	cmd.Flags().StringVar(&status, "status", "", "Status: open|monitoring|closed")
 	cmd.Flags().IntVar(&likelihood, "likelihood", 0, "Inherent likelihood, 1-5")
@@ -286,17 +308,35 @@ func printRisks(w io.Writer, rows []riskDTO, format string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tTITLE\tINHERENT\tRESIDUAL\tTREATMENT\tSTATUS\tLINKS")
+	fmt.Fprintln(tw, "ID\tTITLE\tCATEGORY\tSCORE\tSEVERITY\tTREATMENT\tSTATUS\tAPPETITE")
 	for _, r := range rows {
-		inh := fmt.Sprintf("L%d×I%d=%d", r.InherentLikelihood, r.InherentImpact, r.InherentLikelihood*r.InherentImpact)
-		res := "—"
-		if r.ResidualLikelihood != nil && r.ResidualImpact != nil {
-			res = fmt.Sprintf("L%d×I%d=%d", *r.ResidualLikelihood, *r.ResidualImpact, (*r.ResidualLikelihood)*(*r.ResidualImpact))
+		score, severity := currentRiskScore(r)
+		appetite := "—"
+		if r.AppetiteThreshold != nil {
+			appetite = fmt.Sprintf("≤%d", *r.AppetiteThreshold)
+			if r.AppetiteBreached {
+				appetite = "BREACH(" + appetite + ")"
+			}
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
-			r.ID, r.Title, inh, res, r.Treatment, r.Status, len(r.LinkedFindingIDs))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
+			r.ID, r.Title, dashIfBlank(r.Category), score, severity, r.Treatment, r.Status, appetite)
 	}
 	return tw.Flush()
+}
+
+// currentRiskScore mirrors the server: residual when assessed, else inherent.
+func currentRiskScore(r riskDTO) (int, string) {
+	if r.ResidualScore != nil {
+		return *r.ResidualScore, r.ResidualSeverity
+	}
+	return r.InherentScore, r.InherentSeverity
+}
+
+func dashIfBlank(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
 }
 
 func printOneRisk(w io.Writer, r riskDTO, format string) error {
@@ -308,11 +348,21 @@ func printOneRisk(w io.Writer, r riskDTO, format string) error {
 	if r.Description != "" {
 		fmt.Fprintf(w, "Detail    : %s\n", r.Description)
 	}
-	fmt.Fprintf(w, "Inherent  : likelihood %d × impact %d = %d\n",
-		r.InherentLikelihood, r.InherentImpact, r.InherentLikelihood*r.InherentImpact)
-	if r.ResidualLikelihood != nil && r.ResidualImpact != nil {
-		fmt.Fprintf(w, "Residual  : likelihood %d × impact %d = %d\n",
-			*r.ResidualLikelihood, *r.ResidualImpact, (*r.ResidualLikelihood)*(*r.ResidualImpact))
+	if r.Category != "" {
+		fmt.Fprintf(w, "Category  : %s\n", r.Category)
+	}
+	fmt.Fprintf(w, "Inherent  : likelihood %d × impact %d = %d (%s)\n",
+		r.InherentLikelihood, r.InherentImpact, r.InherentScore, r.InherentSeverity)
+	if r.ResidualScore != nil {
+		fmt.Fprintf(w, "Residual  : likelihood %d × impact %d = %d (%s)\n",
+			*r.ResidualLikelihood, *r.ResidualImpact, *r.ResidualScore, r.ResidualSeverity)
+	}
+	if r.AppetiteThreshold != nil {
+		status := "within appetite"
+		if r.AppetiteBreached {
+			status = "OVER APPETITE"
+		}
+		fmt.Fprintf(w, "Appetite  : ≤%d — %s\n", *r.AppetiteThreshold, status)
 	}
 	fmt.Fprintf(w, "Treatment : %s\n", r.Treatment)
 	fmt.Fprintf(w, "Status    : %s\n", r.Status)
