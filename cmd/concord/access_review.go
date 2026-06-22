@@ -60,6 +60,32 @@ func newAccessReviewCmd() *cobra.Command {
 	cmd.AddCommand(newAccessReviewDecideCmd())
 	cmd.AddCommand(newAccessReviewCompleteCmd())
 	cmd.AddCommand(newAccessReviewCancelCmd())
+	cmd.AddCommand(newAccessReviewCampaignCmd())
+	return cmd
+}
+
+func newAccessReviewCampaignCmd() *cobra.Command {
+	var serverURL, orgSlug, token string
+	cmd := &cobra.Command{
+		Use:   "campaign <cycle-id>",
+		Short: "Launch a workflow that drives this cycle's SLA reminders and escalations",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fs, err := resolveFindingsServer(serverURL, orgSlug, token)
+			if err != nil {
+				return err
+			}
+			var inst workflowInstanceDTO
+			if err := apiSend(cmd.Context(), fs, "POST",
+				"/v1/orgs/"+fs.orgSlug+"/access-reviews/"+args[0]+"/campaign", nil, &inst); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stdout, "campaign %s started for cycle %s (status=%s)\n",
+				inst.ID, args[0], inst.Status)
+			return nil
+		},
+	}
+	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
 	return cmd
 }
 

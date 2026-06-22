@@ -114,6 +114,33 @@ func newFindingsCmd() *cobra.Command {
 	cmd.AddCommand(newFindingsFalsePositiveCmd())
 	cmd.AddCommand(newFindingsAssignCmd())
 	cmd.AddCommand(newFindingsUnassignCmd())
+	cmd.AddCommand(newFindingsCampaignCmd())
+	return cmd
+}
+
+func newFindingsCampaignCmd() *cobra.Command {
+	var serverURL, orgSlug, token, project string
+	cmd := &cobra.Command{
+		Use:   "campaign <finding-id>",
+		Short: "Launch a workflow that drives this finding's remediation SLA and manager escalation",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fs, err := resolveServer(serverURL, orgSlug, project, token)
+			if err != nil {
+				return err
+			}
+			var inst workflowInstanceDTO
+			if err := apiSend(cmd.Context(), fs, "POST",
+				fs.projectBase()+"/findings/"+args[0]+"/remediation/campaign", nil, &inst); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stdout, "campaign %s started for finding %s (status=%s)\n",
+				inst.ID, args[0], inst.Status)
+			return nil
+		},
+	}
+	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
+	addProjectFlag(cmd, &project)
 	return cmd
 }
 
