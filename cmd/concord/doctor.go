@@ -11,8 +11,6 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/concord-dev/concord/pkg/config"
-	"github.com/concord-dev/concord/pkg/controls"
 	awsev "github.com/concord-dev/concord/internal/evidence/aws"
 	ghev "github.com/concord-dev/concord/internal/evidence/github"
 	hfev "github.com/concord-dev/concord/internal/evidence/huggingface"
@@ -22,6 +20,8 @@ import (
 	wandbev "github.com/concord-dev/concord/internal/evidence/wandb"
 	"github.com/concord-dev/concord/internal/evidence/wiring"
 	"github.com/concord-dev/concord/internal/plugins"
+	"github.com/concord-dev/concord/pkg/config"
+	"github.com/concord-dev/concord/pkg/controls"
 )
 
 type prober interface {

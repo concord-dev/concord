@@ -208,7 +208,6 @@ func (c *Collector) get(ctx context.Context, path string) ([]byte, error) {
 	return body, nil
 }
 
-
 type hfModelListEntry struct {
 	ID           string         `json:"id"`
 	Author       string         `json:"author"`

@@ -9,10 +9,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/concord-dev/concord/pkg/controls"
 	"github.com/concord-dev/concord/internal/evidence"
 	"github.com/concord-dev/concord/internal/policy"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
+	"github.com/concord-dev/concord/pkg/controls"
 )
 
 const cc81Path = "controls/frameworks/soc2/cc8.1-change-management.yaml"
@@ -77,7 +77,6 @@ func TestRunCC8_1ParamOverride_DefaultStillWorks(t *testing.T) {
 	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v", f.Messages)
 }
 
-
 const cc61Path = "controls/frameworks/soc2/cc6.1-mfa-enforcement.yaml"
 
 func TestRunCC6_1_Pass(t *testing.T) {
@@ -111,7 +110,6 @@ func runCC61(t *testing.T, fixture string) apiv1.Finding {
 	r := New(policy.New(), evidence.NewFileCollector())
 	return r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
 }
-
 
 const cc71Path = "controls/frameworks/soc2/cc7.1-vulnerability-management.yaml"
 
@@ -153,7 +151,6 @@ func runCC71(t *testing.T, fixture string, params map[string]map[string]any) api
 	return r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
 }
 
-
 const cc63Path = "controls/frameworks/soc2/cc6.3-offboarding.yaml"
 
 func TestRunCC6_3_Pass(t *testing.T) {
@@ -167,7 +164,6 @@ func TestRunCC6_3_ResidualFactorFails(t *testing.T) {
 	assert.Contains(t, f.Messages, `DEPROVISIONED user "former-engineer@example.com" still has an ACTIVE token:software:totp factor — remove enrollment`)
 	assert.Contains(t, f.Messages, `SUSPENDED user "on-leave@example.com" still has an ACTIVE push factor — remove enrollment`)
 }
-
 
 const cc92Path = "controls/frameworks/soc2/cc9.2-risk-register.yaml"
 
@@ -191,7 +187,6 @@ func TestRunCC9_2_StaleAndMalformedFails(t *testing.T) {
 	assert.Contains(t, f.Warnings, `risk register entry "docs/risk-register/old-risk.md" is high severity and still open — schedule treatment`)
 }
 
-
 const cc14Path = "controls/frameworks/soc2/cc1.4-github-org-security-baseline.yaml"
 
 func TestRunCC1_4_Pass(t *testing.T) {
@@ -207,7 +202,6 @@ func TestRunCC1_4_No2FAFails(t *testing.T) {
 	assert.Contains(t, f.Messages, "GitHub org default repository permission is 'write' (members can push to every repo by default — consider 'read' with explicit grants)")
 	assert.Contains(t, f.Warnings, "secret scanning is NOT enabled by default on new repositories")
 }
-
 
 const cc62Path = "controls/frameworks/soc2/cc6.2-access-reviews.yaml"
 
@@ -229,7 +223,6 @@ func TestRunCC6_2_StaleFails(t *testing.T) {
 	assert.True(t, found, "expected freshness deny; got %v", f.Messages)
 }
 
-
 const cc72Path = "controls/frameworks/soc2/cc7.2-incident-response.yaml"
 
 func TestRunCC7_2_Pass(t *testing.T) {
@@ -249,7 +242,6 @@ func TestRunCC7_2_MissingOwnerFails(t *testing.T) {
 	assert.Contains(t, f.Messages, `IR runbook "docs/incident-response/main.md" is missing required field "on_call_owner"`)
 }
 
-
 const cc21Path = "controls/frameworks/soc2/cc2.1-policy-communication.yaml"
 
 func TestRunCC2_1_Pass(t *testing.T) {
@@ -265,7 +257,6 @@ func TestRunCC2_1_MissingPoliciesFails(t *testing.T) {
 	assert.Contains(t, f.Messages, `policy "docs/policies/data-protection.md" is missing required field "approved_by"`)
 }
 
-
 const cc31Path = "controls/frameworks/soc2/cc3.1-risk-assessment-process.yaml"
 
 func TestRunCC3_1_Pass(t *testing.T) {
@@ -278,7 +269,6 @@ func TestRunCC3_1_MissingProcessFails(t *testing.T) {
 	assert.Equal(t, apiv1.StatusFail, f.Status)
 	assert.Contains(t, f.Messages, "no risk-assessment process documented at docs/policies/risk-assessment-process.md")
 }
-
 
 const cc41Path = "controls/frameworks/soc2/cc4.1-monitoring-strategy.yaml"
 
@@ -293,7 +283,6 @@ func TestRunCC4_1_EmptyFails(t *testing.T) {
 	assert.Contains(t, f.Messages, "no monitoring strategy doc found under docs/monitoring/")
 }
 
-
 const cc51Path = "controls/frameworks/soc2/cc5.1-control-activities-register.yaml"
 
 func TestRunCC5_1_Pass(t *testing.T) {
@@ -307,7 +296,6 @@ func TestRunCC5_1_TooFewEntriesFails(t *testing.T) {
 	assert.Contains(t, f.Messages, "control-activities register has 2 entries; minimum is 5")
 	assert.Contains(t, f.Warnings, `control register entry "docs/control-activities/branch-protection.md" is ad_hoc — consider formalizing for audit`)
 }
-
 
 const cc71ContainersPath = "controls/frameworks/soc2/cc7.1-container-vulnerabilities.yaml"
 
@@ -330,7 +318,6 @@ func TestRunCC7_1Containers_CriticalAndHighFail(t *testing.T) {
 	assert.True(t, found, "expected a CRITICAL warning naming concord-api:prod; got %v", f.Warnings)
 }
 
-
 const cisAws110Path = "controls/frameworks/cis-aws/1.10-console-mfa.yaml"
 
 func TestRunCISAWS1_10_Pass(t *testing.T) {
@@ -346,7 +333,6 @@ func TestRunCISAWS1_10_ConsoleUserWithoutMFAFails(t *testing.T) {
 		assert.NotContains(t, m, "<root_account>", "root MFA is handled by CIS-AWS-1.5, not 1.10")
 	}
 }
-
 
 const cc71SnykPath = "controls/frameworks/soc2/cc7.1-vulnerability-management-snyk.yaml"
 
@@ -376,7 +362,6 @@ func TestRunCC7_1Snyk_RelaxedThresholdPasses(t *testing.T) {
 	f := r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
 	assert.Equal(t, apiv1.StatusPass, f.Status, "relaxed thresholds should accept the fixture")
 }
-
 
 const cisAws116Path = "controls/frameworks/cis-aws/1.16-iam-password-policy.yaml"
 
@@ -413,7 +398,6 @@ func TestRunCISAWS1_16_TightenedMinLength(t *testing.T) {
 	assert.Equal(t, apiv1.StatusFail, f.Status, "fixture has length 14, tightened param requires 16")
 	assert.Contains(t, f.Messages, "minimum_password_length is 14, must be >= 16")
 }
-
 
 const cisAws41Path = "controls/frameworks/cis-aws/4.1-unused-credentials.yaml"
 

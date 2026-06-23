@@ -15,7 +15,7 @@ import (
 
 func newDiffCmd() *cobra.Command {
 	var (
-		format     string
+		format      string
 		exitOnDrift bool
 	)
 	cmd := &cobra.Command{

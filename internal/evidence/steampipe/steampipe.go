@@ -29,8 +29,8 @@ type Config struct {
 
 // Collector adapts the Steampipe CLI (single binary, 140+ plugins) to evidence.Collector.
 type Collector struct {
-	cfg     Config
-	runner  runner
+	cfg    Config
+	runner runner
 }
 
 // runner is the seam tests inject to bypass exec.Command.

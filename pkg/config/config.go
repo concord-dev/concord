@@ -8,9 +8,9 @@ import (
 )
 
 type Config struct {
-	APIVersion string                  `json:"apiVersion,omitempty"`
-	Kind       string                  `json:"kind,omitempty"`
-	Metadata   Metadata                `json:"metadata,omitempty"`
+	APIVersion string   `json:"apiVersion,omitempty"`
+	Kind       string   `json:"kind,omitempty"`
+	Metadata   Metadata `json:"metadata,omitempty"`
 	// Project is the slug `concord push` targets when --project / env / profile
 	// are all unset. Defaults to "default".
 	Project    string                  `json:"project,omitempty"      yaml:"project,omitempty"`
@@ -38,8 +38,8 @@ type Metadata struct {
 }
 
 type ControlsCfg struct {
-	Path   string                       `json:"path,omitempty"`
-	Params map[string]map[string]any    `json:"params,omitempty"`
+	Path   string                    `json:"path,omitempty"`
+	Params map[string]map[string]any `json:"params,omitempty"`
 }
 
 func Load(path string) (*Config, error) {

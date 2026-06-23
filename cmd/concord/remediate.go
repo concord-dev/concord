@@ -15,38 +15,38 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/concord-dev/concord/internal/plugins"
 	sdkplugin "github.com/concord-dev/concord-plugin-sdk/plugin"
+	"github.com/concord-dev/concord/internal/plugins"
 )
 
 type remediationAttemptDTO struct {
-	ID            string `json:"id"`
-	OrgID         string `json:"org_id"`
-	ProjectID     string `json:"project_id"`
-	FindingID     string `json:"finding_id"`
-	PluginSource  string `json:"plugin_source"`
-	PluginVersion string `json:"plugin_version"`
-	Action        string `json:"action"`
-	Mode          string `json:"mode"`
-	Status        string `json:"status"`
-	Reason        string `json:"reason"`
-	ReceiptID     string `json:"receipt_id,omitempty"`
-	StartedAt     time.Time `json:"started_at"`
+	ID            string     `json:"id"`
+	OrgID         string     `json:"org_id"`
+	ProjectID     string     `json:"project_id"`
+	FindingID     string     `json:"finding_id"`
+	PluginSource  string     `json:"plugin_source"`
+	PluginVersion string     `json:"plugin_version"`
+	Action        string     `json:"action"`
+	Mode          string     `json:"mode"`
+	Status        string     `json:"status"`
+	Reason        string     `json:"reason"`
+	ReceiptID     string     `json:"receipt_id,omitempty"`
+	StartedAt     time.Time  `json:"started_at"`
 	CompletedAt   *time.Time `json:"completed_at,omitempty"`
 }
 
 func newRemediateCmd() *cobra.Command {
 	var (
-		flagServer        string
-		flagOrgSlug       string
-		flagProject       string
-		flagToken         string
-		flagPluginSource  string
-		flagAction        string
-		flagReason        string
-		flagDryRun        bool
-		flagExecute       bool
-		flagParamsJSON    string
+		flagServer       string
+		flagOrgSlug      string
+		flagProject      string
+		flagToken        string
+		flagPluginSource string
+		flagAction       string
+		flagReason       string
+		flagDryRun       bool
+		flagExecute      bool
+		flagParamsJSON   string
 	)
 	cmd := &cobra.Command{
 		Use:   "remediate <finding-id>",
@@ -198,9 +198,9 @@ type openBody struct {
 }
 
 type completeBody struct {
-	Status       string                  `json:"status"`
+	Status       string                    `json:"status"`
 	Steps        []sdkplugin.RemediateStep `json:"steps,omitempty"`
-	ErrorMessage string                  `json:"error_message,omitempty"`
+	ErrorMessage string                    `json:"error_message,omitempty"`
 }
 
 func openRemediationAttempt(fs findingsServer, findingID string, body openBody) (*remediationAttemptDTO, error) {

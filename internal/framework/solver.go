@@ -36,10 +36,10 @@ type ResolvedFramework struct {
 
 // ResolvedArtifact is one pinned control pack or plugin in the plan.
 type ResolvedArtifact struct {
-	Source       string
-	Version      string
-	Constraints  []string
-	RequestedBy  []string
+	Source      string
+	Version     string
+	Constraints []string
+	RequestedBy []string
 }
 
 // WorkspaceRef is what the solver consumes for each top-level entry of concord.yaml's frameworks list.
@@ -78,12 +78,12 @@ type resolver struct {
 }
 
 type resolvedFramework struct {
-	id          string
-	source      string
-	version     string
-	constraint  string
-	manifest    *Manifest
-	digest      string
+	id         string
+	source     string
+	version    string
+	constraint string
+	manifest   *Manifest
+	digest     string
 }
 
 type constrained struct {

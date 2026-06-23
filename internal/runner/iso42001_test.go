@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/concord-dev/concord/pkg/controls"
 	"github.com/concord-dev/concord/internal/evidence"
 	"github.com/concord-dev/concord/internal/policy"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
+	"github.com/concord-dev/concord/pkg/controls"
 )
 
 const (
@@ -63,7 +63,6 @@ func TestRunISO42001Stale(t *testing.T) {
 	assert.Contains(t, f.Messages, `risk doc "docs/ai/risk-assessments/fraud-detector.md" has not been reviewed in over 365 days`)
 }
 
-
 func TestRunISO42001_ModelEval_Pass(t *testing.T) {
 	f := runISO42001Eval(t, "eval-pass.json")
 	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
@@ -90,7 +89,6 @@ func runISO42001Eval(t *testing.T, fixture string) apiv1.Finding {
 	r := New(policy.New(), evidence.NewFileCollector())
 	return r.Run(context.Background(), controls.Loaded{Control: c, Path: controlPath})
 }
-
 
 func TestRunISO42001_DataQuality_Pass(t *testing.T) {
 	f := runISO42001DataQuality(t, "data-quality-pass.json")

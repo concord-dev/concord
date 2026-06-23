@@ -186,7 +186,6 @@ func (c *Collector) graphql(ctx context.Context, query string, vars map[string]a
 	return json.Unmarshal(raw, out)
 }
 
-
 const wandbRegistryQuery = `query ConcordRegistry($entityName: String!) {
   entity(name: $entityName) {
     projects(first: 100) {

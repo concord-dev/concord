@@ -10,8 +10,8 @@ import (
 type JSONRenderer struct{}
 
 type JSONReport struct {
-	Summary  Summary           `json:"summary"`
-	Findings []apiv1.Finding   `json:"findings"`
+	Summary  Summary         `json:"summary"`
+	Findings []apiv1.Finding `json:"findings"`
 }
 
 func (JSONRenderer) Render(w io.Writer, findings []apiv1.Finding) (Summary, error) {

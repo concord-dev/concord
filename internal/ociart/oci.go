@@ -21,19 +21,19 @@ import (
 
 // Concord-specific media types.
 const (
-	MediaTypePluginBinary    = "application/vnd.concord.plugin.binary.v1"
-	MediaTypeControlPackTar  = "application/vnd.concord.controlpack.v1.tar.gz"
-	MediaTypeFrameworkYAML   = "application/vnd.concord.framework.v1+yaml"
+	MediaTypePluginBinary   = "application/vnd.concord.plugin.binary.v1"
+	MediaTypeControlPackTar = "application/vnd.concord.controlpack.v1.tar.gz"
+	MediaTypeFrameworkYAML  = "application/vnd.concord.framework.v1+yaml"
 )
 
 // Concord-specific annotation keys.
 const (
-	AnnotationKind            = "org.concord.dev.artifact.kind"
-	AnnotationPluginSource    = "org.concord.dev.plugin.source"
-	AnnotationPluginProtocol  = "org.concord.dev.plugin.protocol"
-	AnnotationPackFramework   = "org.concord.dev.controlpack.framework"
-	AnnotationPackSources     = "org.concord.dev.controlpack.evidence_sources"
-	AnnotationFrameworkID     = "org.concord.dev.framework.id"
+	AnnotationKind           = "org.concord.dev.artifact.kind"
+	AnnotationPluginSource   = "org.concord.dev.plugin.source"
+	AnnotationPluginProtocol = "org.concord.dev.plugin.protocol"
+	AnnotationPackFramework  = "org.concord.dev.controlpack.framework"
+	AnnotationPackSources    = "org.concord.dev.controlpack.evidence_sources"
+	AnnotationFrameworkID    = "org.concord.dev.framework.id"
 
 	KindPlugin      = "plugin"
 	KindControlPack = "controlpack"

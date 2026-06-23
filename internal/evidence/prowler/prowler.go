@@ -30,10 +30,10 @@ type Config struct {
 
 // Collector adapts the Prowler scanner (AWS/GCP/Azure/K8s, GDPR/HIPAA/PCI/CIS/NIST/ISO/SOC2 mappings) to evidence.Collector.
 type Collector struct {
-	cfg    Config
-	runner runner
+	cfg      Config
+	runner   runner
 	readFile func(string) ([]byte, error)
-	tempDir func() (string, func(), error)
+	tempDir  func() (string, func(), error)
 }
 
 type runner func(ctx context.Context, dir, name string, args ...string) ([]byte, []byte, error)
@@ -174,20 +174,20 @@ func (c *Collector) CollectFromFile(path string) (any, error) {
 
 // Finding is one Prowler check result, normalised to Concord's shape.
 type Finding struct {
-	CheckID       string            `json:"check_id"`
-	Title         string            `json:"title"`
-	Provider      string            `json:"provider"`
-	Service       string            `json:"service"`
-	Region        string            `json:"region"`
-	ResourceARN   string            `json:"resource_arn,omitempty"`
-	ResourceID    string            `json:"resource_id,omitempty"`
-	AccountID     string            `json:"account_id,omitempty"`
-	Status        string            `json:"status"` // "PASS" | "FAIL" | "MANUAL"
-	StatusExtended string           `json:"status_extended,omitempty"`
-	Severity      string            `json:"severity"`
-	Compliance    map[string][]string `json:"compliance,omitempty"`
-	Description   string            `json:"description,omitempty"`
-	Remediation   string            `json:"remediation,omitempty"`
+	CheckID        string              `json:"check_id"`
+	Title          string              `json:"title"`
+	Provider       string              `json:"provider"`
+	Service        string              `json:"service"`
+	Region         string              `json:"region"`
+	ResourceARN    string              `json:"resource_arn,omitempty"`
+	ResourceID     string              `json:"resource_id,omitempty"`
+	AccountID      string              `json:"account_id,omitempty"`
+	Status         string              `json:"status"` // "PASS" | "FAIL" | "MANUAL"
+	StatusExtended string              `json:"status_extended,omitempty"`
+	Severity       string              `json:"severity"`
+	Compliance     map[string][]string `json:"compliance,omitempty"`
+	Description    string              `json:"description,omitempty"`
+	Remediation    string              `json:"remediation,omitempty"`
 }
 
 func summarise(findings []Finding, provider string, params map[string]any) map[string]any {
@@ -207,16 +207,16 @@ func summarise(findings []Finding, provider string, params map[string]any) map[s
 		}
 	}
 	return map[string]any{
-		"fetched_at":      time.Now().UTC().Format(time.RFC3339),
-		"provider":        provider,
-		"params":          params,
-		"finding_count":   len(findings),
-		"pass_count":      pass,
-		"fail_count":      fail,
-		"manual_count":    manual,
+		"fetched_at":           time.Now().UTC().Format(time.RFC3339),
+		"provider":             provider,
+		"params":               params,
+		"finding_count":        len(findings),
+		"pass_count":           pass,
+		"fail_count":           fail,
+		"manual_count":         manual,
 		"failures_by_check":    byCheck,
 		"failures_by_severity": bySeverity,
-		"findings":        findings,
+		"findings":             findings,
 	}
 }
 
@@ -254,22 +254,22 @@ type asffWire struct {
 }
 
 type asffFinding struct {
-	ID               string                   `json:"Id"`
-	GeneratorID      string                   `json:"GeneratorId"`
-	AwsAccountID     string                   `json:"AwsAccountId"`
-	Title            string                   `json:"Title"`
-	Description      string                   `json:"Description"`
-	Severity         struct {
+	ID           string `json:"Id"`
+	GeneratorID  string `json:"GeneratorId"`
+	AwsAccountID string `json:"AwsAccountId"`
+	Title        string `json:"Title"`
+	Description  string `json:"Description"`
+	Severity     struct {
 		Label string `json:"Label"`
 	} `json:"Severity"`
 	Compliance struct {
-		Status              string   `json:"Status"`
+		Status              string         `json:"Status"`
 		AssociatedStandards []asffStandard `json:"AssociatedStandards"`
-		RelatedRequirements []string `json:"RelatedRequirements"`
+		RelatedRequirements []string       `json:"RelatedRequirements"`
 	} `json:"Compliance"`
-	Resources       []asffResource `json:"Resources"`
-	ProductFields   map[string]any `json:"ProductFields"`
-	Remediation struct {
+	Resources     []asffResource `json:"Resources"`
+	ProductFields map[string]any `json:"ProductFields"`
+	Remediation   struct {
 		Recommendation struct {
 			Text string `json:"Text"`
 		} `json:"Recommendation"`

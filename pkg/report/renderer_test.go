@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/concord-dev/concord/pkg/report"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
+	"github.com/concord-dev/concord/pkg/report"
 )
 
 func sampleFindings() []apiv1.Finding {
@@ -85,10 +85,10 @@ func TestTrustPortal_DoesNotLeakInternalEvidence(t *testing.T) {
 
 	// CRITICAL: deny messages (with internal details) must NOT appear.
 	for _, sensitive := range []string{
-		"fraud-detector",                 // from f.Messages
-		"production model",               // from f.Messages
-		"collector blew up",              // from f.Messages on error finding
-		"high-risk model has no eval",    // from f.Warnings
+		"fraud-detector",              // from f.Messages
+		"production model",            // from f.Messages
+		"collector blew up",           // from f.Messages on error finding
+		"high-risk model has no eval", // from f.Warnings
 	} {
 		assert.NotContains(t, out, sensitive, "internal evidence leaked into trust portal: %q", sensitive)
 	}

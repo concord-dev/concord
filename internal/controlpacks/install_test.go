@@ -51,9 +51,9 @@ metadata:
 func TestExtractTarGz_HappyPath(t *testing.T) {
 	dir := t.TempDir()
 	tgz := buildTarGz(t, map[string][]byte{
-		"pack.yaml":          []byte("apiVersion: concord.dev/v1\nkind: ControlPack\nmetadata:\n  id: gdpr\n  version: v0.1.0\n"),
-		"controls/c1.yaml":   []byte("control1"),
-		"policies/c1.rego":   []byte("package c1"),
+		"pack.yaml":        []byte("apiVersion: concord.dev/v1\nkind: ControlPack\nmetadata:\n  id: gdpr\n  version: v0.1.0\n"),
+		"controls/c1.yaml": []byte("control1"),
+		"policies/c1.rego": []byte("package c1"),
 	})
 	require.NoError(t, extractTarGz(bytes.NewReader(tgz), dir))
 	for _, p := range []string{"pack.yaml", "controls/c1.yaml", "policies/c1.rego"} {

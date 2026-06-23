@@ -157,7 +157,6 @@ func (c *Collector) get(ctx context.Context, path string) ([]byte, error) {
 	return body, nil
 }
 
-
 type mlflowRegisteredModel struct {
 	Name              string               `json:"name"`
 	CreationTimestamp int64                `json:"creation_timestamp"`

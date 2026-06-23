@@ -16,21 +16,21 @@ import (
 type CheckFunc func(ctx context.Context) ([]apiv1.Finding, error)
 
 type Event struct {
-	ControlID string             `json:"control_id"`
-	Title     string             `json:"title"`
+	ControlID string              `json:"control_id"`
+	Title     string              `json:"title"`
 	From      apiv1.FindingStatus `json:"from,omitempty"`
 	To        apiv1.FindingStatus `json:"to"`
-	Reason    string             `json:"reason"`
-	At        time.Time          `json:"at"`
+	Reason    string              `json:"reason"`
+	At        time.Time           `json:"at"`
 }
 
 type Options struct {
 	Interval  time.Duration
 	OutputDir string
 	Once      bool
-	Now func() time.Time
+	Now       func() time.Time
 	EventSink func(Event)
-	Logger io.Writer
+	Logger    io.Writer
 }
 
 type Watcher struct {

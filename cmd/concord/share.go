@@ -100,7 +100,7 @@ func newShareListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path :=  fs.projectBase() + "/share-rooms"
+			path := fs.projectBase() + "/share-rooms"
 			if includeRevoked {
 				path += "?include_revoked=true"
 			}

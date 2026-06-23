@@ -11,14 +11,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/concord-dev/concord/pkg/config"
-	"github.com/concord-dev/concord/pkg/controls"
 	"github.com/concord-dev/concord/internal/evidence/wiring"
 	"github.com/concord-dev/concord/internal/notify"
 	"github.com/concord-dev/concord/internal/policy"
 	"github.com/concord-dev/concord/internal/runner"
 	"github.com/concord-dev/concord/internal/watcher"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
+	"github.com/concord-dev/concord/pkg/config"
+	"github.com/concord-dev/concord/pkg/controls"
 )
 
 func newWatchCmd() *cobra.Command {

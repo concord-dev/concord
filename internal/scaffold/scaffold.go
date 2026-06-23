@@ -141,11 +141,11 @@ type ControlInput struct {
 
 // ControlResult records the files written by Control.
 type ControlResult struct {
-	YAML       string
-	Rego       string
-	PassFix    string
-	FailFix    string
-	LibFiles   []string
+	YAML     string
+	Rego     string
+	PassFix  string
+	FailFix  string
+	LibFiles []string
 }
 
 // Control writes a control YAML + Rego skeleton + pass/fail fixture pair under destDir.

@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/concord-dev/concord/pkg/controls"
 	"github.com/concord-dev/concord/internal/evidence"
 	"github.com/concord-dev/concord/internal/policy"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
+	"github.com/concord-dev/concord/pkg/controls"
 )
 
 const (
@@ -19,7 +19,6 @@ const (
 	euAct13Path = "controls/frameworks/eu-ai-act/article-13-transparency.yaml"
 	euAct14Path = "controls/frameworks/eu-ai-act/article-14-human-oversight.yaml"
 )
-
 
 func TestRunEUAct11_Pass(t *testing.T) {
 	f := runMultiFixture(t, euAct11Path, map[string]string{
@@ -50,7 +49,6 @@ func TestRunEUAct11_StaleDocFails(t *testing.T) {
 	assert.Contains(t, f.Messages, `technical doc "docs/ai/technical-documentation/fraud-detector.md" has not been reviewed in over 180 days`)
 }
 
-
 func TestRunEUAct13_PassViaTag(t *testing.T) {
 	f := runMultiFixture(t, euAct13Path, map[string]string{
 		"model_registry": "models-with-high-risk.json",
@@ -76,7 +74,6 @@ func TestRunEUAct13_FailsWhenNeitherPresent(t *testing.T) {
 	assert.Contains(t, f.Messages, `high-risk model "fraud-detector" has neither public_model_card_url tag nor docs/ai/model-cards/<model>.md`)
 }
 
-
 func TestRunEUAct14_Pass(t *testing.T) {
 	f := runMultiFixture(t, euAct14Path, map[string]string{
 		"model_registry": "models-with-high-risk.json",
@@ -94,7 +91,6 @@ func TestRunEUAct14_MissingSectionFails(t *testing.T) {
 	assert.Contains(t, f.Messages, `oversight runbook "docs/ai/oversight/fraud-detector.md" is missing required section "limitations"`)
 	assert.Contains(t, f.Messages, `oversight runbook "docs/ai/oversight/fraud-detector.md" is missing required section "kill_switch"`)
 }
-
 
 func runMultiFixture(t *testing.T, controlRelPath string, fixtureByEvID map[string]string) apiv1.Finding {
 	t.Helper()

@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
-	"github.com/concord-dev/concord/pkg/config"
 	"github.com/concord-dev/concord/internal/framework"
 	"github.com/concord-dev/concord/internal/lockfile"
+	"github.com/concord-dev/concord/pkg/config"
 )
 
 const defaultFrameworkRegistry = "ghcr.io/concord-dev/concord-framework-"

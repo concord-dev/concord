@@ -170,8 +170,8 @@ func newVendorShowCmd() *cobra.Command {
 
 func newVendorUpdateCmd() *cobra.Command {
 	var (
-		serverURL, orgSlug, token        string
-		name, tier, notes, status        string
+		serverURL, orgSlug, token string
+		name, tier, notes, status string
 	)
 	cmd := &cobra.Command{
 		Use:   "update <vendor-id>",

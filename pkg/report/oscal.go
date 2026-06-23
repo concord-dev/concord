@@ -114,10 +114,10 @@ type oscalEnvelope struct {
 }
 
 type oscalAssessmentResults struct {
-	UUID     string                 `json:"uuid"`
-	Metadata oscalMetadata          `json:"metadata"`
-	ImportAp oscalImportAp          `json:"import-ap"`
-	Results  []oscalResult          `json:"results"`
+	UUID     string        `json:"uuid"`
+	Metadata oscalMetadata `json:"metadata"`
+	ImportAp oscalImportAp `json:"import-ap"`
+	Results  []oscalResult `json:"results"`
 }
 
 type oscalMetadata struct {

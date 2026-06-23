@@ -28,10 +28,10 @@ func newSSOCmd() *cobra.Command {
 func newSSOConfigCmd() *cobra.Command {
 	var (
 		flagServer, flagOrgSlug, flagToken string
-		kind                                string
-		slug, displayName                   string
-		defaultRole                         string
-		jit, disablePasswords               bool
+		kind                               string
+		slug, displayName                  string
+		defaultRole                        string
+		jit, disablePasswords              bool
 
 		// OIDC-specific
 		issuer, clientID, clientSecret string

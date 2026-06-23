@@ -22,17 +22,17 @@ import (
 // findingDTO mirrors store.Finding on the platform side. We unmarshal what we
 // need without binding to the platform module.
 type findingDTO struct {
-	ID                      string    `json:"id"`
-	ControlID               string    `json:"control_id"`
-	Framework               string    `json:"framework"`
-	Severity                string    `json:"severity"`
-	Status                  string    `json:"status"`
-	CurrentEvaluationStatus string    `json:"current_evaluation_status"`
+	ID                      string     `json:"id"`
+	ControlID               string     `json:"control_id"`
+	Framework               string     `json:"framework"`
+	Severity                string     `json:"severity"`
+	Status                  string     `json:"status"`
+	CurrentEvaluationStatus string     `json:"current_evaluation_status"`
 	SuppressedUntil         *time.Time `json:"suppressed_until,omitempty"`
-	Justification           string    `json:"justification,omitempty"`
-	LastMessages            []string  `json:"last_messages,omitempty"`
-	FirstSeenAt             time.Time `json:"first_seen_at"`
-	LastSeenAt              time.Time `json:"last_seen_at"`
+	Justification           string     `json:"justification,omitempty"`
+	LastMessages            []string   `json:"last_messages,omitempty"`
+	FirstSeenAt             time.Time  `json:"first_seen_at"`
+	LastSeenAt              time.Time  `json:"last_seen_at"`
 }
 
 type findingEventDTO struct {
@@ -146,9 +146,9 @@ func newFindingsCampaignCmd() *cobra.Command {
 
 func newFindingsAssignCmd() *cobra.Command {
 	var (
-		serverURL, orgSlug, token string
+		serverURL, orgSlug, token            string
 		assigneeEmail, due, ticketURL, notes string
-		slaDays int
+		slaDays                              int
 	)
 	cmd := &cobra.Command{
 		Use:   "assign <finding-id>",
@@ -227,9 +227,9 @@ func newFindingsUnassignCmd() *cobra.Command {
 
 func newFindingsListCmd() *cobra.Command {
 	var (
-		serverURL, orgSlug, token string
+		serverURL, orgSlug, token     string
 		statusFilter, frameworkFilter []string
-		format string
+		format                        string
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -263,7 +263,7 @@ func newFindingsListCmd() *cobra.Command {
 func newFindingsShowCmd() *cobra.Command {
 	var (
 		serverURL, orgSlug, token string
-		showEvents bool
+		showEvents                bool
 	)
 	cmd := &cobra.Command{
 		Use:   "show <finding-id>",
@@ -294,10 +294,18 @@ func newFindingsShowCmd() *cobra.Command {
 	return cmd
 }
 
-func newFindingsAcceptCmd() *cobra.Command   { return newFindingsTransitionCmd("accept", "accepted_risk", "Accept risk on a finding for a bounded window", true) }
-func newFindingsDeferCmd() *cobra.Command    { return newFindingsTransitionCmd("defer", "deferred", "Defer a finding for a bounded window (similar to accept but no risk assessment yet)", true) }
-func newFindingsReopenCmd() *cobra.Command   { return newFindingsTransitionCmd("reopen", "open", "Reopen a finding previously accepted/deferred/resolved/false-positive", false) }
-func newFindingsResolveCmd() *cobra.Command  { return newFindingsTransitionCmd("resolve", "resolved", "Mark a finding as resolved (manual override; auto-resolve usually handles this)", false) }
+func newFindingsAcceptCmd() *cobra.Command {
+	return newFindingsTransitionCmd("accept", "accepted_risk", "Accept risk on a finding for a bounded window", true)
+}
+func newFindingsDeferCmd() *cobra.Command {
+	return newFindingsTransitionCmd("defer", "deferred", "Defer a finding for a bounded window (similar to accept but no risk assessment yet)", true)
+}
+func newFindingsReopenCmd() *cobra.Command {
+	return newFindingsTransitionCmd("reopen", "open", "Reopen a finding previously accepted/deferred/resolved/false-positive", false)
+}
+func newFindingsResolveCmd() *cobra.Command {
+	return newFindingsTransitionCmd("resolve", "resolved", "Mark a finding as resolved (manual override; auto-resolve usually handles this)", false)
+}
 func newFindingsFalsePositiveCmd() *cobra.Command {
 	return newFindingsTransitionCmd("false-positive", "false_positive", "Mark a finding as a false positive (suppressed forever)", false)
 }
@@ -305,8 +313,8 @@ func newFindingsFalsePositiveCmd() *cobra.Command {
 func newFindingsTransitionCmd(name, status, short string, wantsExpiry bool) *cobra.Command {
 	var (
 		serverURL, orgSlug, token string
-		justification string
-		until         string
+		justification             string
+		until                     string
 	)
 	cmd := &cobra.Command{
 		Use:   name + " <finding-id>",

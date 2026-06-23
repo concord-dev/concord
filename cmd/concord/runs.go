@@ -13,13 +13,13 @@ import (
 )
 
 type runListEntry struct {
-	ID           string    `json:"id"`
-	Status       string    `json:"status"`
-	Source       string    `json:"source"`
-	StartedAt    time.Time `json:"started_at"`
+	ID           string     `json:"id"`
+	Status       string     `json:"status"`
+	Source       string     `json:"source"`
+	StartedAt    time.Time  `json:"started_at"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`
-	ErrorMessage string    `json:"error_message,omitempty"`
-	AgentVersion string    `json:"agent_version,omitempty"`
+	ErrorMessage string     `json:"error_message,omitempty"`
+	AgentVersion string     `json:"agent_version,omitempty"`
 }
 
 type runDetail struct {
@@ -57,7 +57,7 @@ func newRunsListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path :=  fs.projectBase() + "/runs"
+			path := fs.projectBase() + "/runs"
 			var rows []runListEntry
 			if err := apiGet(cmd.Context(), fs, path, &rows); err != nil {
 				return err
@@ -96,9 +96,9 @@ func newRunsShowCmd() *cobra.Command {
 			path := ""
 			switch {
 			case latest:
-				path =  fs.projectBase() + "/runs/latest"
+				path = fs.projectBase() + "/runs/latest"
 			case len(args) == 1:
-				path =  fs.projectBase() + "/runs/" + url.PathEscape(args[0])
+				path = fs.projectBase() + "/runs/" + url.PathEscape(args[0])
 			default:
 				return fmt.Errorf("provide a run id or pass --latest")
 			}

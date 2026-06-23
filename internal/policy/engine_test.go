@@ -32,8 +32,8 @@ warn contains msg if {
 func TestEvaluateSource_Deny(t *testing.T) {
 	e := New()
 	res, err := e.EvaluateSource(context.Background(), denyRule, "concord.test", map[string]any{
-		"protected": false,
-		"reviewers": 0,
+		"protected":  false,
+		"reviewers":  0,
 		"code_owner": false,
 	})
 	require.NoError(t, err)

@@ -166,7 +166,6 @@ func hasStrongMFA(factors []map[string]any) bool {
 	return false
 }
 
-
 type oktaUser struct {
 	ID      string      `json:"id"`
 	Status  string      `json:"status"`

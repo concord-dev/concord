@@ -14,15 +14,15 @@ import (
 )
 
 type accessReviewCycleDTO struct {
-	ID              string                  `json:"id"`
-	Quarter         string                  `json:"quarter"`
-	Status          string                  `json:"status"`
-	StartedAt       time.Time               `json:"started_at"`
-	DueAt           time.Time               `json:"due_at"`
-	CompletedAt     *time.Time              `json:"completed_at,omitempty"`
-	StartedByUserID *string                 `json:"started_by_user_id,omitempty"`
-	Notes           string                  `json:"notes,omitempty"`
-	ItemCounts      accessReviewCountsDTO   `json:"item_counts"`
+	ID              string                `json:"id"`
+	Quarter         string                `json:"quarter"`
+	Status          string                `json:"status"`
+	StartedAt       time.Time             `json:"started_at"`
+	DueAt           time.Time             `json:"due_at"`
+	CompletedAt     *time.Time            `json:"completed_at,omitempty"`
+	StartedByUserID *string               `json:"started_by_user_id,omitempty"`
+	Notes           string                `json:"notes,omitempty"`
+	ItemCounts      accessReviewCountsDTO `json:"item_counts"`
 }
 
 type accessReviewCountsDTO struct {
@@ -215,8 +215,8 @@ func newAccessReviewShowCmd() *cobra.Command {
 
 func newAccessReviewDecideCmd() *cobra.Command {
 	var (
-		serverURL, orgSlug, token  string
-		decision, justification    string
+		serverURL, orgSlug, token string
+		decision, justification   string
 	)
 	cmd := &cobra.Command{
 		Use:   "decide <cycle-id> <item-id>",

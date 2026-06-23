@@ -14,19 +14,19 @@ import (
 )
 
 type incidentDTO struct {
-	ID                 string    `json:"id"`
-	OrgID              string    `json:"org_id"`
-	ProjectID          string    `json:"project_id"`
-	Title              string    `json:"title"`
-	Summary            string    `json:"summary,omitempty"`
-	Severity           string    `json:"severity"`
-	Status             string    `json:"status"`
-	OpenedAt           time.Time `json:"opened_at"`
+	ID                 string     `json:"id"`
+	OrgID              string     `json:"org_id"`
+	ProjectID          string     `json:"project_id"`
+	Title              string     `json:"title"`
+	Summary            string     `json:"summary,omitempty"`
+	Severity           string     `json:"severity"`
+	Status             string     `json:"status"`
+	OpenedAt           time.Time  `json:"opened_at"`
 	MitigatedAt        *time.Time `json:"mitigated_at,omitempty"`
 	ResolvedAt         *time.Time `json:"resolved_at,omitempty"`
-	PostmortemURL      string    `json:"postmortem_url,omitempty"`
-	PostmortemMarkdown string    `json:"postmortem_markdown,omitempty"`
-	AffectedControls   []string  `json:"affected_controls,omitempty"`
+	PostmortemURL      string     `json:"postmortem_url,omitempty"`
+	PostmortemMarkdown string     `json:"postmortem_markdown,omitempty"`
+	AffectedControls   []string   `json:"affected_controls,omitempty"`
 	EscalatedAt        *time.Time `json:"escalated_at,omitempty"`
 }
 
@@ -103,10 +103,10 @@ func newIncidentOpenCmd() *cobra.Command {
 
 func newIncidentListCmd() *cobra.Command {
 	var (
-		serverURL, orgSlug, token        string
-		statusFilter, severityFilter     []string
-		sinceStr, untilStr, format       string
-		allProjects                      bool
+		serverURL, orgSlug, token    string
+		statusFilter, severityFilter []string
+		sinceStr, untilStr, format   string
+		allProjects                  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "list",

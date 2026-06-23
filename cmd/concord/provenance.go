@@ -208,4 +208,3 @@ func verifyDSSE(rawEnvelope string, keys map[string]ed25519.PublicKey) error {
 	}
 	return nil
 }
-

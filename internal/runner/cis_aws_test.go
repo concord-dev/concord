@@ -8,18 +8,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/concord-dev/concord/pkg/controls"
 	"github.com/concord-dev/concord/internal/evidence"
 	"github.com/concord-dev/concord/internal/policy"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
+	"github.com/concord-dev/concord/pkg/controls"
 )
 
 const (
-	cisAWSS3Path           = "controls/frameworks/cis-aws/2.1.1-s3-encryption.yaml"
-	cisAWSNoRootKeysPath   = "controls/frameworks/cis-aws/1.4-no-root-access-keys.yaml"
-	cisAWSRootMFAPath      = "controls/frameworks/cis-aws/1.5-root-mfa.yaml"
-	cisAWSS3PABPath        = "controls/frameworks/cis-aws/2.1.5-s3-public-access-block.yaml"
-	cisAWSCloudTrailPath   = "controls/frameworks/cis-aws/3.1-cloudtrail-multi-region.yaml"
+	cisAWSS3Path         = "controls/frameworks/cis-aws/2.1.1-s3-encryption.yaml"
+	cisAWSNoRootKeysPath = "controls/frameworks/cis-aws/1.4-no-root-access-keys.yaml"
+	cisAWSRootMFAPath    = "controls/frameworks/cis-aws/1.5-root-mfa.yaml"
+	cisAWSS3PABPath      = "controls/frameworks/cis-aws/2.1.5-s3-public-access-block.yaml"
+	cisAWSCloudTrailPath = "controls/frameworks/cis-aws/3.1-cloudtrail-multi-region.yaml"
 )
 
 func TestRunCISAWS_S3_Pass(t *testing.T) {
@@ -48,7 +48,6 @@ func runCISAWSS3(t *testing.T, fixture string) apiv1.Finding {
 	return runControlWithFixture(t, cisAWSS3Path, fixture)
 }
 
-
 func TestRunCISAWS_NoRootAccessKeys_Pass(t *testing.T) {
 	f := runControlWithFixture(t, cisAWSNoRootKeysPath, "iam-pass.json")
 	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
@@ -67,7 +66,6 @@ func TestRunCISAWS_NoRootAccessKeys_WarnOnMFAGaps(t *testing.T) {
 	assert.Contains(t, f.Warnings, "only 8 of 12 IAM users have MFA devices configured")
 }
 
-
 func TestRunCISAWS_RootMFA_Pass(t *testing.T) {
 	f := runControlWithFixture(t, cisAWSRootMFAPath, "iam-pass.json")
 	assert.Equal(t, apiv1.StatusPass, f.Status, "messages=%v warnings=%v", f.Messages, f.Warnings)
@@ -78,7 +76,6 @@ func TestRunCISAWS_RootMFA_FailWhenDisabled(t *testing.T) {
 	assert.Equal(t, apiv1.StatusFail, f.Status)
 	assert.Contains(t, f.Messages, "root account MFA is not enabled — enable an MFA device on the root user immediately")
 }
-
 
 func TestRunCISAWS_S3PAB_Pass(t *testing.T) {
 	f := runControlWithFixture(t, cisAWSS3PABPath, "s3-pab-pass.json")
@@ -91,7 +88,6 @@ func TestRunCISAWS_S3PAB_PartialFails(t *testing.T) {
 	assert.Contains(t, f.Messages, `bucket "concord-prod-data" has Public Access Block flag "block_public_policy" disabled`)
 	assert.Contains(t, f.Messages, `bucket "concord-website-assets" has no Public Access Block configuration at all`)
 }
-
 
 func TestRunCISAWS_CloudTrail_Pass(t *testing.T) {
 	f := runControlWithFixture(t, cisAWSCloudTrailPath, "cloudtrail-pass.json")
@@ -116,7 +112,6 @@ func TestRunCISAWS_CloudTrail_EmptyFails(t *testing.T) {
 	assert.Equal(t, apiv1.StatusFail, f.Status)
 	assert.Contains(t, f.Messages, "no CloudTrail trails exist in this account")
 }
-
 
 func runControlWithFixture(t *testing.T, controlRelPath, fixture string) apiv1.Finding {
 	t.Helper()

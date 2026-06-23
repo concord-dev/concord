@@ -140,8 +140,8 @@ func newProjectShowCmd() *cobra.Command {
 
 func newProjectUpdateCmd() *cobra.Command {
 	var (
-		serverURL, orgSlug, token   string
-		name, description, status   string
+		serverURL, orgSlug, token string
+		name, description, status string
 	)
 	cmd := &cobra.Command{
 		Use:   "update <project-slug>",

@@ -55,9 +55,9 @@ func ParseTemplate(s string) (ControlTemplate, error) {
 }
 
 type templateParts struct {
-	evidenceID    string
-	evidenceSrc   string
-	evidenceType  string
+	evidenceID     string
+	evidenceSrc    string
+	evidenceType   string
 	evidenceParams string
 	passBody       string
 	failBody       string
@@ -495,7 +495,7 @@ deny contains msg if {
 `, pkg, key, controlID, secondary, controlID, key, controlID, secondary, controlID)
 
 	return templateParts{
-		evidenceID: key,
+		evidenceID:   key,
 		evidenceSrc:  "TODO",
 		evidenceType: "TODO",
 		evidenceParams: fmt.Sprintf(`      # composite control: also reference a second evidence id below
