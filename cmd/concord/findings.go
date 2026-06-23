@@ -91,11 +91,11 @@ func resolveServer(serverURL, orgSlug, projectSlug, token string) (findingsServe
 	}
 	switch {
 	case fs.url == "":
-		return fs, errors.New("--server is required (or run `concord login`)")
+		return fs, errors.New("--server is required (or set CONCORD_SERVER_URL, or run `concord login`)")
 	case fs.orgSlug == "":
-		return fs, errors.New("--org-slug is required (or run `concord orgs use <slug>`)")
+		return fs, errors.New("--org-slug is required (or set CONCORD_ORG_SLUG, or run `concord orgs use <slug>`)")
 	case fs.token == "":
-		return fs, errors.New("--token is required (or run `concord login`)")
+		return fs, errors.New("--token is required (or set CONCORD_API_TOKEN, or run `concord login`)")
 	}
 	return fs, nil
 }
@@ -356,9 +356,9 @@ func newFindingsTransitionCmd(name, status, short string, wantsExpiry bool) *cob
 }
 
 func addFindingsServerFlags(cmd *cobra.Command, serverURL, orgSlug, token *string) {
-	cmd.Flags().StringVar(serverURL, "server", "", "Concord server URL (default: from `concord login` profile)")
-	cmd.Flags().StringVar(orgSlug, "org-slug", "", "Org slug (default: from `concord orgs use`)")
-	cmd.Flags().StringVar(token, "token", "", "API token (default: from `concord login` profile)")
+	cmd.Flags().StringVar(serverURL, "server", os.Getenv("CONCORD_SERVER_URL"), "Concord server URL (or CONCORD_SERVER_URL; default: from `concord login` profile)")
+	cmd.Flags().StringVar(orgSlug, "org-slug", os.Getenv("CONCORD_ORG_SLUG"), "Org slug (or CONCORD_ORG_SLUG; default: from `concord orgs use`)")
+	cmd.Flags().StringVar(token, "token", os.Getenv("CONCORD_API_TOKEN"), "API token (or CONCORD_API_TOKEN; default: from `concord login` profile)")
 }
 
 // addProjectFlag registers a --project flag for project-scoped subcommands.
