@@ -386,6 +386,7 @@ func apiGet(ctx context.Context, fs findingsServer, path string, out any) error 
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+fs.token)
+	setAPIVersion(req)
 	return doJSON(req, out)
 }
 
@@ -416,6 +417,7 @@ func apiSend(ctx context.Context, fs findingsServer, method, path string, body, 
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+fs.token)
+	setAPIVersion(req)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -428,6 +430,7 @@ func doJSON(req *http.Request, out any) error {
 		return err
 	}
 	defer resp.Body.Close()
+	warnIfDeprecated(resp)
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return fmt.Errorf("server returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))

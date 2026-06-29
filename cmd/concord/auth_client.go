@@ -43,12 +43,14 @@ func callAPI(ctx context.Context, method, url, bearer string, in, into any) erro
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
 	req.Header.Set("User-Agent", "concord-cli/"+versionString())
+	setAPIVersion(req)
 
 	resp, err := authHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("%s %s: %w", method, url, err)
 	}
 	defer resp.Body.Close()
+	warnIfDeprecated(resp)
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
