@@ -42,6 +42,7 @@ Audits become continuous instead of episodic.`,
 	cmd.AddCommand(newAttestationCmd())
 	cmd.AddCommand(newScheduleCmd())
 	cmd.AddCommand(newRequirementCmd())
+	cmd.AddCommand(newAuditCmd())
 	cmd.AddCommand(newScaffoldRootCmd())
 	cmd.AddCommand(newAuditPacketCmd())
 	cmd.AddCommand(newShareCmd())
