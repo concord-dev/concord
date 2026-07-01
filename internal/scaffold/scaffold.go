@@ -281,10 +281,10 @@ controls:
   #   ISO42001-6.1:
   #     max_age_days: 90
 
-# Concord reads CONCORD_GITHUB_TOKEN (preferred) or GITHUB_TOKEN for the
-# github collector. For AWS the standard credential chain (env vars,
-# ~/.aws/credentials, IAM role) is honored. Set CONCORD_REPO=owner/name
-# in env to populate the ${env.CONCORD_REPO} references in shipped controls.
+# Evidence comes from collector plugins (concord plugin install ...) and
+# controls from control packs (concord add <framework>). Each plugin reads
+# its own credentials from env; set CONCORD_REPO=owner/name to populate the
+# ${env.CONCORD_REPO} references in installed controls.
 `
 
 const githubActionTemplate = `name: Concord Compliance Check
@@ -307,9 +307,13 @@ jobs:
           # TODO: replace with release URL once published.
           go install github.com/concord-dev/concord/cmd/concord@latest
 
+      - name: Install control packs
+        # Replace soc2 with the framework(s) you use; installs their controls + plugin deps.
+        run: concord add soc2
+
       - name: Run Concord checks
         env:
           CONCORD_REPO: ${{ github.repository }}
           CONCORD_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: concord check --controls ./controls
+        run: concord check
 `

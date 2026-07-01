@@ -172,8 +172,8 @@ jobs:
       - name: build worker
         run: go build -buildvcs=false -o /tmp/concord-worker ./cmd/concord-worker
 
-      - name: smoke (controls library loads + check runs)
-        run: /tmp/concord check --fixtures --quiet --controls ./controls
+      - name: smoke (check engine evaluates a control)
+        run: /tmp/concord check --fixtures --quiet --controls testdata/smoke-pack
 
   helm:
     name: helm lint

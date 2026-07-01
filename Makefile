@@ -69,7 +69,7 @@ tools:
 	@echo "✓ analyzers installed into $(GOPATH_BIN)"
 
 check: build
-	./$(BIN) check --controls ./controls
+	./$(BIN) check --fixtures --controls testdata/smoke-pack
 
 clean:
 	rm -rf bin tmp coverage.out build-errors.log
