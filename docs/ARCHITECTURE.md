@@ -36,7 +36,7 @@ internal/
   cli/credentials/ CLI on-disk session credentials (0600 JSON)
   config/          concord.yaml parsing
   controls/        controls library loader
-  evidence/        per-source evidence collectors (AWS, GitHub, Okta, ...)
+  evidence/        evidence registry + file collector + plugin wiring
   logx/            slog wrapper + request-id context plumbing
   notify/          watcher-side notify Sinks + server-side mail/
   otelx/           OpenTelemetry SDK wiring (no-op default)

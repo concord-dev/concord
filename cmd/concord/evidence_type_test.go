@@ -11,7 +11,7 @@ import (
 )
 
 const repoEvidenceType = "../../controls/evidence-types/okta_users_mfa.yaml"
-const repoOktaFixture = "../../controls/frameworks/soc2/tests/fixtures/cc6.1-okta-pass.json"
+const repoOktaFixture = "testdata/okta-pass.json"
 
 func runEvidenceType(t *testing.T, args ...string) (string, error) {
 	t.Helper()

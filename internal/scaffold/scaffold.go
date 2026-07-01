@@ -1,112 +1,13 @@
 package scaffold
 
 import (
-	"bytes"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/concord-dev/concord/internal/scaffold/lib"
 )
-
-type Result struct {
-	Written []string
-	Skipped []string
-}
-
-func Frameworks(src fs.FS, destDir string, allowed []string, force bool) (Result, error) {
-	allow := toSet(allowed)
-	var r Result
-
-	walkErr := fs.WalkDir(src, "controls/frameworks", func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-
-		rel := strings.TrimPrefix(p, "controls/")
-		if !frameworkAllowed(rel, allow) {
-			return nil
-		}
-
-		destPath := filepath.Join(destDir, rel)
-		if !force {
-			if _, statErr := os.Stat(destPath); statErr == nil {
-				r.Skipped = append(r.Skipped, destPath)
-				return nil
-			}
-		}
-
-		if err := copyEmbedFile(src, p, destPath); err != nil {
-			return fmt.Errorf("copying %s: %w", p, err)
-		}
-		r.Written = append(r.Written, destPath)
-		return nil
-	})
-	if walkErr != nil {
-		return r, walkErr
-	}
-	return r, nil
-}
-
-type UpgradeResult struct {
-	New       []string
-	Modified  []string
-	Unchanged []string
-}
-
-func Upgrade(src fs.FS, destDir string, allowed []string, apply bool) (UpgradeResult, error) {
-	allow := toSet(allowed)
-	var r UpgradeResult
-
-	walkErr := fs.WalkDir(src, "controls/frameworks", func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		rel := strings.TrimPrefix(p, "controls/")
-		if !frameworkAllowed(rel, allow) {
-			return nil
-		}
-
-		embedContent, err := fs.ReadFile(src, p)
-		if err != nil {
-			return err
-		}
-
-		destPath := filepath.Join(destDir, rel)
-		diskContent, err := os.ReadFile(destPath)
-		switch {
-		case os.IsNotExist(err):
-			r.New = append(r.New, destPath)
-			if apply {
-				if err := writeBytes(destPath, embedContent); err != nil {
-					return err
-				}
-			}
-		case err != nil:
-			return err
-		case bytes.Equal(embedContent, diskContent):
-			r.Unchanged = append(r.Unchanged, destPath)
-		default:
-			r.Modified = append(r.Modified, destPath)
-			if apply {
-				if err := writeBytes(destPath, embedContent); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	})
-	return r, walkErr
-}
 
 func writeBytes(path string, content []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -359,46 +260,6 @@ func GitHubAction(destPath string, force bool) (bool, error) {
 		return false, err
 	}
 	return true, os.WriteFile(destPath, []byte(githubActionTemplate), 0o644)
-}
-
-func copyEmbedFile(src fs.FS, srcPath, destPath string) error {
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-		return err
-	}
-	in, err := src.Open(srcPath)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(destPath)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
-}
-
-func toSet(values []string) map[string]bool {
-	if len(values) == 0 {
-		return nil
-	}
-	m := make(map[string]bool, len(values))
-	for _, v := range values {
-		m[v] = true
-	}
-	return m
-}
-
-func frameworkAllowed(rel string, allow map[string]bool) bool {
-	if len(allow) == 0 {
-		return true
-	}
-	parts := strings.SplitN(rel, "/", 3)
-	if len(parts) < 2 {
-		return false
-	}
-	return allow[parts[1]]
 }
 
 const configTemplate = `apiVersion: concord.dev/v1

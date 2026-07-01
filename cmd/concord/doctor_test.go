@@ -30,7 +30,7 @@ metadata:
 
 	d := &doctor{w: &bytes.Buffer{}, ctx: context.Background()}
 	d.runConfig(cfgPath)
-	d.runControls("../../controls")
+	d.runControls("testdata/controls")
 	d.runProbe("github", stubProber{info: "authenticated as octocat"}, "")
 
 	assert.GreaterOrEqual(t, d.passed, 3, "config + controls + github should all pass")

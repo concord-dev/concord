@@ -11,14 +11,6 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	awsev "github.com/concord-dev/concord/internal/evidence/aws"
-	ghev "github.com/concord-dev/concord/internal/evidence/github"
-	hfev "github.com/concord-dev/concord/internal/evidence/huggingface"
-	mlflowev "github.com/concord-dev/concord/internal/evidence/mlflow"
-	oktaev "github.com/concord-dev/concord/internal/evidence/okta"
-	snykev "github.com/concord-dev/concord/internal/evidence/snyk"
-	wandbev "github.com/concord-dev/concord/internal/evidence/wandb"
-	"github.com/concord-dev/concord/internal/evidence/wiring"
 	"github.com/concord-dev/concord/internal/plugins"
 	"github.com/concord-dev/concord/pkg/config"
 	"github.com/concord-dev/concord/pkg/controls"
@@ -40,7 +32,7 @@ func newDoctorCmd() *cobra.Command {
 
   - concord.yaml exists and parses
   - controls/ tree validates without errors
-  - each detectable collector (in-tree or installed as a plugin) is reachable
+  - each installed plugin collector is reachable
 
 Exits non-zero if any check fails.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -50,7 +42,6 @@ Exits non-zero if any check fails.`,
 			}
 			d.runConfig(configPath)
 			d.runControls(controlsDir)
-			d.runInTreeCollectors()
 			d.runPluginCollectors()
 			d.printSummary()
 			if d.failed > 0 {
@@ -125,7 +116,7 @@ func (d *doctor) runConfig(path string) {
 func (d *doctor) runControls(dir string) {
 	d.section("Controls")
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		d.fail(fmt.Sprintf("controls/ not found at %s", dir), "run `concord init` to scaffold the bundled library")
+		d.fail(fmt.Sprintf("controls/ not found at %s", dir), "run `concord add <framework>` to install a control pack")
 		return
 	}
 	loaded, err := controls.Load(dir)
@@ -142,28 +133,6 @@ func (d *doctor) runControls(dir string) {
 		frameworks[l.Control.Metadata.Framework]++
 	}
 	d.pass(fmt.Sprintf("%d control(s) parsed and validated", len(loaded)), summarizeFrameworks(frameworks))
-}
-
-type inTreeProbe struct {
-	source string
-	probe  func() (prober, []string, string)
-	hint   string
-}
-
-func (d *doctor) runInTreeCollectors() {
-	d.section("In-tree collectors")
-	for _, p := range inTreeProbes() {
-		c, missing, info := p.probe()
-		if c == nil {
-			d.warn(p.source, info)
-			continue
-		}
-		if len(missing) > 0 {
-			d.warn(p.source, "missing env: "+strings.Join(missing, ", "))
-			continue
-		}
-		d.runProbe(p.source, c, p.hint)
-	}
 }
 
 func (d *doctor) runPluginCollectors() {
@@ -229,94 +198,6 @@ func (d *doctor) printSummary() {
 		fmt.Fprintln(d.w, color.YellowString("doctor is happy, but %d source(s) will fall back to fixtures", d.warned))
 	default:
 		fmt.Fprintln(d.w, color.GreenString("doctor is happy — ready to run `concord check`"))
-	}
-}
-
-func inTreeProbes() []inTreeProbe {
-	return []inTreeProbe{
-		{
-			source: "github",
-			probe: func() (prober, []string, string) {
-				tok := wiring.GitHubToken()
-				if tok == "" {
-					return nil, nil, "no token in CONCORD_GITHUB_TOKEN or GITHUB_TOKEN — controls using source=github will fall back to fixtures"
-				}
-				return ghev.New(tok), nil, ""
-			},
-			hint: "set CONCORD_GITHUB_TOKEN or GITHUB_TOKEN",
-		},
-		{
-			source: "aws",
-			probe: func() (prober, []string, string) {
-				if !wiring.HasAWSCredentials() {
-					return nil, nil, "no AWS credentials detected (env, profile, or ~/.aws/credentials) — controls using source=aws will fall back to fixtures"
-				}
-				c, err := awsev.New(context.Background(), os.Getenv("AWS_REGION"))
-				if err != nil {
-					return nil, nil, "loading SDK config: " + err.Error()
-				}
-				return c, nil, ""
-			},
-			hint: "verify AWS profile, region, and IAM perms (see examples/iam-readonly-policy.json)",
-		},
-		{
-			source: "mlflow",
-			probe: func() (prober, []string, string) {
-				uri := os.Getenv("MLFLOW_TRACKING_URI")
-				if uri == "" {
-					return nil, nil, "MLFLOW_TRACKING_URI not set — controls using source=mlflow will fall back to fixtures"
-				}
-				return mlflowev.New(uri, os.Getenv("MLFLOW_TRACKING_TOKEN")), nil, ""
-			},
-			hint: "verify MLFLOW_TRACKING_URI and (optional) MLFLOW_TRACKING_TOKEN",
-		},
-		{
-			source: "okta",
-			probe: func() (prober, []string, string) {
-				org, tok := os.Getenv("OKTA_ORG_URL"), os.Getenv("OKTA_API_TOKEN")
-				switch {
-				case org != "" && tok != "":
-					return oktaev.New(org, tok), nil, ""
-				case org != "" || tok != "":
-					return nil, nil, "only one of OKTA_ORG_URL / OKTA_API_TOKEN set — both are required"
-				}
-				return nil, nil, "OKTA_ORG_URL and OKTA_API_TOKEN not set — controls using source=okta will fall back to fixtures"
-			},
-			hint: "verify OKTA_ORG_URL and OKTA_API_TOKEN",
-		},
-		{
-			source: "snyk",
-			probe: func() (prober, []string, string) {
-				tok := os.Getenv("SNYK_TOKEN")
-				if tok == "" {
-					return nil, nil, "SNYK_TOKEN not set — controls using source=snyk will fall back to fixtures"
-				}
-				return snykev.New(tok), nil, ""
-			},
-			hint: "verify SNYK_TOKEN is valid for your org",
-		},
-		{
-			source: "wandb",
-			probe: func() (prober, []string, string) {
-				key := os.Getenv("WANDB_API_KEY")
-				if key == "" {
-					return nil, nil, "WANDB_API_KEY not set — controls using source=wandb will fall back to fixtures"
-				}
-				return wandbev.New(os.Getenv("WANDB_BASE_URL"), key), nil, ""
-			},
-			hint: "verify WANDB_API_KEY at wandb.me/authorize",
-		},
-		{
-			source: "huggingface",
-			probe: func() (prober, []string, string) {
-				tok := os.Getenv("HUGGINGFACE_TOKEN")
-				if tok == "" {
-					return nil, nil, "HUGGINGFACE_TOKEN not set — anonymous reads still work, but rate-limited"
-				}
-				return hfev.New(os.Getenv("HUGGINGFACE_BASE_URL"), tok), nil, ""
-			},
-			hint: "verify HUGGINGFACE_TOKEN at huggingface.co/settings/tokens",
-		},
 	}
 }
 
