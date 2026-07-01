@@ -41,8 +41,6 @@ func newAuditCmd() *cobra.Command {
 	return cmd
 }
 
-// ── engagements ────────────────────────────────────────────────────────────
-
 func newEngagementCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "engagement", Aliases: []string{"eng"}, Short: "Audit engagements"}
 	cmd.AddCommand(newEngagementCreateCmd())
@@ -195,8 +193,6 @@ func newEngagementActionCmd(action string) *cobra.Command {
 	}
 	return cmd
 }
-
-// ── PBC requests ───────────────────────────────────────────────────────────
 
 func newPBCCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "pbc", Short: "Provided-By-Client requests"}

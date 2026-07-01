@@ -112,11 +112,7 @@ func newIncidentListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List incidents (defaults to the active project)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ps := ""
-			if !allProjects {
-				ps = "" // will fall through to project slug from profile
-			}
-			fs, err := resolveServer(serverURL, orgSlug, ps, token)
+			fs, err := resolveServer(serverURL, orgSlug, "", token)
 			if err != nil {
 				return err
 			}

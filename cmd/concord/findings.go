@@ -66,9 +66,6 @@ func resolveFindingsServer(serverURL, orgSlug, token string) (findingsServer, er
 // fs.projectSlug != "" themselves.
 func resolveServer(serverURL, orgSlug, projectSlug, token string) (findingsServer, error) {
 	fs := findingsServer{url: serverURL, orgSlug: orgSlug, projectSlug: projectSlug, token: token}
-	if fs.url != "" && fs.orgSlug != "" && fs.token != "" && (fs.projectSlug != "" || projectSlug == "") {
-		// Fall through; we still want to fill missing fields from the profile below.
-	}
 	file, err := credentials.Load()
 	if err == nil {
 		if p, perr := file.CurrentProfile(); perr == nil {

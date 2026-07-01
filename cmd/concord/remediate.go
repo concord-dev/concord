@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -274,6 +273,3 @@ func containsString(haystack []string, needle string) bool {
 	}
 	return false
 }
-
-// silence unused-import lint in some build configs
-var _ = os.Stdout

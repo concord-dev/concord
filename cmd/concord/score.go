@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -133,7 +132,3 @@ func renderOneScore(w io.Writer, s *complianceScoreDTO) {
 	fmt.Fprintf(tw, "recomputed_at\t%s\n", s.RecomputedAt.Format(time.RFC3339))
 	tw.Flush()
 }
-
-// keep context imported even when no other context usage is present in
-// this file's first iteration
-var _ = context.TODO
