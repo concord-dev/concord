@@ -18,7 +18,9 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          # Must match go.mod (and CI's GO_VERSION). A stale pin here fails
+          # the release build against newer language/stdlib usage.
+          go-version: '1.25.11'
 
       - uses: goreleaser/goreleaser-action@v6
         with:

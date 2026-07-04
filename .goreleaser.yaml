@@ -1,8 +1,12 @@
 version: 2
 
-before:
-  hooks:
-    - go mod tidy
+# NOTE: no `before.hooks: go mod tidy`. On a tag-triggered single-repo
+# checkout the workspace go.work is absent, so `go mod tidy` cannot resolve
+# the `replace github.com/concord-dev/concord-plugin-sdk => ../concord-plugin-sdk`
+# sibling and fails the release. The module graph is already tidy in the
+# committed go.mod/go.sum, so the hook is unnecessary. When the SDK is
+# published as a tagged module (see assessment/30), drop the replace directive
+# and this note becomes moot.
 
 builds:
   - id: concord

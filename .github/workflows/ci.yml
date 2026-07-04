@@ -12,9 +12,14 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Single source of truth for the toolchain. Bump here and in
-  # Dockerfile.server in lockstep.
+  # Single source of truth for the toolchain. Keep in lockstep with go.mod
+  # and .github/workflows/release.yml.
   GO_VERSION: '1.25.11'
+
+# This repo builds ONLY the `concord` CLI + engine. The server, worker, Helm
+# chart, and Kafka-backed tests live in concord-dev/concord-platform and are
+# CI'd there. Cross-repo imports (the plugin SDK) resolve via the `replace`
+# directive against a sibling checkout — see the "check out sibling" step.
 
 jobs:
   lint:
@@ -22,29 +27,43 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: concord
+
+      - name: check out plugin SDK sibling
+        uses: actions/checkout@v4
+        with:
+          repository: concord-dev/concord-plugin-sdk
+          path: concord-plugin-sdk
 
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+          cache-dependency-path: concord/go.sum
 
       - name: go vet
+        working-directory: concord
         run: go vet ./...
 
       - name: install analyzers
+        working-directory: concord
         run: make tools
 
       - name: staticcheck
+        working-directory: concord
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
           staticcheck ./...
 
       - name: deadcode
+        working-directory: concord
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
           deadcode -test ./...
 
       - name: gofmt
+        working-directory: concord
         run: |
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then
@@ -58,16 +77,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: concord
+
+      - name: check out plugin SDK sibling
+        uses: actions/checkout@v4
+        with:
+          repository: concord-dev/concord-plugin-sdk
+          path: concord-plugin-sdk
 
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+          cache-dependency-path: concord/go.sum
 
       - name: install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
 
       - name: govulncheck
+        working-directory: concord
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
           govulncheck ./...
@@ -75,125 +104,54 @@ jobs:
   test:
     name: test (race)
     runs-on: ubuntu-latest
-
-    # Real Postgres + Redis in CI — tests that need a DB or shared
-    # rate-limiter don't get to skip silently. The harness already
-    # targets localhost:5432 with the concord-dev creds; the limiter
-    # tests skip unless CONCORD_TEST_REDIS_ADDR is set.
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: concord
-          POSTGRES_PASSWORD: concord-dev
-          POSTGRES_DB: concord
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U concord -d concord"
-          --health-interval=5s
-          --health-timeout=3s
-          --health-retries=10
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd="redis-cli ping"
-          --health-interval=5s
-          --health-timeout=3s
-          --health-retries=10
-      # NOTE: Redpanda is started in a step below, not here. Services{}
-      # doesn't support passing a custom command, and Redpanda needs
-      # `--advertise-kafka-addr` so the test client can reach it over
-      # localhost. See the "Start Redpanda" step.
-
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: concord
+
+      - name: check out plugin SDK sibling
+        uses: actions/checkout@v4
+        with:
+          repository: concord-dev/concord-plugin-sdk
+          path: concord-plugin-sdk
 
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+          cache-dependency-path: concord/go.sum
 
-      - name: wait for postgres
-        run: |
-          for i in {1..30}; do
-            pg_isready -h 127.0.0.1 -U concord && exit 0
-            sleep 1
-          done
-          echo "postgres never came up"; exit 1
-        env:
-          PGPASSWORD: concord-dev
-
-      - name: start Redpanda
-        # Single-binary Kafka-API broker. `--advertise-kafka-addr` is
-        # what lets the test client (running on the host) reach the
-        # broker through the published port mapping.
-        run: |
-          docker run -d --name redpanda -p 19092:19092 \
-            docker.redpanda.com/redpandadata/redpanda:v24.2.13 \
-            redpanda start \
-              --smp 1 --memory 512M --reserve-memory 0M --overprovisioned --check=false \
-              --kafka-addr PLAINTEXT://0.0.0.0:19092 \
-              --advertise-kafka-addr PLAINTEXT://127.0.0.1:19092
-          for i in {1..60}; do
-            if docker exec redpanda rpk cluster health -X brokers=127.0.0.1:19092 2>/dev/null | grep -q 'Healthy:.*true'; then
-              echo "redpanda ready"; exit 0
-            fi
-            sleep 1
-          done
-          echo "redpanda never reported healthy"; docker logs redpanda; exit 1
-
+      # The CLI engine needs no backends. Integration-tagged tests spawn real
+      # plugins / hit ghcr and are exercised via `make test-integration`
+      # (kept out of the default PR gate because they need network + binaries).
       - name: test (race + count=1)
+        working-directory: concord
         run: go test -buildvcs=false -race -count=1 ./...
-        env:
-          CONCORD_TEST_DATABASE_URL: postgres://concord:concord-dev@127.0.0.1:5432/concord?sslmode=disable
-          CONCORD_TEST_REDIS_ADDR: 127.0.0.1:6379
-          CONCORD_TEST_KAFKA_BROKERS: 127.0.0.1:19092
 
   build:
     name: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: concord
+
+      - name: check out plugin SDK sibling
+        uses: actions/checkout@v4
+        with:
+          repository: concord-dev/concord-plugin-sdk
+          path: concord-plugin-sdk
 
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+          cache-dependency-path: concord/go.sum
 
       - name: build cli
+        working-directory: concord
         run: go build -buildvcs=false -o /tmp/concord ./cmd/concord
 
-      - name: build server
-        run: go build -buildvcs=false -o /tmp/concord-server ./cmd/server
-
-      - name: build worker
-        run: go build -buildvcs=false -o /tmp/concord-worker ./cmd/concord-worker
-
       - name: smoke (check engine evaluates a control)
+        working-directory: concord
         run: /tmp/concord check --fixtures --quiet --controls testdata/smoke-pack
-
-  helm:
-    name: helm lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: azure/setup-helm@v4
-        with:
-          version: v3.14.0
-
-      - name: helm lint (with realistic overrides)
-        run: |
-          helm lint deploy/helm/concord \
-            --set database.databaseUrlSecret.name=concord-db
-
-      - name: helm template (verify rendering)
-        run: |
-          helm template concord deploy/helm/concord \
-            --set image.tag=test \
-            --set database.databaseUrlSecret.name=concord-db \
-            > /tmp/rendered.yaml
-          test -s /tmp/rendered.yaml
