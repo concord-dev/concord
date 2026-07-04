@@ -79,30 +79,26 @@ Audits become continuous instead of episodic.`,
 	add(groupAccount, newScoreCmd())
 	add(groupAccount, newProvenanceCmd())
 
-	// Administration — platform GRC CRUD. Slated to move under a single `admin`
-	// parent / separate distribution so the practitioner's tool stays lean
-	// (assessment/36 phase 2+). Grouped here for now so --help reads cleanly.
-	add(groupAdmin, newRiskCmd())
-	add(groupAdmin, newAssetCmd())
-	add(groupAdmin, newExceptionCmd())
-	add(groupAdmin, newEvidenceCmd())
-	add(groupAdmin, newEvidenceRequestCmd())
-	add(groupAdmin, newPolicyDocCmd())
-	add(groupAdmin, newAttestationCmd())
-	add(groupAdmin, newScheduleCmd())
-	add(groupAdmin, newRequirementCmd())
-	add(groupAdmin, newAuditCmd())
-	add(groupAdmin, newReportCmd())
-	add(groupAdmin, newRoleCmd())
-	add(groupAdmin, newCustomFieldCmd())
-	add(groupAdmin, newAuditPacketCmd())
-	add(groupAdmin, newShareCmd())
-	add(groupAdmin, newVendorCmd())
-	add(groupAdmin, newRemediateCmd())
-	add(groupAdmin, newSSOCmd())
-	add(groupAdmin, newIncidentCmd())
-	add(groupAdmin, newAccessReviewCmd())
-	add(groupAdmin, newWorkflowCmd())
+	// Administration — platform GRC CRUD. These live under a single `admin`
+	// parent so the top-level CLI stays lean (assessment/36 phase 2). Each is
+	// also kept as a HIDDEN top-level alias during the POC so existing
+	// invocations (`concord risk …`) keep working while muscle memory adjusts.
+	adminCtors := []func() *cobra.Command{
+		newRiskCmd, newAssetCmd, newExceptionCmd, newEvidenceCmd, newEvidenceRequestCmd,
+		newPolicyDocCmd, newAttestationCmd, newScheduleCmd, newRequirementCmd, newAuditCmd,
+		newReportCmd, newRoleCmd, newCustomFieldCmd, newAuditPacketCmd, newShareCmd,
+		newVendorCmd, newRemediateCmd, newSSOCmd, newIncidentCmd, newAccessReviewCmd,
+		newWorkflowCmd,
+	}
+	adminCmd := newAdminCmd()
+	for _, ctor := range adminCtors {
+		adminCmd.AddCommand(ctor()) // canonical: `concord admin <verb>`
+		alias := ctor()             // fresh instance for the back-compat path
+		alias.Hidden = true
+		alias.GroupID = groupAdmin
+		cmd.AddCommand(alias) // hidden: `concord <verb>` (POC back-compat)
+	}
+	add(groupAdmin, adminCmd)
 
 	return cmd
 }
