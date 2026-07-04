@@ -50,6 +50,61 @@ func newRiskCmd() *cobra.Command {
 	cmd.AddCommand(newRiskKRICmd())
 	cmd.AddCommand(newRiskAppetiteCmd())
 	cmd.AddCommand(newRiskRollupCmd())
+	cmd.AddCommand(newRiskImportCmd())
+	cmd.AddCommand(newRiskExportCmd())
+	return cmd
+}
+
+func newRiskImportCmd() *cobra.Command {
+	var serverURL, orgSlug, projectSlug, token string
+	cmd := &cobra.Command{
+		Use:   "import <file.csv>",
+		Short: "Bulk-import risks from CSV (title,inherent_likelihood,inherent_impact,...); all-or-nothing",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fs, err := resolveServer(serverURL, orgSlug, projectSlug, token)
+			if err != nil {
+				return err
+			}
+			out, err := apiUploadCSV(cmd.Context(), fs, fs.projectBase()+"/risks/import", args[0])
+			if err != nil {
+				return err
+			}
+			var res struct {
+				Imported int `json:"imported"`
+			}
+			if err := json.Unmarshal(out, &res); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stdout, "imported %d risk(s)\n", res.Imported)
+			return nil
+		},
+	}
+	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
+	addProjectFlag(cmd, &projectSlug)
+	return cmd
+}
+
+func newRiskExportCmd() *cobra.Command {
+	var serverURL, orgSlug, projectSlug, token, out string
+	cmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export the risk register as CSV",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			fs, err := resolveServer(serverURL, orgSlug, projectSlug, token)
+			if err != nil {
+				return err
+			}
+			data, err := apiDownload(cmd.Context(), fs, fs.projectBase()+"/risks/export")
+			if err != nil {
+				return err
+			}
+			return writeOutOrStdout(out, data)
+		},
+	}
+	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
+	addProjectFlag(cmd, &projectSlug)
+	cmd.Flags().StringVar(&out, "out", "", "Write to file instead of stdout")
 	return cmd
 }
 

@@ -112,6 +112,7 @@ func newFindingsCmd() *cobra.Command {
 	cmd.AddCommand(newFindingsAssignCmd())
 	cmd.AddCommand(newFindingsUnassignCmd())
 	cmd.AddCommand(newFindingsCampaignCmd())
+	cmd.AddCommand(newFindingsExportCmd())
 	return cmd
 }
 
@@ -525,4 +526,41 @@ func parseUntil(s string) (time.Time, error) {
 		return time.Now().UTC().AddDate(n, 0, 0), nil
 	}
 	return time.Time{}, fmt.Errorf("unknown duration suffix %q in %q", unit, s)
+}
+
+func newFindingsExportCmd() *cobra.Command {
+	var serverURL, orgSlug, projectSlug, token, out string
+	var frameworks, statuses []string
+	cmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export findings as CSV (same columns as the audit packet)",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			fs, err := resolveServer(serverURL, orgSlug, projectSlug, token)
+			if err != nil {
+				return err
+			}
+			q := url.Values{}
+			for _, f := range frameworks {
+				q.Add("framework", f)
+			}
+			for _, s := range statuses {
+				q.Add("status", s)
+			}
+			path := fs.projectBase() + "/findings/export"
+			if len(q) > 0 {
+				path += "?" + q.Encode()
+			}
+			data, err := apiDownload(cmd.Context(), fs, path)
+			if err != nil {
+				return err
+			}
+			return writeOutOrStdout(out, data)
+		},
+	}
+	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
+	addProjectFlag(cmd, &projectSlug)
+	cmd.Flags().StringArrayVar(&frameworks, "framework", nil, "Filter by framework (repeatable)")
+	cmd.Flags().StringArrayVar(&statuses, "status", nil, "Filter by status (repeatable)")
+	cmd.Flags().StringVar(&out, "out", "", "Write to file instead of stdout")
+	return cmd
 }

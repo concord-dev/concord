@@ -35,6 +35,7 @@ Audits become continuous instead of episodic.`,
 	cmd.AddCommand(newFindingsCmd())
 	cmd.AddCommand(newEvidenceCmd())
 	cmd.AddCommand(newRiskCmd())
+	cmd.AddCommand(newAssetCmd())
 	cmd.AddCommand(newExceptionCmd())
 	cmd.AddCommand(newEvidenceRequestCmd())
 	cmd.AddCommand(newPolicyDocCmd())
