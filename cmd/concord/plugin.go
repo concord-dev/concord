@@ -39,7 +39,7 @@ identity, writes the binary under ~/.concord/plugins/<source>/<version>/,
 and pins the digest + signer in concord.lock.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts.RequireSignature = requireSignature
+			opts.RequireSignature = requireSignature || !skipSignature // fail-closed by default
 			opts.SkipSignature = skipSignature
 			opts.ProgressW = os.Stderr
 
@@ -61,7 +61,7 @@ and pins the digest + signer in concord.lock.`,
 	cmd.Flags().StringVar(&opts.GitHubRepo, "github-repo", "", "GitHub repo for cosign identity check (default: inferred from ghcr.io/<owner>/<repo>)")
 	cmd.Flags().StringVar(&opts.ExpectedIdentity, "identity", "", "Exact cosign signer identity to require")
 	cmd.Flags().BoolVar(&opts.AllowSignerChange, "allow-signer-change", false, "Permit upgrades that change the signer identity recorded in the lockfile")
-	cmd.Flags().BoolVar(&requireSignature, "require-signature", false, "Fail if no valid cosign signature is found")
+	cmd.Flags().BoolVar(&requireSignature, "require-signature", false, "(default) Require a valid cosign signature; verification is on unless --no-verify")
 	cmd.Flags().BoolVar(&skipSignature, "no-verify", false, "Skip signature verification entirely (use only for trusted local dev)")
 	cmd.Flags().BoolVar(&opts.PlainHTTP, "plain-http", false, "Use HTTP for the registry (local testing only)")
 	cmd.Flags().StringVar(&opts.CosignBin, "cosign-bin", "", "Override cosign binary path (default: lookup on PATH)")

@@ -47,7 +47,7 @@ func newInstallCmd() *cobra.Command {
 			return framework.Apply(ctx, plan, framework.ApplyOptions{
 				LockfilePath:      lockPath,
 				PlainHTTP:         plainHTTP,
-				RequireSignature:  requireSignature,
+				RequireSignature:  requireSignature || !skipSignature, // fail-closed by default
 				SkipSignature:     skipSignature,
 				AllowSignerChange: allowSignerChange,
 				CosignBin:         cosignBin,
@@ -58,7 +58,7 @@ func newInstallCmd() *cobra.Command {
 	cmd.Flags().StringVar(&configPath, "config", "./concord.yaml", "Path to concord.yaml")
 	cmd.Flags().StringVar(&lockPath, "lockfile", lockfile.Path, "Path to concord.lock")
 	cmd.Flags().BoolVar(&plainHTTP, "plain-http", false, "Use HTTP for the registry (local testing only)")
-	cmd.Flags().BoolVar(&requireSignature, "require-signature", false, "Fail if any artifact lacks a valid cosign signature")
+	cmd.Flags().BoolVar(&requireSignature, "require-signature", false, "(default) Require a valid cosign signature; verification is on unless --no-verify")
 	cmd.Flags().BoolVar(&skipSignature, "no-verify", false, "Skip signature verification entirely")
 	cmd.Flags().BoolVar(&allowSignerChange, "allow-signer-change", false, "Permit upgrades that change a recorded signer identity")
 	cmd.Flags().StringVar(&cosignBin, "cosign-bin", "", "Override cosign binary path")

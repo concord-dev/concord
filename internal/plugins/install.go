@@ -170,7 +170,7 @@ func verifyArtifact(ctx context.Context, pulled *ociart.PullResult, opts Install
 	}
 	if verifyOpts.Identity == "" && verifyOpts.IdentityRegexp == "" {
 		if opts.RequireSignature {
-			return nil, errors.New("--require-signature was set, but no identity could be determined from artifact reference (pass --identity or --identity-regexp)")
+			return nil, errors.New("cannot determine signer identity from the artifact reference; pass --identity or --identity-regexp, or --no-verify to bypass verification")
 		}
 		fmt.Fprintln(progress, "  → signature verification SKIPPED (cannot determine signer identity)")
 		return nil, nil
@@ -180,7 +180,7 @@ func verifyArtifact(ctx context.Context, pulled *ociart.PullResult, opts Install
 	switch {
 	case errors.Is(err, ociart.ErrCosignMissing):
 		if opts.RequireSignature {
-			return nil, fmt.Errorf("--require-signature was set, but cosign is not on PATH: %w", err)
+			return nil, fmt.Errorf("cosign is not on PATH; install cosign, or pass --no-verify to bypass verification: %w", err)
 		}
 		fmt.Fprintln(progress, "  → signature verification SKIPPED (cosign not on PATH)")
 		return nil, nil
