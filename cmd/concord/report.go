@@ -81,7 +81,7 @@ func newReportCreateCmd() *cobra.Command {
 	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
 	cmd.Flags().StringVar(&name, "name", "", "Report name (required)")
 	cmd.Flags().StringVar(&kind, "kind", "", "Report kind (required)")
-	cmd.Flags().StringVar(&format, "format", "", "Output format: json|csv|markdown (default json)")
+	cmd.Flags().StringVar(&format, "format", "", "Output format: json|csv|markdown|pdf (default json)")
 	cmd.Flags().StringVar(&paramsJSON, "params", "", "Report parameters as a JSON object")
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("kind")
@@ -242,10 +242,10 @@ func newReportRunsCmd() *cobra.Command {
 }
 
 func newReportDownloadCmd() *cobra.Command {
-	var serverURL, orgSlug, token string
+	var serverURL, orgSlug, token, out string
 	cmd := &cobra.Command{
 		Use:   "download <id> <run-id>",
-		Short: "Download a succeeded run's artifact to stdout",
+		Short: "Download a succeeded run's artifact (use --out for PDF and other binary formats)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fs, err := resolveFindingsServer(serverURL, orgSlug, token)
@@ -267,10 +267,20 @@ func newReportDownloadCmd() *cobra.Command {
 			if resp.StatusCode < 200 || resp.StatusCode > 299 {
 				return fmt.Errorf("server returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 			}
+			// --out writes the raw bytes to a file — the safe path for a binary
+			// (PDF) artifact, which would corrupt a terminal on stdout.
+			if out != "" {
+				if err := os.WriteFile(out, body, 0o644); err != nil {
+					return fmt.Errorf("writing %s: %w", out, err)
+				}
+				fmt.Fprintf(os.Stderr, "✓ wrote %d bytes to %s\n", len(body), out)
+				return nil
+			}
 			_, err = os.Stdout.Write(body)
 			return err
 		},
 	}
 	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
+	cmd.Flags().StringVar(&out, "out", "", "Write the artifact to this file instead of stdout (use for PDF)")
 	return cmd
 }
