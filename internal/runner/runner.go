@@ -48,6 +48,11 @@ func (r *Runner) Run(ctx context.Context, loaded controls.Loaded) apiv1.Finding 
 		return f
 	}
 
+	// Commit the finding to the exact evidence it was evaluated against, before
+	// the runner mixes in synthetic params. The server records this so a pushed
+	// finding is tied to verifiable inputs rather than trusted blindly.
+	f.EvidenceFingerprint = apiv1.FingerprintEvidence(input)
+
 	params := map[string]any{}
 	if r.params != nil {
 		if p, ok := r.params[c.Metadata.ID]; ok {

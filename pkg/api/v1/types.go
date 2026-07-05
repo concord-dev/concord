@@ -64,16 +64,22 @@ const (
 )
 
 type Finding struct {
-	ControlID   string              `json:"control_id"`
-	Title       string              `json:"title"`
-	Framework   string              `json:"framework"`
-	Severity    string              `json:"severity"`
-	Status      FindingStatus       `json:"status"`
-	Messages    []string            `json:"messages,omitempty"`
-	Warnings    []string            `json:"warnings,omitempty"`
-	Mappings    map[string][]string `json:"mappings,omitempty"`
-	EvaluatedAt time.Time           `json:"evaluated_at"`
-	DurationMs  int64               `json:"duration_ms"`
+	ControlID string        `json:"control_id"`
+	Title     string        `json:"title"`
+	Framework string        `json:"framework"`
+	Severity  string        `json:"severity"`
+	Status    FindingStatus `json:"status"`
+	Messages  []string      `json:"messages,omitempty"`
+	Warnings  []string      `json:"warnings,omitempty"`
+	// EvidenceFingerprint is a sha256 digest of the exact evidence the agent
+	// evaluated to produce this finding (see FingerprintEvidence). It commits the
+	// result to its inputs so the server records what the finding was based on
+	// rather than an unverifiable claim. Empty when no evidence was collected
+	// (e.g. an evaluation error).
+	EvidenceFingerprint string              `json:"evidence_fingerprint,omitempty"`
+	Mappings            map[string][]string `json:"mappings,omitempty"`
+	EvaluatedAt         time.Time           `json:"evaluated_at"`
+	DurationMs          int64               `json:"duration_ms"`
 }
 
 // ObservedAsset is an asset a collector reported during a run. Its JSON shape

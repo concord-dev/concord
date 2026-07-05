@@ -36,6 +36,24 @@ func TestEngine_FailWithDenyMessage(t *testing.T) {
 	assert.Contains(t, f.Messages, `default branch "main" is not protected`)
 }
 
+// The runner must commit each finding to a digest of the evidence it evaluated,
+// and that digest must change when the evidence changes (the P1 trust seam).
+func TestEngine_SetsEvidenceFingerprint(t *testing.T) {
+	pass := New(policy.New(), evidence.NewFileCollector()).Run(context.Background(), loadTestControl(t))
+	assert.NotEmpty(t, pass.EvidenceFingerprint, "a finding with evidence must carry a fingerprint")
+
+	l := loadTestControl(t)
+	l.Control.Spec.Evidence[0].Fixture = "./tests/fixtures/cc8.1-no-protection.json"
+	fail := New(policy.New(), evidence.NewFileCollector()).Run(context.Background(), l)
+	assert.NotEmpty(t, fail.EvidenceFingerprint)
+	assert.NotEqual(t, pass.EvidenceFingerprint, fail.EvidenceFingerprint,
+		"different evidence must produce a different fingerprint")
+
+	// Deterministic: re-evaluating identical evidence yields the same digest.
+	again := New(policy.New(), evidence.NewFileCollector()).Run(context.Background(), loadTestControl(t))
+	assert.Equal(t, pass.EvidenceFingerprint, again.EvidenceFingerprint)
+}
+
 func TestEngine_ParamOverride(t *testing.T) {
 	r := New(policy.New(), evidence.NewFileCollector()).SetParams(map[string]map[string]any{
 		"SOC2-CC8.1": {"min_reviewers": 3},
