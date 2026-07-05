@@ -53,7 +53,7 @@ func newReportCreateCmd() *cobra.Command {
 	var serverURL, orgSlug, token, name, kind, format, paramsJSON string
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a report definition (kinds: framework_readiness, findings_summary)",
+		Short: "Create a report definition (kinds: framework_readiness, findings_summary, risk_exposure, annex_iv)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			fs, err := resolveFindingsServer(serverURL, orgSlug, token)
 			if err != nil {
