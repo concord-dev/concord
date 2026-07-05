@@ -313,10 +313,18 @@ func findFixture(packDir, slug, kind string) string {
 	return ""
 }
 
-// fixturesForControl resolves pass + fail fixture paths, preferring the YAML's
-// explicit fixture: field and deriving the fail variant from it; otherwise
-// falling back to the <slug>-{pass,fail}.json convention.
+// fixturesForControl resolves pass + fail fixture paths.
+//
+// A multi-evidence control cannot be replayed from a single evidence's fixture
+// (the Rego needs every evidence id present at once), so it uses a combined
+// wrapped fixture under the <slug>-{pass,fail}.json convention — a file whose
+// top-level keys are the evidence ids. Single-evidence controls keep the
+// simpler behaviour: prefer the YAML's explicit fixture: field and derive the
+// fail variant from it, else fall back to <slug>-{pass,fail}.json.
 func fixturesForControl(c apiv1.Control, packDir, slug string) (string, string) {
+	if len(evidenceIDsFor(c)) > 1 {
+		return findFixture(packDir, slug, "pass"), findFixture(packDir, slug, "fail")
+	}
 	for _, ev := range c.Spec.Evidence {
 		if ev.Fixture == "" {
 			continue
