@@ -45,18 +45,28 @@ Audits become continuous instead of episodic.`,
 	}
 
 	// Core — the lean as-code loop; works offline against local controls.
+	// plan/apply are the Terraform-shaped verbs: `check` evaluates and prints,
+	// `plan` gates a change against a baseline, `apply` records the run.
 	add(groupCore, newInitCmd())
 	add(groupCore, newCheckCmd())
+	add(groupCore, newPlanCmd())
+	add(groupCore, newApplyCmd())
 	add(groupCore, newWatchCmd())
 	add(groupCore, newDiffCmd())
 	add(groupCore, newExplainCmd())
 	add(groupCore, newListCmd())
-	add(groupCore, newPushCmd())
 	add(groupCore, newControlCmd())
 	add(groupCore, newScaffoldRootCmd())
 	add(groupCore, newEvidenceTypeCmd())
 	add(groupCore, newDoctorCmd())
 	add(groupCore, newVersionCmd())
+
+	// push is superseded by `apply` (evaluate + record) and `apply --findings`
+	// (record a pre-computed file). Kept as a hidden alias for POC back-compat.
+	pushAlias := newPushCmd()
+	pushAlias.Hidden = true
+	pushAlias.GroupID = groupCore
+	cmd.AddCommand(pushAlias)
 
 	// Ecosystem — the plugin + signed-content-pack + framework registry surface.
 	add(groupEcosystem, newPluginCmd())

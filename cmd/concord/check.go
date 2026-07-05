@@ -1,95 +1,38 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/concord-dev/concord/internal/controlpacks"
 	"github.com/concord-dev/concord/internal/evidence"
-	"github.com/concord-dev/concord/internal/evidence/wiring"
-	"github.com/concord-dev/concord/internal/policy"
-	"github.com/concord-dev/concord/internal/runner"
-	"github.com/concord-dev/concord/pkg/config"
-	"github.com/concord-dev/concord/pkg/controls"
 	"github.com/concord-dev/concord/pkg/report"
 )
 
 func newCheckCmd() *cobra.Command {
 	var (
-		controlsDir  string
-		configPath   string
-		fixturesOnly bool
-		format       string
-		outputPath   string
-		quiet        bool
-		frameworks   []string
-		severities   []string
-		tags         []string
-		controlIDs   []string
-		push         pushOpts
+		eval       evalOptions
+		format     string
+		outputPath string
+		push       pushOpts
 	)
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Evaluate compliance controls against collected evidence",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(configPath)
-			if err != nil {
-				return fmt.Errorf("loading config: %w", err)
-			}
-
-			renderer, err := report.RendererFor(format, report.Opts{OrgName: cfg.Metadata.Name})
+			res, err := runEvaluation(cmd.Context(), os.Stderr, eval)
 			if err != nil {
 				return err
 			}
 
-			roots, err := controlRoots(controlsDir)
+			renderer, err := report.RendererFor(format, report.Opts{OrgName: res.orgName})
 			if err != nil {
 				return err
 			}
-			loaded, err := controls.LoadFrom(roots)
-			if err != nil {
-				return fmt.Errorf("loading controls: %w", err)
-			}
-			totalLoaded := len(loaded)
-			if totalLoaded == 0 {
-				return fmt.Errorf("no controls found in %s or any installed pack", controlsDir)
-			}
-			filter := controls.Filter{
-				Frameworks: frameworks,
-				Severities: severities,
-				Tags:       tags,
-				IDs:        controlIDs,
-			}
-			loaded = filter.Apply(loaded)
-			if len(loaded) == 0 {
-				return fmt.Errorf("filter excluded every control (%d loaded, 0 matched)", totalLoaded)
-			}
-
-			built := wiring.BuildRegistry(context.Background(), wiring.Opts{
-				FixturesOnly:  fixturesOnly,
-				NeededSources: controls.NeededSources(loaded),
-				Warn:          os.Stderr,
-			})
-			defer built.Shutdown()
-			reg := built.Registry
-			if !quiet {
-				describeMode(os.Stderr, reg, fixturesOnly)
-				if !filter.Empty() {
-					fmt.Fprintf(os.Stderr, "Filter: %d of %d control(s) matched\n", len(loaded), totalLoaded)
-				}
-				fmt.Fprintf(os.Stderr, "Checking %d control(s)...\n\n", len(loaded))
-			}
-
-			started := time.Now().UTC()
-			r := runner.New(policy.New(), reg).SetParams(cfg.Controls.Params)
-			findings := r.RunAll(context.Background(), loaded)
-			completed := time.Now().UTC()
 
 			out, closeFn, err := openOutput(outputPath)
 			if err != nil {
@@ -97,24 +40,22 @@ func newCheckCmd() *cobra.Command {
 			}
 			defer closeFn()
 
-			summary, err := renderer.Render(out, findings)
+			summary, err := renderer.Render(out, res.findings)
 			if err != nil {
 				return fmt.Errorf("rendering: %w", err)
 			}
 
 			push.resolveFromCredentials()
 			if push.serverURL != "" {
-				if err := pushFindings(cmd.Context(), push, findings, started, completed); err != nil {
+				if err := pushFindings(cmd.Context(), push, res.findings, res.started, res.completed); err != nil {
 					fmt.Fprintln(os.Stderr, "push failed:", err)
 					os.Exit(1)
 				}
 				// Assets are secondary to findings: a push failure here warns
 				// but doesn't fail the run.
-				if built.Manager != nil {
-					if assets := built.Manager.DrainAssets(); len(assets) > 0 {
-						if err := pushAssets(cmd.Context(), push, assets); err != nil {
-							fmt.Fprintln(os.Stderr, "asset push failed:", err)
-						}
+				if len(res.assets) > 0 {
+					if err := pushAssets(cmd.Context(), push, res.assets); err != nil {
+						fmt.Fprintln(os.Stderr, "asset push failed:", err)
 					}
 				}
 			}
@@ -125,16 +66,9 @@ func newCheckCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&controlsDir, "controls", "./controls", "Path to controls directory")
-	cmd.Flags().StringVar(&configPath, "config", "./concord.yaml", "Path to concord.yaml")
-	cmd.Flags().BoolVar(&fixturesOnly, "fixtures", false, "Force fixture-only mode (skip live collectors)")
+	addEvalFlags(cmd, &eval)
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text|json|oscal|markdown|trust-portal")
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Write findings to this file (default: stdout)")
-	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress prelude (Mode + Checking lines)")
-	cmd.Flags().StringSliceVar(&frameworks, "framework", nil, "Only evaluate controls whose metadata.framework matches (repeatable)")
-	cmd.Flags().StringSliceVar(&severities, "severity", nil, "Only evaluate controls of these severities (repeatable)")
-	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Only evaluate controls carrying any of these tags (repeatable)")
-	cmd.Flags().StringSliceVar(&controlIDs, "control-id", nil, "Only evaluate controls with these ids (repeatable)")
 	addPushFlags(cmd, &push)
 	return cmd
 }
