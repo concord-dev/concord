@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 	"github.com/concord-dev/concord/pkg/report"
 )
 
@@ -42,22 +41,25 @@ re-evaluating, which is handy when an earlier CI step already ran the check.`,
 				return err
 			}
 
-			findings, assets, started, completed, err := applyFindings(cmd.Context(), findingsPath, eval)
+			res, err := applyFindings(cmd.Context(), findingsPath, eval)
 			if err != nil {
 				return err
 			}
 
-			if err := pushFindings(cmd.Context(), push, findings, started, completed); err != nil {
+			if err := pushFindings(cmd.Context(), push, res.findings, res.started, res.completed); err != nil {
 				return err
 			}
+			// Heartbeat each live source so the server's evidence-freshness sweep
+			// can detect when one goes stale.
+			pushEvidenceHeartbeats(cmd.Context(), push, res.liveSources, res.started, res.completed)
 			// Assets are secondary: a push failure warns but doesn't fail apply.
-			if len(assets) > 0 {
-				if err := pushAssets(cmd.Context(), push, assets); err != nil {
+			if len(res.assets) > 0 {
+				if err := pushAssets(cmd.Context(), push, res.assets); err != nil {
 					fmt.Fprintln(os.Stderr, "asset push failed:", err)
 				}
 			}
 
-			summary := report.Summarize(findings)
+			summary := report.Summarize(res.findings)
 			if failOnFail && (summary.Fail > 0 || summary.Err > 0) {
 				fmt.Fprintf(os.Stderr, "✗ %d failing / %d errored control(s) (--fail-on-fail)\n",
 					summary.Fail, summary.Err)
@@ -73,21 +75,17 @@ re-evaluating, which is handy when an earlier CI step already ran the check.`,
 	return cmd
 }
 
-// applyFindings produces the findings apply will record: either a pre-computed
-// file (--findings) or a fresh local evaluation. Timestamps bracket the actual
-// evaluation; for a pre-computed file they collapse to now.
-func applyFindings(ctx context.Context, findingsPath string, eval evalOptions) (findings []apiv1.Finding, assets []apiv1.ObservedAsset, started, completed time.Time, err error) {
+// applyFindings produces what apply will record: either a pre-computed file
+// (--findings) or a fresh local evaluation. For a pre-computed file the
+// timestamps collapse to now and there are no live sources to heartbeat.
+func applyFindings(ctx context.Context, findingsPath string, eval evalOptions) (*evalResult, error) {
 	if findingsPath != "" {
 		f, err := loadFindings(findingsPath)
 		if err != nil {
-			return nil, nil, time.Time{}, time.Time{}, fmt.Errorf("loading %s: %w", findingsPath, err)
+			return nil, fmt.Errorf("loading %s: %w", findingsPath, err)
 		}
 		now := time.Now().UTC()
-		return f, nil, now, now, nil
+		return &evalResult{findings: f, started: now, completed: now}, nil
 	}
-	res, err := runEvaluation(ctx, os.Stderr, eval)
-	if err != nil {
-		return nil, nil, time.Time{}, time.Time{}, err
-	}
-	return res.findings, res.assets, res.started, res.completed, nil
+	return runEvaluation(ctx, os.Stderr, eval)
 }

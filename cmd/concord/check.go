@@ -51,6 +51,9 @@ func newCheckCmd() *cobra.Command {
 					fmt.Fprintln(os.Stderr, "push failed:", err)
 					os.Exit(1)
 				}
+				// Heartbeat each live source so the server's evidence-freshness
+				// sweep can detect when one goes stale.
+				pushEvidenceHeartbeats(cmd.Context(), push, res.liveSources, res.started, res.completed)
 				// Assets are secondary to findings: a push failure here warns
 				// but doesn't fail the run.
 				if len(res.assets) > 0 {

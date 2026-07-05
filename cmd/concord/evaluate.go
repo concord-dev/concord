@@ -35,11 +35,12 @@ type evalOptions struct {
 // whole collector lifecycle (spawn → run → drain → shutdown), so callers get a
 // finished result with nothing to defer.
 type evalResult struct {
-	findings  []apiv1.Finding
-	assets    []apiv1.ObservedAsset
-	orgName   string
-	started   time.Time
-	completed time.Time
+	findings    []apiv1.Finding
+	assets      []apiv1.ObservedAsset
+	liveSources []string // live collector sources active this run (empty in fixtures mode)
+	orgName     string
+	started     time.Time
+	completed   time.Time
 }
 
 // addEvalFlags registers the control-selection flags common to check/plan/apply.
@@ -113,10 +114,11 @@ func runEvaluation(ctx context.Context, w io.Writer, o evalOptions) (*evalResult
 	}
 
 	return &evalResult{
-		findings:  findings,
-		assets:    assets,
-		orgName:   cfg.Metadata.Name,
-		started:   started,
-		completed: completed,
+		findings:    findings,
+		assets:      assets,
+		liveSources: reg.Sources(),
+		orgName:     cfg.Metadata.Name,
+		started:     started,
+		completed:   completed,
 	}, nil
 }

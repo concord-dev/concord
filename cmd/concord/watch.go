@@ -99,6 +99,7 @@ for an always-on agent.`,
 			})
 			defer built.Shutdown()
 
+			liveSources := built.Registry.Sources()
 			check := func(ctx context.Context) ([]apiv1.Finding, error) {
 				started := time.Now().UTC()
 				r := runner.New(policy.New(), built.Registry).SetParams(cfg.Controls.Params)
@@ -109,6 +110,9 @@ for an always-on agent.`,
 					if err := pushFindings(ctx, push, findings, started, completed); err != nil {
 						fmt.Fprintln(os.Stderr, "push failed (continuing):", err)
 					}
+					// Heartbeat live sources each iteration so evidence freshness
+					// tracks the watch cadence.
+					pushEvidenceHeartbeats(ctx, push, liveSources, started, completed)
 				}
 				return findings, nil
 			}

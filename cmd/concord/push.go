@@ -144,6 +144,53 @@ func pushFindings(ctx context.Context, opts pushOpts, findings []apiv1.Finding, 
 	return nil
 }
 
+// pushEvidenceHeartbeats records one evidence-collection heartbeat per live
+// source, so the server's freshness sweep (which fires evidence.stale when a
+// source goes quiet) has something to watch. Best-effort: a failure warns but
+// never fails the run. Empty sources (fixtures-only, or no live collectors)
+// records nothing.
+func pushEvidenceHeartbeats(ctx context.Context, opts pushOpts, sources []string, startedAt, completedAt time.Time) {
+	if len(sources) == 0 {
+		return
+	}
+	opts.resolveFromCredentials()
+	if err := opts.validate(); err != nil {
+		return
+	}
+	url := strings.TrimRight(opts.serverURL, "/") + "/v1/orgs/" + opts.orgSlug +
+		"/projects/" + opts.projectSlug + "/evidence-collections"
+	posted := 0
+	for _, src := range sources {
+		body, err := json.Marshal(map[string]any{
+			"source":       src,
+			"started_at":   startedAt.UTC(),
+			"succeeded_at": completedAt.UTC(),
+		})
+		if err != nil {
+			continue
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+opts.token)
+		req.Header.Set("User-Agent", "concord-agent/"+versionString())
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "evidence heartbeat (%s) failed: %v\n", src, err)
+			continue
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+			posted++
+		}
+	}
+	if posted > 0 {
+		fmt.Fprintf(os.Stderr, "✓ %d evidence heartbeat(s) recorded\n", posted)
+	}
+}
+
 // assetPushClient carries an explicit timeout — unlike findings, an asset
 // batch can be large, and we never want a hung server to wedge the agent.
 var assetPushClient = &http.Client{Timeout: 60 * time.Second}
