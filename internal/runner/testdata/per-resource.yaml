@@ -1,0 +1,28 @@
+apiVersion: concord.dev/v1
+kind: Control
+
+metadata:
+  id: TEST-RES.1
+  name: per-resource-fanout
+  title: Per-resource fan-out test control
+  framework: test
+  category: Test
+  severity: high
+
+spec:
+  description: |
+    Test-only control whose policy emits one resource verdict per user, used to
+    exercise the runner's per-resource fan-out.
+
+  evidence:
+    - id: users
+      source: github
+      type: branch_protection
+      fixture: ./tests/fixtures/per-resource.json
+
+  policy:
+    engine: rego
+    package: concord.test.perres
+    file: ./policies/per-resource.rego
+
+  status: stable

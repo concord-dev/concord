@@ -1,0 +1,4 @@
+[
+  {"id": "bucket-a", "ok": true},
+  {"id": "bucket-b", "ok": false}
+]

@@ -62,3 +62,29 @@ func TestEngine_ParamOverride(t *testing.T) {
 	assert.Equal(t, apiv1.StatusFail, f.Status)
 	assert.Contains(t, f.Messages, "default branch requires 2 approving reviews; minimum is 3")
 }
+
+// A policy with resource_findings must fan out into one finding per resource,
+// each carrying its ResourceID + status and sharing the control's evidence
+// digest. RunAll flattens them.
+func TestRunControl_FansOutPerResource(t *testing.T) {
+	c, err := controls.LoadFile("testdata/per-resource.yaml")
+	require.NoError(t, err)
+	l := controls.Loaded{Control: c, Path: "testdata/per-resource.yaml"}
+
+	fs := New(policy.New(), evidence.NewFileCollector()).RunControl(context.Background(), l)
+	require.Len(t, fs, 2, "one finding per user resource")
+
+	byRes := map[string]apiv1.Finding{}
+	for _, f := range fs {
+		assert.Equal(t, "TEST-RES.1", f.ControlID)
+		assert.NotEmpty(t, f.EvidenceFingerprint, "per-resource findings carry the control's evidence digest")
+		byRes[f.ResourceID] = f
+	}
+	assert.Equal(t, apiv1.StatusPass, byRes["bucket-a"].Status)
+	assert.Equal(t, apiv1.StatusFail, byRes["bucket-b"].Status)
+	assert.Contains(t, byRes["bucket-b"].Messages, "bucket-b failed")
+
+	// RunAll flattens per-resource findings across controls.
+	all := New(policy.New(), evidence.NewFileCollector()).RunAll(context.Background(), []controls.Loaded{l})
+	assert.Len(t, all, 2)
+}

@@ -19,6 +19,19 @@ type Result struct {
 	Deny []string
 	Warn []string
 	Pass bool
+	// Resources holds per-resource verdicts when the policy defines an optional
+	// `resource_findings` rule (a set of {resource, status, messages} objects).
+	// Empty for control-level policies, which keeps the deny/warn contract and
+	// the one-finding-per-control behavior unchanged.
+	Resources []ResourceVerdict
+}
+
+// ResourceVerdict is one resource's outcome under a control (e.g. one S3 bucket,
+// one identity-provider user). status is "pass" | "fail" | "warn".
+type ResourceVerdict struct {
+	Resource string
+	Status   string
+	Messages []string
 }
 
 func (e *Engine) EvaluateFile(ctx context.Context, regoFile, pkg string, input map[string]any) (Result, error) {
@@ -41,9 +54,61 @@ func (e *Engine) EvaluateWithModules(ctx context.Context, mods map[string]string
 		return Result{}, fmt.Errorf("deny query: %w", err)
 	}
 	warn, _ := query(ctx, mods, fmt.Sprintf("data.%s.warn", pkg), input)
+	resources, err := queryResources(ctx, mods, fmt.Sprintf("data.%s.resource_findings", pkg), input)
+	if err != nil {
+		return Result{}, fmt.Errorf("resource_findings query: %w", err)
+	}
 	sort.Strings(deny)
 	sort.Strings(warn)
-	return Result{Deny: deny, Warn: warn, Pass: len(deny) == 0}, nil
+	return Result{Deny: deny, Warn: warn, Pass: len(deny) == 0, Resources: resources}, nil
+}
+
+// queryResources evaluates the optional `resource_findings` rule and decodes its
+// set of {resource, status, messages} objects. An undefined rule yields no
+// results (not an error), so control-level policies simply return nil.
+func queryResources(ctx context.Context, mods map[string]string, q string, input map[string]any) ([]ResourceVerdict, error) {
+	opts := []func(*rego.Rego){rego.Query(q), rego.Input(input)}
+	for name, src := range mods {
+		opts = append(opts, rego.Module(name, src))
+	}
+	rs, err := rego.New(opts...).Eval(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []ResourceVerdict
+	for _, r := range rs {
+		for _, e := range r.Expressions {
+			items, ok := e.Value.([]any)
+			if !ok {
+				continue
+			}
+			for _, item := range items {
+				m, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				v := ResourceVerdict{}
+				if s, ok := m["resource"].(string); ok {
+					v.Resource = s
+				}
+				if s, ok := m["status"].(string); ok {
+					v.Status = s
+				}
+				if msgs, ok := m["messages"].([]any); ok {
+					for _, mm := range msgs {
+						if s, ok := mm.(string); ok {
+							v.Messages = append(v.Messages, s)
+						}
+					}
+				}
+				if v.Resource != "" {
+					out = append(out, v)
+				}
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Resource < out[j].Resource })
+	return out, nil
 }
 
 func query(ctx context.Context, mods map[string]string, q string, input map[string]any) ([]string, error) {
