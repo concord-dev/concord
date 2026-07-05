@@ -25,6 +25,8 @@ type pushOpts struct {
 	projectSlug string
 	token       string
 	agentLabel  string // free-form, lands in agent_version
+	keyPath     string // ed25519 private key file; when set with keyID, signs the submission
+	keyID       string // registered key id the server verifies against
 }
 
 func newPushCmd() *cobra.Command {
@@ -68,6 +70,8 @@ func addPushFlags(cmd *cobra.Command, opts *pushOpts) {
 	cmd.Flags().StringVar(&opts.projectSlug, "project", os.Getenv("CONCORD_PROJECT_SLUG"), "Project slug (or CONCORD_PROJECT_SLUG; defaults to the profile's default_project or 'default')")
 	cmd.Flags().StringVar(&opts.token, "token", os.Getenv("CONCORD_API_TOKEN"), "API token (or CONCORD_API_TOKEN)")
 	cmd.Flags().StringVar(&opts.agentLabel, "agent-label", "", "Optional agent identifier recorded on the run (e.g. CI job name)")
+	cmd.Flags().StringVar(&opts.keyPath, "key", os.Getenv("CONCORD_AGENT_KEY"), "Path to an ed25519 agent private key (from `concord agent keygen`) to sign the submission")
+	cmd.Flags().StringVar(&opts.keyID, "key-id", os.Getenv("CONCORD_AGENT_KEY_ID"), "Registered key id the server verifies the signature against (required with --key)")
 }
 
 func pushFindings(ctx context.Context, opts pushOpts, findings []apiv1.Finding, startedAt, completedAt time.Time) error {
@@ -102,6 +106,20 @@ func pushFindings(ctx context.Context, opts pushOpts, findings []apiv1.Finding, 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+opts.token)
 	req.Header.Set("User-Agent", "concord-agent/"+versionString())
+
+	// Sign the exact bytes we send so the server can verify which agent produced
+	// the run and that it wasn't altered in transit (the trust seam).
+	if opts.keyPath != "" || opts.keyID != "" {
+		if opts.keyPath == "" || opts.keyID == "" {
+			return errors.New("--key and --key-id must be provided together to sign a submission")
+		}
+		sig, err := signSubmission(opts.keyPath, body)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("X-Concord-Key-Id", opts.keyID)
+		req.Header.Set("X-Concord-Signature", sig)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

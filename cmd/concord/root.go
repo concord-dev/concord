@@ -78,6 +78,7 @@ Audits become continuous instead of episodic.`,
 	add(groupAccount, newFindingsCmd())
 	add(groupAccount, newScoreCmd())
 	add(groupAccount, newProvenanceCmd())
+	add(groupAccount, newAgentCmd())
 
 	// Administration — platform GRC CRUD. These live under a single `admin`
 	// parent so the top-level CLI stays lean (assessment/36 phase 2). Each is
