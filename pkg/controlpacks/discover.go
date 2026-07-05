@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/concord-dev/concord/pkg/semverx"
 )
 
 // Discovered describes a single control pack found on disk.
@@ -71,8 +73,7 @@ func newestVersion(frameworkDir, framework string) *Discovered {
 	if len(versionDirs) == 0 {
 		return nil
 	}
-	sort.Strings(versionDirs)
-	ver := versionDirs[len(versionDirs)-1]
+	ver := semverx.Newest(versionDirs)
 	dir := filepath.Join(frameworkDir, ver)
 
 	pack, err := ParsePack(filepath.Join(dir, PackFile))

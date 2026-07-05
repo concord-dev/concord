@@ -19,6 +19,7 @@ import (
 	pluginv1 "github.com/concord-dev/concord-plugin-sdk/proto/concord/plugin/v1"
 
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
+	"github.com/concord-dev/concord/pkg/semverx"
 )
 
 // Manager discovers plugin binaries on disk and spawns them on demand.
@@ -130,8 +131,7 @@ func (m *Manager) scanDir(dir string) error {
 		if len(versionDirs) == 0 {
 			continue
 		}
-		sort.Strings(versionDirs)
-		ver := versionDirs[len(versionDirs)-1]
+		ver := semverx.Newest(versionDirs)
 
 		versionDir := filepath.Join(dir, src.Name(), ver)
 		bin := filepath.Join(versionDir, "concord-plugin-"+src.Name())
