@@ -56,13 +56,20 @@ for an always-on agent.`,
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
 			}
-			loaded, err := controls.Load(controlsDir)
+			// Use the same control set as check/apply — the --controls dir plus
+			// every installed pack — so watch never silently evaluates a smaller
+			// set than a one-shot check.
+			roots, err := controlRoots(controlsDir)
+			if err != nil {
+				return err
+			}
+			loaded, err := controls.LoadFrom(roots)
 			if err != nil {
 				return fmt.Errorf("loading controls: %w", err)
 			}
 			totalLoaded := len(loaded)
 			if totalLoaded == 0 {
-				return fmt.Errorf("no controls found in %s", controlsDir)
+				return fmt.Errorf("no controls found in %s or any installed pack", controlsDir)
 			}
 			filter := controls.Filter{
 				Frameworks: frameworks,
