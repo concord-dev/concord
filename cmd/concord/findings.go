@@ -24,6 +24,7 @@ import (
 type findingDTO struct {
 	ID                      string     `json:"id"`
 	ControlID               string     `json:"control_id"`
+	ResourceID              string     `json:"resource_id,omitempty"`
 	Framework               string     `json:"framework"`
 	Severity                string     `json:"severity"`
 	Status                  string     `json:"status"`
@@ -227,6 +228,7 @@ func newFindingsListCmd() *cobra.Command {
 	var (
 		serverURL, orgSlug, token     string
 		statusFilter, frameworkFilter []string
+		controlID, resourceID         string
 		format                        string
 	)
 	cmd := &cobra.Command{
@@ -244,6 +246,12 @@ func newFindingsListCmd() *cobra.Command {
 			for _, f := range frameworkFilter {
 				q.Add("framework", f)
 			}
+			if controlID != "" {
+				q.Set("control_id", controlID)
+			}
+			if resourceID != "" {
+				q.Set("resource_id", resourceID)
+			}
 			rows, err := getFindings(cmd.Context(), fs, q)
 			if err != nil {
 				return err
@@ -254,6 +262,8 @@ func newFindingsListCmd() *cobra.Command {
 	addFindingsServerFlags(cmd, &serverURL, &orgSlug, &token)
 	cmd.Flags().StringSliceVar(&statusFilter, "status", nil, "Filter by lifecycle status (repeatable)")
 	cmd.Flags().StringSliceVar(&frameworkFilter, "framework", nil, "Filter by framework id (repeatable)")
+	cmd.Flags().StringVar(&controlID, "control-id", "", "Filter to one control id (e.g. list every resource evaluated for CC6.1)")
+	cmd.Flags().StringVar(&resourceID, "resource-id", "", "Filter to one resource id")
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text|json")
 	return cmd
 }
@@ -448,14 +458,18 @@ func printFindings(w io.Writer, rows []findingDTO, format string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tFRAMEWORK\tCONTROL\tEVAL\tSTATUS\tSUPPRESSED-UNTIL")
+	fmt.Fprintln(tw, "ID\tFRAMEWORK\tCONTROL\tRESOURCE\tEVAL\tSTATUS\tSUPPRESSED-UNTIL")
 	for _, f := range rows {
 		expiry := "—"
 		if f.SuppressedUntil != nil {
 			expiry = f.SuppressedUntil.Format(time.RFC3339)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			f.ID, f.Framework, f.ControlID, f.CurrentEvaluationStatus, f.Status, expiry)
+		resource := f.ResourceID
+		if resource == "" {
+			resource = "—"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			f.ID, f.Framework, f.ControlID, resource, f.CurrentEvaluationStatus, f.Status, expiry)
 	}
 	return tw.Flush()
 }

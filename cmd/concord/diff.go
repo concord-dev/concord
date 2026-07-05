@@ -137,16 +137,26 @@ func renderEventTable(w io.Writer, heading string, events []watcher.Event, withF
 		fmt.Fprintln(w, "| Control | Title | Change |")
 		fmt.Fprintln(w, "|---|---|---|")
 		for _, e := range events {
-			fmt.Fprintf(w, "| `%s` | %s | `%s` → `%s` |\n", e.ControlID, mdEscape(e.Title), e.From, e.To)
+			fmt.Fprintf(w, "| `%s` | %s | `%s` → `%s` |\n", controlLabel(e.ControlID, e.ResourceID), mdEscape(e.Title), e.From, e.To)
 		}
 	} else {
 		fmt.Fprintln(w, "| Control | Title | Status |")
 		fmt.Fprintln(w, "|---|---|---|")
 		for _, e := range events {
-			fmt.Fprintf(w, "| `%s` | %s | `%s` |\n", e.ControlID, mdEscape(e.Title), e.To)
+			fmt.Fprintf(w, "| `%s` | %s | `%s` |\n", controlLabel(e.ControlID, e.ResourceID), mdEscape(e.Title), e.To)
 		}
 	}
 	fmt.Fprintln(w)
+}
+
+// controlLabel renders a control id, appending the resource when the finding is
+// per-resource ("CC6.1 · arn:aws:s3:::logs"), so drift on a specific resource
+// is legible in both the plan and diff output.
+func controlLabel(controlID, resourceID string) string {
+	if resourceID == "" {
+		return controlID
+	}
+	return controlID + " · " + resourceID
 }
 
 func mdEscape(s string) string {

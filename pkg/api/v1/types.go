@@ -64,13 +64,20 @@ const (
 )
 
 type Finding struct {
-	ControlID string        `json:"control_id"`
-	Title     string        `json:"title"`
-	Framework string        `json:"framework"`
-	Severity  string        `json:"severity"`
-	Status    FindingStatus `json:"status"`
-	Messages  []string      `json:"messages,omitempty"`
-	Warnings  []string      `json:"warnings,omitempty"`
+	ControlID string `json:"control_id"`
+	// ResourceID identifies the specific resource this finding is about (e.g. an
+	// S3 bucket ARN, a repo, a user). It extends finding identity beyond the
+	// control so one control evaluated against many resources yields one finding
+	// per resource ("which bucket failed CC6?"). Empty means a control-level
+	// finding — the aggregate verdict — which is the default and preserves the
+	// original one-finding-per-control behavior.
+	ResourceID string        `json:"resource_id,omitempty"`
+	Title      string        `json:"title"`
+	Framework  string        `json:"framework"`
+	Severity   string        `json:"severity"`
+	Status     FindingStatus `json:"status"`
+	Messages   []string      `json:"messages,omitempty"`
+	Warnings   []string      `json:"warnings,omitempty"`
 	// EvidenceFingerprint is a sha256 digest of the exact evidence the agent
 	// evaluated to produce this finding (see FingerprintEvidence). It commits the
 	// result to its inputs so the server records what the finding was based on

@@ -199,7 +199,7 @@ func renderPlanText(w io.Writer, current []apiv1.Finding, events []watcher.Event
 				changed++
 			}
 		}
-		fmt.Fprintf(tw, "  %s %s\t%s\t%s\n", sym, e.ControlID, planTransition(e), note)
+		fmt.Fprintf(tw, "  %s %s\t%s\t%s\n", sym, controlLabel(e.ControlID, e.ResourceID), planTransition(e), note)
 	}
 	_ = tw.Flush()
 

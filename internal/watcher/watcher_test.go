@@ -29,6 +29,25 @@ func TestDiff_PassToFailIsRegression(t *testing.T) {
 	assert.Equal(t, apiv1.StatusFail, events[0].To)
 }
 
+// Per-resource findings must not collapse: the same control on two resources is
+// two distinct entries, and a regression on one resource is reported for that
+// resource alone.
+func TestDiff_PerResourceKeyedIndependently(t *testing.T) {
+	prev := []apiv1.Finding{
+		{ControlID: "CC6.1", ResourceID: "bucket-a", Status: apiv1.StatusPass},
+		{ControlID: "CC6.1", ResourceID: "bucket-b", Status: apiv1.StatusPass},
+	}
+	curr := []apiv1.Finding{
+		{ControlID: "CC6.1", ResourceID: "bucket-a", Status: apiv1.StatusPass},
+		{ControlID: "CC6.1", ResourceID: "bucket-b", Status: apiv1.StatusFail},
+	}
+	events := watcher.Diff(prev, curr, fixed)
+	require.Len(t, events, 1, "only the regressed resource should produce an event")
+	assert.Equal(t, "CC6.1", events[0].ControlID)
+	assert.Equal(t, "bucket-b", events[0].ResourceID)
+	assert.Equal(t, "regression", events[0].Reason)
+}
+
 func TestDiff_FailToPassIsRemediated(t *testing.T) {
 	prev := []apiv1.Finding{{ControlID: "X", Status: apiv1.StatusFail}}
 	curr := []apiv1.Finding{{ControlID: "X", Status: apiv1.StatusPass}}

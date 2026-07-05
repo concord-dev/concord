@@ -16,12 +16,13 @@ import (
 type CheckFunc func(ctx context.Context) ([]apiv1.Finding, error)
 
 type Event struct {
-	ControlID string              `json:"control_id"`
-	Title     string              `json:"title"`
-	From      apiv1.FindingStatus `json:"from,omitempty"`
-	To        apiv1.FindingStatus `json:"to"`
-	Reason    string              `json:"reason"`
-	At        time.Time           `json:"at"`
+	ControlID  string              `json:"control_id"`
+	ResourceID string              `json:"resource_id,omitempty"`
+	Title      string              `json:"title"`
+	From       apiv1.FindingStatus `json:"from,omitempty"`
+	To         apiv1.FindingStatus `json:"to"`
+	Reason     string              `json:"reason"`
+	At         time.Time           `json:"at"`
 }
 
 type Options struct {
@@ -117,32 +118,37 @@ func Diff(prev, curr []apiv1.Finding, at time.Time) []Event {
 	currByID := indexByID(curr)
 
 	var events []Event
-	for id, c := range currByID {
-		p, hadBefore := prevByID[id]
+	for key, c := range currByID {
+		p, hadBefore := prevByID[key]
 		switch {
 		case !hadBefore:
 			events = append(events, Event{
-				ControlID: id, Title: c.Title, To: c.Status,
+				ControlID: c.ControlID, ResourceID: c.ResourceID, Title: c.Title, To: c.Status,
 				Reason: "new control added since last run", At: at,
 			})
 		case p.Status != c.Status:
 			events = append(events, Event{
-				ControlID: id, Title: c.Title,
+				ControlID: c.ControlID, ResourceID: c.ResourceID, Title: c.Title,
 				From: p.Status, To: c.Status,
 				Reason: changeReason(p.Status, c.Status), At: at,
 			})
 		}
 	}
-	for id, p := range prevByID {
-		if _, ok := currByID[id]; !ok {
+	for key, p := range prevByID {
+		if _, ok := currByID[key]; !ok {
 			events = append(events, Event{
-				ControlID: id, Title: p.Title,
+				ControlID: p.ControlID, ResourceID: p.ResourceID, Title: p.Title,
 				From: p.Status, To: apiv1.FindingStatus("removed"),
 				Reason: "control removed since last run", At: at,
 			})
 		}
 	}
-	sort.Slice(events, func(i, j int) bool { return events[i].ControlID < events[j].ControlID })
+	sort.Slice(events, func(i, j int) bool {
+		if events[i].ControlID != events[j].ControlID {
+			return events[i].ControlID < events[j].ControlID
+		}
+		return events[i].ResourceID < events[j].ResourceID
+	})
 	return events
 }
 
@@ -160,12 +166,20 @@ func changeReason(from, to apiv1.FindingStatus) string {
 	return "status changed"
 }
 
+// indexByID keys findings by control + resource so a control evaluated against
+// several resources yields distinct entries rather than collapsing to one.
 func indexByID(f []apiv1.Finding) map[string]apiv1.Finding {
 	out := make(map[string]apiv1.Finding, len(f))
 	for _, x := range f {
-		out[x.ControlID] = x
+		out[findingKey(x)] = x
 	}
 	return out
+}
+
+// findingKey is the drift identity of a finding: control plus resource. The NUL
+// separator keeps "a"+"bc" distinct from "ab"+"c".
+func findingKey(f apiv1.Finding) string {
+	return f.ControlID + "\x00" + f.ResourceID
 }
 
 func LastRunPath(outputDir string) string {
