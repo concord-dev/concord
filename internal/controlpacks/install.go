@@ -298,17 +298,6 @@ func writeLockEntry(path, framework string, pulled *ociart.PullResult, verify *o
 	return lockfile.Save(path, lf)
 }
 
-func resolveInstallRoot(root string) (string, error) {
-	if root != "" {
-		return root, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolving home dir: %w", err)
-	}
-	return filepath.Join(home, ".concord", "controlpacks"), nil
-}
-
 func defaultFrameworkFromArtifact(artifact string) string {
 	base := artifact
 	for i := len(base) - 1; i >= 0; i-- {

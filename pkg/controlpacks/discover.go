@@ -7,7 +7,7 @@ import (
 	"sort"
 )
 
-// Installed describes a single discovered pack on disk.
+// Discovered describes a single control pack found on disk.
 type Discovered struct {
 	Framework string
 	Version   string
@@ -15,9 +15,24 @@ type Discovered struct {
 	Pack      *Pack
 }
 
-// Discover walks installRoot and returns every readable, schema-valid pack.
+// ResolveInstallRoot returns the pack install root, defaulting to
+// ~/.concord/controlpacks when root is empty.
+func ResolveInstallRoot(root string) (string, error) {
+	if root != "" {
+		return root, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolving home dir: %w", err)
+	}
+	return filepath.Join(home, ".concord", "controlpacks"), nil
+}
+
+// Discover walks installRoot and returns every readable, schema-valid pack
+// (newest version per framework). An absent root is not an error — it yields
+// no packs, so a consumer can call it unconditionally.
 func Discover(installRoot string) ([]Discovered, error) {
-	root, err := resolveInstallRoot(installRoot)
+	root, err := ResolveInstallRoot(installRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +82,9 @@ func newestVersion(frameworkDir, framework string) *Discovered {
 	return &Discovered{Framework: framework, Version: ver, Dir: dir, Pack: pack}
 }
 
-// ControlsDirs returns the list of dirs containing per-control YAML files for the loader to walk.
+// ControlsDirs returns the directories containing per-control YAML for a
+// control loader to walk: each pack's controls/ subdir, or the pack root when
+// that subdir is absent.
 func ControlsDirs(packs []Discovered) []string {
 	out := make([]string, 0, len(packs))
 	for _, p := range packs {
