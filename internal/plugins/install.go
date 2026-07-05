@@ -66,6 +66,11 @@ func Install(ctx context.Context, ref string, opts InstallOptions) (*InstalledPl
 	if err != nil {
 		return nil, err
 	}
+	// Record the binary's sha256 so Discover can re-check it before exec — the
+	// OCI signature is verified only at download time (see #11a).
+	if err := WriteBinaryDigest(filepath.Dir(binaryPath), pulled.Layer.Bytes); err != nil {
+		return nil, fmt.Errorf("recording binary digest: %w", err)
+	}
 	fmt.Fprintf(progress, "  → digest %s\n", pulled.Digest)
 	fmt.Fprintf(progress, "  → installed %s\n", binaryPath)
 

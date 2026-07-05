@@ -144,11 +144,17 @@ func (d *doctor) runPluginCollectors() {
 	}
 	defer func() { _ = mgr.Shutdown(d.ctx) }()
 
+	// Surface binaries skipped for failing their install-time integrity check so
+	// a "missing" plugin isn't silently mistaken for "not installed".
+	integrityErrs := mgr.IntegrityErrors()
 	available := mgr.Available()
-	if len(available) == 0 {
+	if len(available) == 0 && len(integrityErrs) == 0 {
 		return
 	}
 	d.section("Plugin collectors")
+	for _, err := range integrityErrs {
+		d.fail("plugin integrity", err.Error())
+	}
 	for _, src := range available {
 		caps, err := mgr.Capabilities(d.ctx, src)
 		if err != nil {

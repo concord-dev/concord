@@ -25,10 +25,20 @@ import (
 type Manager struct {
 	dirs []string
 
-	mu         sync.Mutex
-	discovered map[string]*entry
-	running    map[string]*client
-	assets     *assetSink
+	mu            sync.Mutex
+	discovered    map[string]*entry
+	running       map[string]*client
+	assets        *assetSink
+	integrityErrs []error // binaries skipped at Discover for failing the digest check
+}
+
+// IntegrityErrors returns any plugin binaries that were skipped during the last
+// Discover because their on-disk sha256 did not match the digest recorded at
+// install (a tampered/swapped binary). Empty on a clean discovery.
+func (m *Manager) IntegrityErrors() []error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]error(nil), m.integrityErrs...)
 }
 
 type entry struct {
@@ -89,6 +99,7 @@ func (m *Manager) Discover() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.discovered = make(map[string]*entry)
+	m.integrityErrs = nil
 	for _, dir := range m.dirs {
 		if err := m.scanDir(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("scanning %s: %w", dir, err)
@@ -125,6 +136,12 @@ func (m *Manager) scanDir(dir string) error {
 		versionDir := filepath.Join(dir, src.Name(), ver)
 		bin := filepath.Join(versionDir, "concord-plugin-"+src.Name())
 		if _, err := os.Stat(bin); err != nil {
+			continue
+		}
+		// Refuse to register a binary that no longer matches the digest recorded
+		// at install time — a locally swapped/tampered binary is not executed.
+		if err := verifyBinaryDigest(versionDir, bin); err != nil {
+			m.integrityErrs = append(m.integrityErrs, err)
 			continue
 		}
 		m.discovered[src.Name()] = &entry{
