@@ -53,7 +53,13 @@ func (e *Engine) EvaluateWithModules(ctx context.Context, mods map[string]string
 	if err != nil {
 		return Result{}, fmt.Errorf("deny query: %w", err)
 	}
-	warn, _ := query(ctx, mods, fmt.Sprintf("data.%s.warn", pkg), input)
+	warn, warnErr := query(ctx, mods, fmt.Sprintf("data.%s.warn", pkg), input)
+	if warnErr != nil {
+		// A broken warn rule shouldn't fail an otherwise-valid control (warns are
+		// advisory), but it must not vanish either — surface it as a warning so
+		// the policy author sees it.
+		warn = append(warn, fmt.Sprintf("warn rule evaluation error: %v", warnErr))
+	}
 	resources, err := queryResources(ctx, mods, fmt.Sprintf("data.%s.resource_findings", pkg), input)
 	if err != nil {
 		return Result{}, fmt.Errorf("resource_findings query: %w", err)
