@@ -57,6 +57,7 @@ concord-admin; run 'concord admin <verb>' with it installed.`,
 	add(groupCore, newCheckCmd())
 	add(groupCore, newPlanCmd())
 	add(groupCore, newApplyCmd())
+	add(groupCore, newGateCmd())
 	add(groupCore, newWatchCmd())
 	add(groupCore, newDiffCmd())
 	add(groupCore, newExplainCmd())

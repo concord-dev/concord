@@ -15,10 +15,11 @@ import (
 
 func newCheckCmd() *cobra.Command {
 	var (
-		eval       evalOptions
-		format     string
-		outputPath string
-		push       pushOpts
+		eval          evalOptions
+		format        string
+		outputPath    string
+		sarifLocation string
+		push          pushOpts
 	)
 	cmd := &cobra.Command{
 		Use:   "check",
@@ -29,7 +30,7 @@ func newCheckCmd() *cobra.Command {
 				return err
 			}
 
-			renderer, err := report.RendererFor(format, report.Opts{OrgName: res.orgName})
+			renderer, err := report.RendererFor(format, report.Opts{OrgName: res.orgName, SARIFLocationURI: sarifLocation})
 			if err != nil {
 				return err
 			}
@@ -70,8 +71,9 @@ func newCheckCmd() *cobra.Command {
 		},
 	}
 	addEvalFlags(cmd, &eval)
-	cmd.Flags().StringVar(&format, "format", "text", "Output format: text|json|oscal|markdown|trust-portal")
+	cmd.Flags().StringVar(&format, "format", "text", "Output format: text|json|oscal|markdown|sarif|trust-portal")
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Write findings to this file (default: stdout)")
+	cmd.Flags().StringVar(&sarifLocation, "sarif-location", "", "Repo file SARIF results point at for PR annotations (default: concord.yaml)")
 	addPushFlags(cmd, &push)
 	return cmd
 }

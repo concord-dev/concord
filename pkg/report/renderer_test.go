@@ -227,6 +227,54 @@ func decodeFindingUUIDs(t *testing.T, raw []byte) map[string]string {
 	return out
 }
 
+func TestSARIFRenderer_StructureAndDeterminism(t *testing.T) {
+	var a, b bytes.Buffer
+	_, err := report.SARIFRenderer{}.Render(&a, sampleFindings())
+	require.NoError(t, err)
+	_, err = report.SARIFRenderer{}.Render(&b, sampleFindings())
+	require.NoError(t, err)
+	assert.Equal(t, a.String(), b.String(), "SARIF must render deterministically for clean diffs")
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(a.Bytes(), &doc))
+	assert.Equal(t, "2.1.0", doc["version"])
+	run := doc["runs"].([]any)[0].(map[string]any)
+	driver := run["tool"].(map[string]any)["driver"].(map[string]any)
+	assert.Equal(t, "Concord", driver["name"])
+
+	// A rule per distinct control (3 in the sample).
+	assert.Len(t, driver["rules"].([]any), 3)
+
+	// Results: the fail + error findings are errors; the finding with warnings
+	// adds a warning. The passing control (no warnings) produces no result.
+	results := run["results"].([]any)
+	var errs, warns int
+	byRule := map[string]bool{}
+	for _, r := range results {
+		rm := r.(map[string]any)
+		byRule[rm["ruleId"].(string)] = true
+		switch rm["level"].(string) {
+		case "error":
+			errs++
+		case "warning":
+			warns++
+		}
+		// Every result carries a location + a stable fingerprint for GitHub.
+		require.NotEmpty(t, rm["locations"])
+		assert.NotEmpty(t, rm["partialFingerprints"])
+	}
+	assert.Equal(t, 2, errs, "ISO42001-6.1 (fail) + FAKE-1 (error)")
+	assert.Equal(t, 1, warns, "ISO42001-6.1 has a warning")
+	assert.False(t, byRule["SOC2-CC8.1"], "a clean passing control must not produce a result")
+}
+
+func TestSARIFRenderer_LocationURIOverride(t *testing.T) {
+	var buf bytes.Buffer
+	_, err := report.SARIFRenderer{LocationURI: "posture/concord.yaml"}.Render(&buf, sampleFindings())
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "posture/concord.yaml")
+}
+
 func TestMarkdownRenderer(t *testing.T) {
 	var buf bytes.Buffer
 	_, err := report.MarkdownRenderer{}.Render(&buf, sampleFindings())

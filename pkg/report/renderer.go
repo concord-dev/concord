@@ -36,6 +36,9 @@ type Renderer interface {
 
 type Opts struct {
 	OrgName string
+	// SARIFLocationURI is the repo-relative file SARIF results point at (GitHub
+	// annotates it). Empty defaults to concord.yaml.
+	SARIFLocationURI string
 }
 
 func RendererFor(format string, opts Opts) (Renderer, error) {
@@ -49,8 +52,10 @@ func RendererFor(format string, opts Opts) (Renderer, error) {
 	case "markdown", "md":
 		return MarkdownRenderer{}, nil
 	case "trust-portal":
-		return TrustPortalRenderer(opts), nil
+		return TrustPortalRenderer{OrgName: opts.OrgName}, nil
+	case "sarif":
+		return SARIFRenderer{LocationURI: opts.SARIFLocationURI}, nil
 	default:
-		return nil, fmt.Errorf("unknown format %q (want one of text|json|oscal|markdown|trust-portal)", format)
+		return nil, fmt.Errorf("unknown format %q (want one of text|json|oscal|markdown|sarif|trust-portal)", format)
 	}
 }

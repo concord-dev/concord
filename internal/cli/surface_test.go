@@ -17,7 +17,7 @@ import (
 // guard (rule 5) fails the build so the surface never grows silently.
 var wantVisibleTopLevel = []string{
 	// Core — author & evaluate compliance as code (offline).
-	"init", "check", "plan", "apply", "watch", "diff", "explain", "list",
+	"init", "check", "plan", "apply", "gate", "watch", "diff", "explain", "list",
 	"control", "scaffold", "evidence-type", "doctor", "version",
 	// Ecosystem — plugins, packs, frameworks, extensions.
 	"plugin", "controlpack", "framework", "install", "add", "remove", "outdated", "oscal", "extension",
