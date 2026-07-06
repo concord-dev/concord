@@ -1,0 +1,97 @@
+name: "Concord Compliance Gate"
+description: "Evaluate compliance controls as code and gate the PR, publishing results to GitHub code scanning (SARIF)."
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  version:
+    description: "Concord release to use (a git tag like v0.3.0, or 'latest')."
+    default: "latest"
+  controls:
+    description: "Path to the controls directory."
+    default: "controls"
+  config:
+    description: "Path to concord.yaml."
+    default: "concord.yaml"
+  framework:
+    description: "Restrict evaluation to a single framework id (optional)."
+    default: ""
+  fixtures:
+    description: "Run in fixtures-only mode (offline; no live collectors)."
+    default: "false"
+  fail-on-warnings:
+    description: "Fail the gate when a control emits warnings, not just failures."
+    default: "false"
+  sarif-file:
+    description: "Where to write the SARIF report."
+    default: "concord.sarif"
+  upload-sarif:
+    description: "Upload the SARIF report to GitHub code scanning (needs security-events: write)."
+    default: "true"
+  working-directory:
+    description: "Directory to run concord in."
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Install concord
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        os=$(uname -s | tr '[:upper:]' '[:lower:]')
+        arch=$(uname -m)
+        case "$arch" in aarch64) arch=arm64 ;; esac
+        pattern="concord_*_${os}_${arch}.tar.gz"
+        dest="${RUNNER_TEMP:-/tmp}/concord-bin"
+        mkdir -p "$dest"
+        if [ "$VERSION" = "latest" ]; then
+          gh release download --repo concord-dev/concord --pattern "$pattern" --dir "$dest"
+        else
+          gh release download "$VERSION" --repo concord-dev/concord --pattern "$pattern" --dir "$dest"
+        fi
+        tar -xzf "$dest"/*.tar.gz -C "$dest"
+        echo "$dest" >> "$GITHUB_PATH"
+        "$dest/concord" version
+
+    - name: Concord gate
+      id: gate
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      continue-on-error: true
+      env:
+        CONTROLS: ${{ inputs.controls }}
+        CONFIG: ${{ inputs.config }}
+        FRAMEWORK: ${{ inputs.framework }}
+        FIXTURES: ${{ inputs.fixtures }}
+        WARN: ${{ inputs.fail-on-warnings }}
+        SARIF: ${{ inputs.sarif-file }}
+      run: |
+        args=(--controls "$CONTROLS" --config "$CONFIG" --sarif "$SARIF")
+        [ -n "$FRAMEWORK" ] && args+=(--framework "$FRAMEWORK")
+        [ "$FIXTURES" = "true" ] && args+=(--fixtures)
+        [ "$WARN" = "true" ] && args+=(--warn-as-error)
+        set +e
+        concord gate "${args[@]}"
+        echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+    - name: Upload SARIF to code scanning
+      if: ${{ always() && inputs.upload-sarif == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.working-directory }}/${{ inputs.sarif-file }}
+
+    - name: Enforce gate
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        code="${{ steps.gate.outputs.exit_code }}"
+        if [ "${code:-1}" != "0" ]; then
+          echo "::error::Concord compliance gate failed (exit ${code:-1}). See the code scanning alerts for failing controls."
+          exit "${code:-1}"
+        fi
+        echo "Concord compliance gate passed."
