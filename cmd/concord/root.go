@@ -77,6 +77,7 @@ Audits become continuous instead of episodic.`,
 	add(groupEcosystem, newRemoveCmd())
 	add(groupEcosystem, newOutdatedCmd())
 	add(groupEcosystem, newOSCALCmd())
+	add(groupEcosystem, newExtensionCmd())
 
 	// Account — connect to a server and read back pushed results.
 	add(groupAccount, newLoginCmd())
