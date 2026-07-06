@@ -312,9 +312,7 @@ func parseConstraints(constraints []string) ([]*semver.Constraints, error) {
 		if c == "" {
 			continue
 		}
-		if strings.HasPrefix(c, "=") {
-			c = strings.TrimPrefix(c, "=")
-		}
+		c = strings.TrimPrefix(c, "=")
 		cleaned := strings.ReplaceAll(c, "v", "")
 		parsed, err := semver.NewConstraint(cleaned)
 		if err != nil {

@@ -182,7 +182,7 @@ func extractTarGz(src io.Reader, dest string) error {
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return fmt.Errorf("mkdir %s: %w", target, err)
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if err := writeFile(target, tr, os.FileMode(hdr.Mode)&0o777); err != nil {
 				return err
 			}

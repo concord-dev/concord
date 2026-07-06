@@ -43,7 +43,7 @@ func extractTemplateTarball(src io.Reader, dest string) error {
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return fmt.Errorf("mkdir %s: %w", target, err)
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
 			}
@@ -76,7 +76,7 @@ func stripTopLevel(name string) string {
 
 func safeTemplateJoin(root, name string) (string, error) {
 	if strings.Contains(name, "..") {
-		return "", fmt.Errorf("refusing %s in template tarball: contains ..", name)
+		return "", fmt.Errorf("refusing template tarball entry %q: contains a parent-dir segment", name)
 	}
 	if filepath.IsAbs(name) {
 		return "", fmt.Errorf("refusing %s in template tarball: absolute path", name)

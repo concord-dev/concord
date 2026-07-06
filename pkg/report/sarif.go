@@ -100,9 +100,7 @@ func ruleFor(f apiv1.Finding) sarifRule {
 	if f.Framework != "" {
 		tags = append(tags, f.Framework)
 	}
-	for _, fw := range sortedKeys(f.Mappings) {
-		tags = append(tags, fw)
-	}
+	tags = append(tags, sortedKeys(f.Mappings)...)
 	props["tags"] = tags
 	return sarifRule{
 		ID:               f.ControlID,

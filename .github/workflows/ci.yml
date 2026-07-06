@@ -49,7 +49,9 @@ jobs:
       - name: deadcode
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
-          deadcode -test ./...
+          # Scope findings to our own module — deadcode otherwise reports the
+          # SDK's public API (functions for plugin authors) as "unreachable".
+          deadcode -test -filter github.com/concord-dev/concord/ ./...
 
       - name: gofmt
         run: |

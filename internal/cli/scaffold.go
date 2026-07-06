@@ -12,8 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const templateRefBase = "https://github.com/concord-dev/concord-%s-template"
-
 func newPluginScaffoldCmd() *cobra.Command {
 	return newScaffoldCmd("plugin", "concord-plugin-template", "Plugin source identifier (e.g. datadog)")
 }
