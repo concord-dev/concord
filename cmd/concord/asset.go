@@ -17,6 +17,7 @@ func newAssetCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newAssetImportCmd())
 	cmd.AddCommand(newAssetExportCmd())
+	cmd.AddCommand(newAssetApplyAISystemsCmd())
 	return cmd
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -17,6 +18,19 @@ func apiUploadCSV(ctx context.Context, fs findingsServer, path, file string) ([]
 	}
 	defer f.Close()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(fs.url, "/")+path, f)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+fs.token)
+	req.Header.Set("Content-Type", "text/csv")
+	setAPIVersion(req)
+	return doRaw(req)
+}
+
+// apiUploadCSVBytes posts an in-memory CSV body to path and returns the
+// response body — used by callers that generate CSV rather than upload a file.
+func apiUploadCSVBytes(ctx context.Context, fs findingsServer, path string, data []byte) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(fs.url, "/")+path, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
