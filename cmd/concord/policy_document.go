@@ -48,6 +48,8 @@ func newPolicyDocCmd() *cobra.Command {
 
 func newPolicyDocCreateCmd() *cobra.Command {
 	var serverURL, orgSlug, token, title, body, bodyFile, category string
+	var requiresAttestation bool
+	var attestationDueDays, attestationRecurrenceMonths int
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Draft a new policy document",
@@ -70,6 +72,15 @@ func newPolicyDocCreateCmd() *cobra.Command {
 			if category != "" {
 				payload["category"] = category
 			}
+			if requiresAttestation {
+				payload["requires_attestation"] = true
+			}
+			if cmd.Flags().Changed("attestation-due-days") {
+				payload["attestation_due_days"] = attestationDueDays
+			}
+			if cmd.Flags().Changed("attestation-recurrence-months") {
+				payload["attestation_recurrence_months"] = attestationRecurrenceMonths
+			}
 			var pd policyDocDTO
 			if err := apiSend(cmd.Context(), fs, "POST", policyDocBase(fs), payload, &pd); err != nil {
 				return err
@@ -83,6 +94,9 @@ func newPolicyDocCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&body, "body", "", "Document body (markdown)")
 	cmd.Flags().StringVar(&bodyFile, "body-file", "", "Read the body from a file")
 	cmd.Flags().StringVar(&category, "category", "", "Free-text category")
+	cmd.Flags().BoolVar(&requiresAttestation, "requires-attestation", false, "Launch an org-wide attestation campaign when this policy is published")
+	cmd.Flags().IntVar(&attestationDueDays, "attestation-due-days", 0, "Days attesters get to acknowledge (use with --requires-attestation)")
+	cmd.Flags().IntVar(&attestationRecurrenceMonths, "attestation-recurrence-months", 0, "Re-attest every N months (0 = one-time)")
 	_ = cmd.MarkFlagRequired("title")
 	return cmd
 }
@@ -180,6 +194,8 @@ func newPolicyDocShowCmd() *cobra.Command {
 
 func newPolicyDocUpdateCmd() *cobra.Command {
 	var serverURL, orgSlug, token, title, body, bodyFile, category string
+	var requiresAttestation bool
+	var attestationDueDays, attestationRecurrenceMonths int
 	cmd := &cobra.Command{
 		Use:   "update <id>",
 		Short: "Edit a draft or in-review document",
@@ -205,6 +221,15 @@ func newPolicyDocUpdateCmd() *cobra.Command {
 			if cmd.Flags().Changed("category") {
 				payload["category"] = category
 			}
+			if cmd.Flags().Changed("requires-attestation") {
+				payload["requires_attestation"] = requiresAttestation
+			}
+			if cmd.Flags().Changed("attestation-due-days") {
+				payload["attestation_due_days"] = attestationDueDays
+			}
+			if cmd.Flags().Changed("attestation-recurrence-months") {
+				payload["attestation_recurrence_months"] = attestationRecurrenceMonths
+			}
 			if len(payload) == 0 {
 				return fmt.Errorf("no fields to update — pass at least one flag")
 			}
@@ -221,6 +246,9 @@ func newPolicyDocUpdateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&body, "body", "", "New body (markdown)")
 	cmd.Flags().StringVar(&bodyFile, "body-file", "", "Read the new body from a file")
 	cmd.Flags().StringVar(&category, "category", "", "New category")
+	cmd.Flags().BoolVar(&requiresAttestation, "requires-attestation", false, "Launch an attestation campaign on publish")
+	cmd.Flags().IntVar(&attestationDueDays, "attestation-due-days", 0, "Days attesters get to acknowledge")
+	cmd.Flags().IntVar(&attestationRecurrenceMonths, "attestation-recurrence-months", 0, "Re-attest every N months (0 = one-time)")
 	return cmd
 }
 
