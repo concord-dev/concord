@@ -8,6 +8,10 @@ version: 2
 # published as a tagged module (see assessment/30), drop the replace directive
 # and this note becomes moot.
 
+# Two binaries built from one repo (assessment/36 phase 3): the lean core
+# `concord` for practitioners, and the `concord-admin` GRC bundle for compliance
+# admins. Version metadata lives in internal/cli (both binaries share it), so the
+# -X ldflags target that package, not main.
 builds:
   - id: concord
     main: ./cmd/concord
@@ -26,15 +30,48 @@ builds:
         goarch: arm64
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
-      - -X main.commit={{.ShortCommit}}
-      - -X main.date={{.Date}}
+      - -X github.com/concord-dev/concord/internal/cli.version={{.Version}}
+      - -X github.com/concord-dev/concord/internal/cli.commit={{.ShortCommit}}
+      - -X github.com/concord-dev/concord/internal/cli.date={{.Date}}
+  - id: concord-admin
+    main: ./cmd/concord-admin
+    binary: concord-admin
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/concord-dev/concord/internal/cli.version={{.Version}}
+      - -X github.com/concord-dev/concord/internal/cli.commit={{.ShortCommit}}
+      - -X github.com/concord-dev/concord/internal/cli.date={{.Date}}
 
+# Separate archives so each persona downloads only what they need.
 archives:
   - id: concord
+    ids: [concord]
     formats: [tar.gz]
     name_template: >-
       concord_{{ .Version }}_{{ .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+  - id: concord-admin
+    ids: [concord-admin]
+    formats: [tar.gz]
+    name_template: >-
+      concord-admin_{{ .Version }}_{{ .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
     format_overrides:
       - goos: windows
         formats: [zip]

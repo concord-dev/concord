@@ -12,3 +12,7 @@ vendor/
 # air live-reload
 tmp/
 build-errors.log
+
+# Stray root-level build outputs (use bin/ or goreleaser dist/)
+/concord
+/concord-admin

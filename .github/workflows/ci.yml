@@ -150,7 +150,9 @@ jobs:
 
       - name: build cli
         working-directory: concord
-        run: go build -buildvcs=false -o /tmp/concord ./cmd/concord
+        run: |
+          go build -buildvcs=false -o /tmp/concord ./cmd/concord
+          go build -buildvcs=false -o /tmp/concord-admin ./cmd/concord-admin
 
       - name: smoke (check engine evaluates a control)
         working-directory: concord

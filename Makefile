@@ -29,6 +29,7 @@ tidy:
 build:
 	@mkdir -p bin
 	go build -buildvcs=false -o $(BIN) ./cmd/concord
+	go build -buildvcs=false -o bin/concord-admin ./cmd/concord-admin
 
 test:
 	go test -buildvcs=false ./... -count=1
