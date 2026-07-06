@@ -19,11 +19,23 @@ import (
 // core (assessment/36 §2 surface 3).
 const extensionPrefix = "concord-"
 
+// firstPartyExtensions maps a verb the core knows about but does not itself
+// implement to the bundle that provides it. When such a verb is invoked without
+// its binary installed, we give a targeted "install the bundle" hint instead of
+// cobra's bare "unknown command" — the core stays lean but points the user to
+// the right shelf. Community/unknown verbs are left to cobra (which offers typo
+// suggestions).
+var firstPartyExtensions = map[string]string{
+	"admin": "concord-admin", // the GRC-administration bundle (assessment/36 phase 3)
+}
+
 // tryExtension dispatches to a PATH extension when args name a command the core
-// doesn't know. It returns (exitCode, true) when it handled the invocation by
-// exec-ing an extension; (0, false) means "not an extension — let cobra run",
-// which covers builtins, flags, help/completion, and unknown names with no
-// matching binary (so cobra still prints its normal unknown-command error).
+// doesn't know. It returns (exitCode, true) when it handled the invocation —
+// either by exec-ing an extension, or by printing an install hint for a known
+// first-party bundle that is missing. (0, false) means "not an extension — let
+// cobra run", which covers builtins, flags, help/completion, and unknown names
+// with no matching binary (so cobra still prints its unknown-command error with
+// suggestions).
 func tryExtension(root *cobra.Command, args []string) (int, bool) {
 	name := firstCommandToken(args)
 	if name == "" || isBuiltinCommand(root, name) {
@@ -31,6 +43,14 @@ func tryExtension(root *cobra.Command, args []string) (int, bool) {
 	}
 	bin, err := exec.LookPath(extensionPrefix + name)
 	if err != nil {
+		if bundle, ok := firstPartyExtensions[name]; ok {
+			fmt.Fprintf(os.Stderr,
+				"'concord %s' needs the %s bundle, which isn't installed.\n"+
+					"%s ships in the same release as concord — put it on your PATH, then re-run 'concord %s …'.\n"+
+					"(Run 'concord extension list' to see installed extensions.)\n",
+				name, bundle, bundle, name)
+			return 1, true
+		}
 		return 0, false
 	}
 	// Pass everything after the extension name straight through; env (incl.

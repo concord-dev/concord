@@ -48,3 +48,21 @@ func TestTryExtension_FallsThroughForBuiltinsAndFlags(t *testing.T) {
 		t.Fatal("unknown command with no PATH binary must fall through")
 	}
 }
+
+func TestTryExtension_FirstPartyHintWhenBundleMissing(t *testing.T) {
+	t.Setenv("PATH", "") // guarantee concord-admin is not resolvable
+	root := NewConcordCmd()
+	// `concord admin` with the bundle missing is handled with an install hint
+	// (exit 1), not passed through to cobra's bare unknown-command error.
+	code, handled := tryExtension(root, []string{"admin", "risk", "list"})
+	if !handled {
+		t.Fatal("missing first-party bundle must be handled with a hint, not fall through")
+	}
+	if code != 1 {
+		t.Fatalf("expected exit 1 for missing bundle, got %d", code)
+	}
+	// A non-first-party unknown verb still falls through to cobra.
+	if _, handled := tryExtension(root, []string{"totallyunknownverb"}); handled {
+		t.Fatal("non-first-party unknown verb must fall through to cobra")
+	}
+}
