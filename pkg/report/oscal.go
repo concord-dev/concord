@@ -1,9 +1,13 @@
 package report
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,21 +15,35 @@ import (
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
 )
 
+// oscalNamespace anchors every deterministic (v5) UUID this renderer mints. It
+// is itself derived deterministically so the value is self-documenting rather
+// than a magic literal.
+var oscalNamespace = uuid.NewSHA1(uuid.NameSpaceURL, []byte("https://concord.dev/oscal"))
+
 type OSCALRenderer struct{}
 
+// Render emits an OSCAL assessment-results document. The output is a pure
+// function of the findings: UUIDs are content-seeded (UUIDv5) and timestamps
+// are derived from the findings' EvaluatedAt window rather than wall-clock, so
+// rendering the same findings twice is byte-identical. That lets teams commit
+// OSCAL artifacts to Git and get clean, meaningful diffs — the whole point of
+// compliance as code — instead of a full UUID/timestamp reshuffle every run.
 func (OSCALRenderer) Render(w io.Writer, findings []apiv1.Finding) (Summary, error) {
 	s := Summarize(findings)
-	now := time.Now().UTC().Format(time.RFC3339)
+	start, end := assessmentWindow(findings)
+	published := end.Format(time.RFC3339)
+	digest := findingsDigest(findings)
 
-	results := buildOSCALResult(findings, now)
+	results := buildOSCALResult(findings, start, end)
+	results.UUID = detUUID("result:" + digest)
 
 	doc := oscalEnvelope{
 		AssessmentResults: oscalAssessmentResults{
-			UUID: uuid.NewString(),
+			UUID: detUUID("assessment-results:" + digest),
 			Metadata: oscalMetadata{
 				Title:        "Concord Automated Assessment Results",
-				Published:    now,
-				LastModified: now,
+				Published:    published,
+				LastModified: published,
 				Version:      "1.0",
 				OscalVersion: "1.1.2",
 			},
@@ -42,13 +60,12 @@ func (OSCALRenderer) Render(w io.Writer, findings []apiv1.Finding) (Summary, err
 	return s, nil
 }
 
-func buildOSCALResult(findings []apiv1.Finding, ts string) oscalResult {
+func buildOSCALResult(findings []apiv1.Finding, start, end time.Time) oscalResult {
 	res := oscalResult{
-		UUID:        uuid.NewString(),
 		Title:       "Concord automated assessment",
 		Description: "Findings produced by Concord controls evaluated against collected evidence.",
-		Start:       ts,
-		End:         ts,
+		Start:       start.Format(time.RFC3339),
+		End:         end.Format(time.RFC3339),
 	}
 
 	for _, f := range findings {
@@ -58,22 +75,27 @@ func buildOSCALResult(findings []apiv1.Finding, ts string) oscalResult {
 		} else if f.Status == apiv1.StatusError {
 			state = "not-applicable"
 		}
+		collected := f.EvaluatedAt.UTC().Format(time.RFC3339)
+		findingKey := f.ControlID + "\x00" + f.ResourceID
 
 		var obsRefs []oscalObservationRef
-		for _, msg := range f.Messages {
+		for i, msg := range f.Messages {
 			obs := oscalObservation{
-				UUID:        uuid.NewString(),
+				// Index guards against a finding repeating a message.
+				UUID:        detUUID("observation:" + findingKey + "\x00" + strconv.Itoa(i) + "\x00" + msg),
 				Title:       f.ControlID + " observation",
 				Description: msg,
 				Methods:     []string{"TEST"},
-				Collected:   ts,
+				Collected:   collected,
 			}
 			res.Observations = append(res.Observations, obs)
 			obsRefs = append(obsRefs, oscalObservationRef{ObservationUUID: obs.UUID})
 		}
 
 		res.Findings = append(res.Findings, oscalFinding{
-			UUID:                uuid.NewString(),
+			// Seeded by (control, resource) alone so a finding keeps its UUID
+			// even as sibling findings change — minimal diffs.
+			UUID:                detUUID("finding:" + findingKey),
 			Title:               f.ControlID + " — " + f.Title,
 			Description:         f.Title,
 			Props:               buildMappingProps(f),
@@ -82,6 +104,45 @@ func buildOSCALResult(findings []apiv1.Finding, ts string) oscalResult {
 		})
 	}
 	return res
+}
+
+// detUUID returns a deterministic v5 UUID for a content key.
+func detUUID(name string) string {
+	return uuid.NewSHA1(oscalNamespace, []byte(name)).String()
+}
+
+// assessmentWindow is the [earliest, latest] EvaluatedAt across findings — the
+// real evaluation window, and deterministic given the same findings. Zero
+// EvaluatedAt values are ignored; an empty/all-zero set yields the zero time
+// (which still formats to a stable RFC3339 string).
+func assessmentWindow(findings []apiv1.Finding) (time.Time, time.Time) {
+	var start, end time.Time
+	for _, f := range findings {
+		t := f.EvaluatedAt.UTC()
+		if t.IsZero() {
+			continue
+		}
+		if start.IsZero() || t.Before(start) {
+			start = t
+		}
+		if t.After(end) {
+			end = t
+		}
+	}
+	return start, end
+}
+
+// findingsDigest is a stable sha256 over the finding identities + statuses, so
+// the top-level assessment/result UUIDs are distinct per assessment content but
+// identical when the content is.
+func findingsDigest(findings []apiv1.Finding) string {
+	keys := make([]string, 0, len(findings))
+	for _, f := range findings {
+		keys = append(keys, f.ControlID+"\x00"+f.ResourceID+"\x00"+string(f.Status))
+	}
+	sort.Strings(keys)
+	sum := sha256.Sum256([]byte(strings.Join(keys, "\n")))
+	return hex.EncodeToString(sum[:])
 }
 
 func buildMappingProps(f apiv1.Finding) []oscalProp {

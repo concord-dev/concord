@@ -189,6 +189,44 @@ func TestOSCALRenderer_ProducesValidEnvelope(t *testing.T) {
 	assert.Contains(t, mappedValues, "nist_csf:PR.IP-3")
 }
 
+func TestOSCALRenderer_Deterministic(t *testing.T) {
+	// Rendering the same findings twice must be byte-identical — no wall-clock
+	// timestamps, no random UUIDs — so committed OSCAL artifacts diff cleanly.
+	var a, b bytes.Buffer
+	_, err := report.OSCALRenderer{}.Render(&a, sampleFindings())
+	require.NoError(t, err)
+	_, err = report.OSCALRenderer{}.Render(&b, sampleFindings())
+	require.NoError(t, err)
+	assert.Equal(t, a.String(), b.String(), "identical findings must render identical OSCAL")
+
+	// Timestamps are derived from EvaluatedAt (2026-05-14T10:00:00Z), not now.
+	assert.Contains(t, a.String(), "2026-05-14T10:00:00Z")
+
+	// A finding's UUID is stable regardless of sibling findings (seeded by
+	// control+resource): rendering a subset yields the same finding UUID.
+	full := decodeFindingUUIDs(t, a.Bytes())
+	var subsetBuf bytes.Buffer
+	_, err = report.OSCALRenderer{}.Render(&subsetBuf, sampleFindings()[:1])
+	require.NoError(t, err)
+	subset := decodeFindingUUIDs(t, subsetBuf.Bytes())
+	assert.Equal(t, full["SOC2-CC8.1"], subset["SOC2-CC8.1"], "finding UUID must not depend on siblings")
+}
+
+// decodeFindingUUIDs maps target-id → finding uuid from an OSCAL envelope.
+func decodeFindingUUIDs(t *testing.T, raw []byte) map[string]string {
+	t.Helper()
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(raw, &doc))
+	rs := doc["assessment-results"].(map[string]any)["results"].([]any)
+	out := map[string]string{}
+	for _, f := range rs[0].(map[string]any)["findings"].([]any) {
+		fm := f.(map[string]any)
+		target := fm["target"].(map[string]any)["target-id"].(string)
+		out[target] = fm["uuid"].(string)
+	}
+	return out
+}
+
 func TestMarkdownRenderer(t *testing.T) {
 	var buf bytes.Buffer
 	_, err := report.MarkdownRenderer{}.Render(&buf, sampleFindings())
