@@ -16,10 +16,12 @@ env:
   # and .github/workflows/release.yml.
   GO_VERSION: '1.25.11'
 
-# This repo builds ONLY the `concord` CLI + engine. The server, worker, Helm
-# chart, and Kafka-backed tests live in concord-dev/concord-platform and are
-# CI'd there. Cross-repo imports (the plugin SDK) resolve via the `replace`
-# directive against a sibling checkout — see the "check out sibling" step.
+# This repo builds ONLY the `concord` CLI + engine (and the concord-admin
+# bundle). The server, worker, Helm chart, and Kafka-backed tests live in
+# concord-dev/concord-platform and are CI'd there. The plugin SDK is consumed
+# as a published module (github.com/concord-dev/concord-plugin-sdk), so a clean
+# single-repo checkout builds — no sibling checkout, no replace directive. The
+# committed go.work is for local multi-repo dev only and is absent here.
 
 jobs:
   lint:
@@ -27,43 +29,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: concord
-
-      - name: check out plugin SDK sibling
-        uses: actions/checkout@v4
-        with:
-          repository: concord-dev/concord-plugin-sdk
-          path: concord-plugin-sdk
-
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-          cache-dependency-path: concord/go.sum
+          cache-dependency-path: go.sum
 
       - name: go vet
-        working-directory: concord
         run: go vet ./...
 
       - name: install analyzers
-        working-directory: concord
         run: make tools
 
       - name: staticcheck
-        working-directory: concord
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
           staticcheck ./...
 
       - name: deadcode
-        working-directory: concord
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
           deadcode -test ./...
 
       - name: gofmt
-        working-directory: concord
         run: |
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then
@@ -77,26 +65,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: concord
-
-      - name: check out plugin SDK sibling
-        uses: actions/checkout@v4
-        with:
-          repository: concord-dev/concord-plugin-sdk
-          path: concord-plugin-sdk
-
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-          cache-dependency-path: concord/go.sum
+          cache-dependency-path: go.sum
 
       - name: install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
 
       - name: govulncheck
-        working-directory: concord
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
           govulncheck ./...
@@ -106,26 +84,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: concord
-
-      - name: check out plugin SDK sibling
-        uses: actions/checkout@v4
-        with:
-          repository: concord-dev/concord-plugin-sdk
-          path: concord-plugin-sdk
-
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-          cache-dependency-path: concord/go.sum
+          cache-dependency-path: go.sum
 
       # The CLI engine needs no backends. Integration-tagged tests spawn real
       # plugins / hit ghcr and are exercised via `make test-integration`
       # (kept out of the default PR gate because they need network + binaries).
       - name: test (race + count=1)
-        working-directory: concord
         run: go test -buildvcs=false -race -count=1 ./...
 
   build:
@@ -133,27 +101,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: concord
-
-      - name: check out plugin SDK sibling
-        uses: actions/checkout@v4
-        with:
-          repository: concord-dev/concord-plugin-sdk
-          path: concord-plugin-sdk
-
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-          cache-dependency-path: concord/go.sum
+          cache-dependency-path: go.sum
 
-      - name: build cli
-        working-directory: concord
+      - name: build binaries
         run: |
           go build -buildvcs=false -o /tmp/concord ./cmd/concord
           go build -buildvcs=false -o /tmp/concord-admin ./cmd/concord-admin
 
       - name: smoke (check engine evaluates a control)
-        working-directory: concord
         run: /tmp/concord check --fixtures --quiet --controls testdata/smoke-pack
