@@ -75,6 +75,14 @@ func ValidateControl(ctx context.Context, yamlPath string) (ValidationReport, er
 	}
 	r.ControlID = c.Metadata.ID
 
+	// doc 31 §1 (the iron rule): a control ships only if it is real. A
+	// description or rationale left as a scaffold TODO placeholder is not
+	// shippable content, so it fails lint — this is what stops stub packs
+	// (whose Rego + fixtures otherwise replay fine) from passing the gate.
+	if isTODOStub(c.Spec.Description) || isTODOStub(c.Spec.Rationale) {
+		r.Errors = append(r.Errors, "description/rationale is a TODO placeholder — write real content (doc 31 §1: a control ships only if it is real)")
+	}
+
 	packDir := packDirFromYAMLPath(yamlPath)
 	regoRel := strings.TrimPrefix(c.Spec.Policy.File, "../")
 	regoPath := filepath.Join(packDir, regoRel)
@@ -298,6 +306,12 @@ func packDirFromYAMLPath(yamlPath string) string {
 		abs = yamlPath
 	}
 	return filepath.Dir(filepath.Dir(abs))
+}
+
+// isTODOStub reports whether a description/rationale still carries a scaffold
+// TODO placeholder (the marker the scaffolder writes for un-authored content).
+func isTODOStub(s string) bool {
+	return strings.Contains(strings.ToUpper(s), "TODO")
 }
 
 func slugFromYAML(yamlPath string) string {
