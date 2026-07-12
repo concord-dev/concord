@@ -1,0 +1,54 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/storage_encryption
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    Encryption-at-rest across S3 buckets, RDS instances, and EBS volumes, each
+    tagged so controls can scope by data classification. From the aws plugin
+    collectStorageEncryption: { fetched_at,
+      buckets:       [ { name, tags, encryption: { configured, rules } } ],
+      rds_instances: [ { identifier, tags, encryption: { configured } } ],
+      ebs_volumes:   [ { volume_id, tags, encryption: { configured } } ] }.
+    A few controls extend this with kms_keys / dynamodb_tables (not yet emitted
+    by the collector); those extra arrays are allowed but optional here.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [buckets, rds_instances]
+    properties:
+      fetched_at: {type: string}
+      buckets:
+        type: array
+        items:
+          type: object
+          required: [name, encryption]
+          properties:
+            name: {type: string}
+            tags: {type: object}
+            encryption: {type: object}
+          additionalProperties: true
+      rds_instances:
+        type: array
+        items:
+          type: object
+          required: [identifier, encryption]
+          properties:
+            identifier: {type: string}
+            tags: {type: object}
+            encryption: {type: object}
+          additionalProperties: true
+      ebs_volumes:
+        type: array
+        items:
+          type: object
+          required: [volume_id, encryption]
+          properties:
+            volume_id: {type: string}
+            tags: {type: object}
+            encryption: {type: object}
+          additionalProperties: true
+    additionalProperties: true
