@@ -1,0 +1,44 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: attestation/policy_attestation
+  version: v1.0.0
+spec:
+  source: attestation
+  description: |
+    A signed, structured policy/process attestation: a human-approved record
+    that some non-cloud-checkable control is in place (a risk assessment exists,
+    a vendor register is maintained, an incident-response plan is approved, …).
+
+    This is the TARGET contract the control packs consume (doc 31 §6,
+    contract-first). Controls read:
+      input.<id>.kind                 — the attestation kind (e.g. "ropa", "dpia")
+      input.<id>.attested_fields.<f>  — the structured attested content (a MAP)
+      input.<id>.signature_verified   — whether the signature was verified
+    plus optional envelope fields (owner, signers, version, *_at timestamps).
+
+    NOTE (Phase 2): the concord-plugin-attestation collector as currently
+    implemented emits attested_fields as a []string of field NAMES and does not
+    emit `kind` or `signature_verified`, so it does not yet satisfy this
+    contract. This schema pins what the plugin MUST emit; the plugin is being
+    upgraded to match. The one invariant enforced here — attested_fields is an
+    object, never an array — is what distinguishes the target contract from the
+    collector's current output and fails any fixture that reverts to it.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [kind, attested_fields]
+    properties:
+      kind:
+        type: string
+        minLength: 1
+      attested_fields:
+        type: object
+      signature_verified:
+        type: boolean
+      signers:
+        type: array
+        items:
+          type: string
+    additionalProperties: true
