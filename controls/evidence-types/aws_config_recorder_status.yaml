@@ -1,0 +1,36 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/config_recorder_status
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    AWS Config recorder coverage. From the aws plugin collectConfigRecorderStatus
+    (DescribeConfigurationRecorders + DescribeConfigurationRecorderStatus):
+      { fetched_at, active_regions: [region],
+        recorders: [ { name, region, recording, all_supported } ] }.
+    Controls require an all-supported recorder that is actively recording. The
+    collector is single-region, so active_regions reports the region audited.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [active_regions, recorders]
+    properties:
+      fetched_at: {type: string}
+      active_regions:
+        type: array
+        items: {type: string}
+      recorders:
+        type: array
+        items:
+          type: object
+          required: [recording, all_supported]
+          properties:
+            name: {type: string}
+            region: {type: string}
+            recording: {type: boolean}
+            all_supported: {type: boolean}
+          additionalProperties: true
+    additionalProperties: true
