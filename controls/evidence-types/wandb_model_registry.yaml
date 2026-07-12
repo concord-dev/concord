@@ -1,0 +1,23 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: wandb/model_registry
+  version: v1.0.0
+spec:
+  source: wandb
+  description: |
+    Weights & Biases registered models, from the wandb plugin:
+    { tracking_uri, entity, fetched_at, models: [ { name, ... } ] }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [models]
+    properties:
+      tracking_uri: {type: string}
+      entity: {type: string}
+      fetched_at: {type: string}
+      models:
+        type: array
+        items: {type: object}
+    additionalProperties: true

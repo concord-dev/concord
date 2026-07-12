@@ -1,0 +1,28 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: snyk/container_issues
+  version: v1.0.0
+spec:
+  source: snyk
+  description: |
+    Snyk container issues, from the snyk plugin collectContainerIssues:
+    { fetched_at, org_id, project_type, projects: [ ... ], issues: [ ... ],
+    summary: { critical, high, medium, low, total } }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [issues, summary]
+    properties:
+      fetched_at: {type: string}
+      org_id: {type: string}
+      project_type: {type: string}
+      projects:
+        type: array
+        items: {type: object}
+      issues:
+        type: array
+        items: {type: object}
+      summary: {type: object}
+    additionalProperties: true

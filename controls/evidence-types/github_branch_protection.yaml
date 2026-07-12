@@ -1,0 +1,20 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: github/branch_protection
+  version: v1.0.0
+spec:
+  source: github
+  description: |
+    Branch-protection state for one repo/branch, from the github plugin:
+    { repo, branch, protected, protection: { ...rules } | null }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [repo, branch, protected]
+    properties:
+      repo: {type: string}
+      branch: {type: string}
+      protected: {type: boolean}
+    additionalProperties: true

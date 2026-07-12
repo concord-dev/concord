@@ -1,0 +1,22 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: mlflow/query
+  version: v1.0.0
+spec:
+  source: mlflow
+  description: |
+    MLflow registry query — same collector + shape as model_registry:
+    { tracking_uri, fetched_at, models: [ ... ] }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [models]
+    properties:
+      tracking_uri: {type: string}
+      fetched_at: {type: string}
+      models:
+        type: array
+        items: {type: object}
+    additionalProperties: true

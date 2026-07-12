@@ -1,0 +1,20 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: github/org_security_policy
+  version: v1.0.0
+spec:
+  source: github
+  description: |
+    Org-level security policy/settings, from the github plugin:
+    { fetched_at, org, policy: { ... } }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [policy]
+    properties:
+      fetched_at: {type: string}
+      org: {type: string}
+      policy: {type: object}
+    additionalProperties: true

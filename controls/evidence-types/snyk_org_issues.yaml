@@ -1,0 +1,23 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: snyk/org_issues
+  version: v1.0.0
+spec:
+  source: snyk
+  description: |
+    Snyk org issues, from the snyk plugin collectOrgIssues: { fetched_at,
+    org_id, issues: [ ... ], summary: { critical, high, medium, low, total } }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [issues, summary]
+    properties:
+      fetched_at: {type: string}
+      org_id: {type: string}
+      issues:
+        type: array
+        items: {type: object}
+      summary: {type: object}
+    additionalProperties: true
