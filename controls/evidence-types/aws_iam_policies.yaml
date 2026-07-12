@@ -1,0 +1,44 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/iam_policies
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    IAM identities (users, roles, groups) with their attached managed policies
+    and each policy's decoded document. From the aws plugin collectIAMPolicies
+    (ListUsers/ListRoles/ListGroups + ListAttached*Policies + GetPolicy/
+    GetPolicyVersion):
+      { fetched_at, identities: [ { name, type, attached_policies: [
+        { policy_name, arn, is_aws_managed, document } ] } ] }.
+    document is the policy JSON decoded from its IAM URL-encoding, so
+    least-privilege controls can inspect Statement/Action/Resource for wildcards.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [identities]
+    properties:
+      fetched_at: {type: string}
+      identities:
+        type: array
+        items:
+          type: object
+          required: [name, type, attached_policies]
+          properties:
+            name: {type: string}
+            type: {type: string}
+            attached_policies:
+              type: array
+              items:
+                type: object
+                required: [policy_name]
+                properties:
+                  policy_name: {type: string}
+                  arn: {type: string}
+                  is_aws_managed: {type: boolean}
+                  document: {type: object}
+                additionalProperties: true
+          additionalProperties: true
+    additionalProperties: true
