@@ -1,0 +1,40 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: github/file_glob
+  version: v1.0.0
+spec:
+  source: github
+  description: |
+    Files matched by a glob in a GitHub repository, each fetched and parsed
+    (frontmatter / json / yaml) into a document. Emitted by the github plugin's
+    file_glob evidence type (concord-plugin-github Collector), whose payload is
+    { scanned_paths: [...], docs: [ { path, ...parsed fields } ] }.
+
+    Attestation-style controls MUST read this as `some doc in input.<id>.docs;
+    doc.<field>` — never flat `input.<id>.<field>`. A flat fixture lints green
+    against a flat-reading rego but resolves to nothing against the real
+    collector, so the control always fails in production (doc 31 §6). This
+    schema pins the docs[] shape: a fixture (or a collector change) that drops
+    back to the flat shape fails `concord control lint`.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [docs]
+    properties:
+      scanned_paths:
+        type: array
+        items:
+          type: string
+      fetched_at:
+        type: string
+      docs:
+        type: array
+        items:
+          type: object
+          required: [path]
+          properties:
+            path:
+              type: string
+          additionalProperties: true
