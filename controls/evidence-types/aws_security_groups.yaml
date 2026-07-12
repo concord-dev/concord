@@ -1,0 +1,49 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/security_groups
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    EC2 security groups with inbound/outbound rules flattened to one entry per
+    CIDR, plus a scope classification from the group's `scope` tag. From the aws
+    plugin collectSecurityGroups (DescribeSecurityGroups):
+      { fetched_at, groups: [ { id, name, description, tags, scope?,
+        ingress_rules: [ { protocol, from_port, to_port, cidr } ],
+        egress_rules:  [ { protocol, from_port, to_port, cidr } ] } ] }.
+    scope is present only when the group carries a scope tag, so a control that
+    fails closed on an unclassified group surfaces the gap.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [groups]
+    properties:
+      fetched_at: {type: string}
+      groups:
+        type: array
+        items:
+          type: object
+          required: [id, ingress_rules]
+          properties:
+            id: {type: string}
+            name: {type: string}
+            description: {type: string}
+            scope: {type: string}
+            tags: {type: object}
+            ingress_rules:
+              type: array
+              items:
+                type: object
+                properties:
+                  protocol: {type: string}
+                  from_port: {type: integer}
+                  to_port: {type: integer}
+                  cidr: {type: string}
+                additionalProperties: true
+            egress_rules:
+              type: array
+              items: {type: object}
+          additionalProperties: true
+    additionalProperties: true
