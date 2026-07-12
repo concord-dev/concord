@@ -1,0 +1,36 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/iam_roles
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    IAM roles with session ceiling, tags, and decoded trust policy. From the aws
+    plugin collectIAMRoles (ListRoles + ListRoleTags):
+      { fetched_at, roles: [ { role_name, arn, tags,
+        max_session_duration_seconds, assume_role_policy } ] }.
+    assume_role_policy is the trust document decoded from its IAM URL-encoding.
+    A couple of controls extend a role with idle_session_lock_seconds or add a
+    top-level alarms array (not yet emitted by the collector); those extras are
+    allowed but optional here.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [roles]
+    properties:
+      fetched_at: {type: string}
+      roles:
+        type: array
+        items:
+          type: object
+          required: [role_name, arn]
+          properties:
+            role_name: {type: string}
+            arn: {type: string}
+            tags: {type: object}
+            max_session_duration_seconds: {type: integer}
+            assume_role_policy: {type: object}
+          additionalProperties: true
+    additionalProperties: true
