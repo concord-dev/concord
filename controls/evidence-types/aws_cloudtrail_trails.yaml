@@ -1,0 +1,26 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/cloudtrail_trails
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    CloudTrail trails, from the aws plugin collectCloudTrail (DescribeTrails +
+    GetTrailStatus): { fetched_at, trails: [ { name, is_multi_region,
+    is_organization, log_file_validation_enabled, home_region, ... } ] }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [trails]
+    properties:
+      fetched_at: {type: string}
+      trails:
+        type: array
+        items:
+          type: object
+          required: [name]
+          properties:
+            name: {type: string}
+          additionalProperties: true

@@ -1,0 +1,19 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/iam_account_summary
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    IAM account summary map, from the aws plugin collectIAMAccountSummary
+    (GetAccountSummary): { fetched_at, summary: { <SummaryMap counters> } }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [summary]
+    properties:
+      fetched_at: {type: string}
+      summary: {type: object}
+    additionalProperties: true

@@ -1,0 +1,28 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/s3_bucket_encryption
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    S3 default-encryption configuration per bucket, from the aws plugin
+    collectS3BucketEncryption (ListBuckets + GetBucketEncryption):
+    { fetched_at, buckets: [ { name, creation_date?, encryption: { configured,
+    rules: [ { sse_algorithm?, kms_key?, bucket_key_enabled } ] } } ] }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [buckets]
+    properties:
+      fetched_at: {type: string}
+      buckets:
+        type: array
+        items:
+          type: object
+          required: [name]
+          properties:
+            name: {type: string}
+            encryption: {type: object}
+          additionalProperties: true

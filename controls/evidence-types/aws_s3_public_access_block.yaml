@@ -1,0 +1,28 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/s3_public_access_block
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    S3 Block Public Access configuration per bucket, from the aws plugin
+    collectS3PublicAccessBlock: { fetched_at, buckets: [ { name,
+    public_access_block: { configured, block_public_acls, block_public_policy,
+    ignore_public_acls, restrict_public_buckets } } ] }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [buckets]
+    properties:
+      fetched_at: {type: string}
+      buckets:
+        type: array
+        items:
+          type: object
+          required: [name]
+          properties:
+            name: {type: string}
+            public_access_block: {type: object}
+          additionalProperties: true
