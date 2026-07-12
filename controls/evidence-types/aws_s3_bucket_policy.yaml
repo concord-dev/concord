@@ -1,0 +1,31 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/s3_bucket_policy
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    S3 bucket resource policies (decoded) with each bucket's tags. From the aws
+    plugin collectS3BucketPolicy (ListBuckets + GetBucketPolicy + GetBucketTagging):
+      { fetched_at, buckets: [ { name, tags, policy } ] }.
+    policy is the bucket policy JSON decoded to an object, so transmission
+    controls can inspect Statement for a Deny on aws:SecureTransport=false.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [buckets]
+    properties:
+      fetched_at: {type: string}
+      buckets:
+        type: array
+        items:
+          type: object
+          required: [name, policy]
+          properties:
+            name: {type: string}
+            tags: {type: object}
+            policy: {type: object}
+          additionalProperties: true
+    additionalProperties: true

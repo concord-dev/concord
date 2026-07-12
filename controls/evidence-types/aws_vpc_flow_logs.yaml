@@ -1,0 +1,32 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/vpc_flow_logs
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    VPCs with whether an ACTIVE flow log targets them. From the aws plugin
+    collectVPCFlowLogs (DescribeFlowLogs + DescribeVpcs). Emits both a flat flag
+    and a detail object so every consuming control's shape is satisfied:
+      { fetched_at, vpcs: [ { id, region, flow_logs_enabled,
+        flow_logs: { enabled, status, log_destination_type } } ] }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [vpcs]
+    properties:
+      fetched_at: {type: string}
+      vpcs:
+        type: array
+        items:
+          type: object
+          required: [id]
+          properties:
+            id: {type: string}
+            region: {type: string}
+            flow_logs_enabled: {type: boolean}
+            flow_logs: {type: object}
+          additionalProperties: true
+    additionalProperties: true
