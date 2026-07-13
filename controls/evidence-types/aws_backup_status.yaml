@@ -1,0 +1,26 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/backup_status
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    Backup posture across RDS, DynamoDB, and AWS Backup vaults. From the aws
+    plugin collectBackupStatus (RDS DescribeDBInstances + DynamoDB
+    ListTables/DescribeContinuousBackups + Backup ListBackupVaults): { fetched_at,
+    rds_instances:[{identifier, tags, backup_retention_period}],
+    dynamodb_tables:[{name, tags, point_in_time_recovery_enabled}],
+    backup_vaults:[{name, locked}] }. One control instead reads recovery_points
+    (backup-integrity), a different shape allowed here but not yet collected.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    properties:
+      fetched_at: {type: string}
+      rds_instances: {type: array, items: {type: object}}
+      dynamodb_tables: {type: array, items: {type: object}}
+      backup_vaults: {type: array, items: {type: object}}
+      recovery_points: {type: array, items: {type: object}}
+    additionalProperties: true
