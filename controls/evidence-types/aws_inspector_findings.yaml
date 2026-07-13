@@ -1,0 +1,37 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/inspector_findings
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    Amazon Inspector enablement + unresolved critical/high finding counts. From
+    the aws plugin collectInspectorFindings (BatchGetAccountStatus +
+    ListFindings): { fetched_at, active_regions:[region],
+    scanners:[{region, inspector_enabled}],
+    findings:{critical_unresolved, high_unresolved} }. Single-region.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [scanners, findings]
+    properties:
+      fetched_at: {type: string}
+      active_regions: {type: array, items: {type: string}}
+      scanners:
+        type: array
+        items:
+          type: object
+          required: [region, inspector_enabled]
+          properties:
+            region: {type: string}
+            inspector_enabled: {type: boolean}
+          additionalProperties: true
+      findings:
+        type: object
+        properties:
+          critical_unresolved: {type: integer}
+          high_unresolved: {type: integer}
+        additionalProperties: true
+    additionalProperties: true
