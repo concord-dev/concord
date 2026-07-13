@@ -1,0 +1,37 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/cloudtrail_event_selectors
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    CloudTrail event selectors per trail. From the aws plugin
+    collectCloudTrailEventSelectors (DescribeTrails + GetEventSelectors):
+    { fetched_at, trails:[{name, event_selectors:[{include_management_events,
+    read_write_type, data_resources:[{type, values}]}]}] }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [trails]
+    properties:
+      fetched_at: {type: string}
+      trails:
+        type: array
+        items:
+          type: object
+          required: [name, event_selectors]
+          properties:
+            name: {type: string}
+            event_selectors:
+              type: array
+              items:
+                type: object
+                properties:
+                  include_management_events: {type: boolean}
+                  read_write_type: {type: string}
+                  data_resources: {type: array}
+                additionalProperties: true
+          additionalProperties: true
+    additionalProperties: true

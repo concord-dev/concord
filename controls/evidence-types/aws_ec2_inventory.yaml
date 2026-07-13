@@ -1,0 +1,30 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/ec2_inventory
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    EC2 instances with tags, plus whether AWS Config is actively recording. From
+    the aws plugin collectEC2Inventory (DescribeInstances +
+    DescribeConfigurationRecorderStatus): { fetched_at, config_recorder_active,
+    instances:[{id, tags}] }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [instances]
+    properties:
+      fetched_at: {type: string}
+      config_recorder_active: {type: boolean}
+      instances:
+        type: array
+        items:
+          type: object
+          required: [id]
+          properties:
+            id: {type: string}
+            tags: {type: object}
+          additionalProperties: true
+    additionalProperties: true
