@@ -1,0 +1,32 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/cloudwatch_alarms
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    CloudWatch Logs metric filters and the CloudWatch alarms watching them. From
+    the aws plugin collectCloudWatchAlarms (DescribeMetricFilters +
+    DescribeAlarms): { fetched_at, metric_filters:[{filter_name, log_group_name,
+    filter_pattern, metric_name}], alarms:[{alarm_name, metric_name,
+    actions_enabled, alarm_actions}] }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [alarms]
+    properties:
+      fetched_at: {type: string}
+      metric_filters: {type: array, items: {type: object}}
+      alarms:
+        type: array
+        items:
+          type: object
+          properties:
+            alarm_name: {type: string}
+            metric_name: {type: string}
+            actions_enabled: {type: boolean}
+            alarm_actions: {type: array}
+          additionalProperties: true
+    additionalProperties: true

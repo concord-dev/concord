@@ -1,0 +1,33 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/cloudwatch_log_groups
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    CloudWatch log groups with retention, KMS key, and classification tags. From
+    the aws plugin collectCloudWatchLogGroups (DescribeLogGroups +
+    ListTagsForResource): { fetched_at, log_groups:[{name, retention_in_days,
+    kms_key_id, holds_ephi, is_production}] }. holds_ephi / is_production come
+    from the log group's ephi / production tags.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [log_groups]
+    properties:
+      fetched_at: {type: string}
+      log_groups:
+        type: array
+        items:
+          type: object
+          required: [name]
+          properties:
+            name: {type: string}
+            retention_in_days: {type: integer}
+            kms_key_id: {type: [string, "null"]}
+            holds_ephi: {type: boolean}
+            is_production: {type: boolean}
+          additionalProperties: true
+    additionalProperties: true
