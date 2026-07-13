@@ -1,0 +1,50 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/aws_tls_endpoints
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    TLS-terminating endpoints: S3 buckets (with resource policy, to check
+    SecureTransport enforcement) and ELBv2 load balancers with listeners. From
+    the aws plugin collectTLSEndpoints (ListBuckets + GetBucketPolicy + ELBv2
+    DescribeLoadBalancers/DescribeListeners/DescribeTags): { fetched_at,
+    buckets:[{name, tags, policy}], load_balancers:[{name, tags,
+    listeners:[{port, protocol, ssl_policy}]}] }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [buckets, load_balancers]
+    properties:
+      fetched_at: {type: string}
+      buckets:
+        type: array
+        items:
+          type: object
+          required: [name, policy]
+          properties:
+            name: {type: string}
+            tags: {type: object}
+            policy: {type: object}
+          additionalProperties: true
+      load_balancers:
+        type: array
+        items:
+          type: object
+          required: [name, listeners]
+          properties:
+            name: {type: string}
+            tags: {type: object}
+            listeners:
+              type: array
+              items:
+                type: object
+                properties:
+                  port: {type: integer}
+                  protocol: {type: string}
+                  ssl_policy: {type: string}
+                additionalProperties: true
+          additionalProperties: true
+    additionalProperties: true
