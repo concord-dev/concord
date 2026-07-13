@@ -1,0 +1,32 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/kms_keys
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    Customer-managed KMS keys with rotation state and tags. From the aws plugin
+    collectKMSKeys (ListKeys + DescribeKey + GetKeyRotationStatus +
+    ListResourceTags): { keys:[{key_id, tags, key_state, rotation_enabled,
+    rotation_period_days}] }. AWS-managed keys are skipped.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [keys]
+    properties:
+      fetched_at: {type: string}
+      keys:
+        type: array
+        items:
+          type: object
+          required: [key_id, key_state]
+          properties:
+            key_id: {type: string}
+            tags: {type: object}
+            key_state: {type: string}
+            rotation_enabled: {type: boolean}
+            rotation_period_days: {type: integer}
+          additionalProperties: true
+    additionalProperties: true

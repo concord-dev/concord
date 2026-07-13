@@ -1,0 +1,31 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/s3_bucket_integrity
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    S3 bucket versioning + Object Lock posture with tags. From the aws plugin
+    collectS3BucketIntegrity (ListBuckets + GetBucketVersioning +
+    GetObjectLockConfiguration + GetBucketTagging): { buckets:[{name, tags,
+    versioning:{enabled, mfa_delete}, object_lock:{enabled, mode, retention_days}}] }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [buckets]
+    properties:
+      fetched_at: {type: string}
+      buckets:
+        type: array
+        items:
+          type: object
+          required: [name, versioning, object_lock]
+          properties:
+            name: {type: string}
+            tags: {type: object}
+            versioning: {type: object}
+            object_lock: {type: object}
+          additionalProperties: true
+    additionalProperties: true

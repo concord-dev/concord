@@ -1,0 +1,41 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/network_acls
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    Network ACLs with rule entries. From the aws plugin collectNetworkACLs
+    (DescribeNetworkAcls): { acls:[{id, vpc_id, is_default, entries:[{rule_number,
+    egress, protocol, from_port, to_port, cidr, action}]}] }. Protocol numbers
+    are mapped to names (-1->all, 6->tcp, 17->udp, 1->icmp).
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [acls]
+    properties:
+      fetched_at: {type: string}
+      acls:
+        type: array
+        items:
+          type: object
+          required: [id, entries]
+          properties:
+            id: {type: string}
+            vpc_id: {type: string}
+            is_default: {type: boolean}
+            entries:
+              type: array
+              items:
+                type: object
+                properties:
+                  rule_number: {type: integer}
+                  egress: {type: boolean}
+                  protocol: {type: string}
+                  cidr: {type: string}
+                  action: {type: string}
+                additionalProperties: true
+          additionalProperties: true
+    additionalProperties: true
