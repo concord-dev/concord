@@ -1,0 +1,32 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/iam_privileged_principals
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    IAM users with administrator-level access, with MFA and access-key facts.
+    From the aws plugin collectIAMPrivilegedPrincipals (ListUsers +
+    ListAttachedUserPolicies + policy documents + credential report):
+    { fetched_at, administrators:[{username, has_access_key, mfa_enabled}] }.
+    A user is an administrator when it has AdministratorAccess or a policy
+    allowing Action "*" on Resource "*".
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [administrators]
+    properties:
+      fetched_at: {type: string}
+      administrators:
+        type: array
+        items:
+          type: object
+          required: [username]
+          properties:
+            username: {type: string}
+            has_access_key: {type: boolean}
+            mfa_enabled: {type: boolean}
+          additionalProperties: true
+    additionalProperties: true

@@ -1,0 +1,34 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/iam_identity_inventory
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    IAM user inventory plus root-usage and account-key facts. From the aws
+    plugin collectIAMIdentityInventory (credential report + account summary):
+    { fetched_at, account_access_keys_present, root_last_used_days_ago,
+    shared_credentials, users:[{username, is_service_account, has_console_login}] }.
+    A user with no console login is treated as a service account.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [users]
+    properties:
+      fetched_at: {type: string}
+      account_access_keys_present: {type: integer}
+      root_last_used_days_ago: {type: integer}
+      shared_credentials: {type: array}
+      users:
+        type: array
+        items:
+          type: object
+          required: [username]
+          properties:
+            username: {type: string}
+            is_service_account: {type: boolean}
+            has_console_login: {type: boolean}
+          additionalProperties: true
+    additionalProperties: true
