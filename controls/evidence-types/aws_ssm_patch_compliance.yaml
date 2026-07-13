@@ -1,0 +1,35 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/ssm_patch_compliance
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    SSM patch state per managed instance. From the aws plugin
+    collectSSMPatchCompliance (DescribeInstancePatchStates):
+      { fetched_at, instances:[{instance_id, patch_group, compliance_status,
+        missing_critical_count, missing_security_count}] }.
+    compliance_status derived (NON_COMPLIANT when any critical/security patch is
+    non-compliant). oldest_missing_critical_age_days is not exposed by SSM, so
+    the collector omits it (allowed but optional here).
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [instances]
+    properties:
+      fetched_at: {type: string}
+      instances:
+        type: array
+        items:
+          type: object
+          required: [instance_id, compliance_status]
+          properties:
+            instance_id: {type: string}
+            patch_group: {type: string}
+            compliance_status: {type: string}
+            missing_critical_count: {type: integer}
+            missing_security_count: {type: integer}
+          additionalProperties: true
+    additionalProperties: true
