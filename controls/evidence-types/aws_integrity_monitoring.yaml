@@ -1,0 +1,34 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/integrity_monitoring
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    CloudTrail log-file validation + AWS Config recording, the AWS signal for
+    file/config integrity monitoring. From the aws plugin
+    collectIntegrityMonitoring (DescribeTrails + GetTrailStatus + Config
+    recorders): { fetched_at, trails:[{name, is_multi_region, is_logging,
+    log_file_validation_enabled}], config_recorders:[{name, region, recording,
+    all_supported}] }.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    required: [trails]
+    properties:
+      fetched_at: {type: string}
+      trails:
+        type: array
+        items:
+          type: object
+          required: [name]
+          properties:
+            name: {type: string}
+            is_multi_region: {type: boolean}
+            is_logging: {type: boolean}
+            log_file_validation_enabled: {type: boolean}
+          additionalProperties: true
+      config_recorders: {type: array, items: {type: object}}
+    additionalProperties: true
