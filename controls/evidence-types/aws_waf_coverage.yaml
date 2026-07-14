@@ -1,0 +1,38 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/waf_coverage
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    Public-facing web entry points and whether each has an AWS WAF WebACL
+    associated. From the aws plugin collectWAFCoverage (ELBv2
+    DescribeLoadBalancers + WAFv2 GetWebACLForResource for internet-facing
+    Application Load Balancers, and CloudFront ListDistributions reading each
+    distribution's WebACLId): { fetched_at,
+    resources:[{arn, type, scheme, public_facing, web_acl_associated,
+    web_acl_arn}] }. type is application_load_balancer or
+    cloudfront_distribution. The PCI DSS 6.6 control fails closed:
+    web_acl_associated is reported true only when AWS returns an association.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    properties:
+      fetched_at: {type: string}
+      resources:
+        type: array
+        items:
+          type: object
+          properties:
+            arn: {type: string}
+            type: {type: string}
+            scheme: {type: string}
+            public_facing: {type: boolean}
+            web_acl_associated: {type: boolean}
+            web_acl_arn: {type: string}
+          required: [arn, public_facing, web_acl_associated]
+          additionalProperties: true
+    required: [resources]
+    additionalProperties: true
