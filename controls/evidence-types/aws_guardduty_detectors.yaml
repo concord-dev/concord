@@ -1,0 +1,50 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/guardduty_detectors
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    GuardDuty detector status plus unresolved HIGH-severity findings. From the
+    aws plugin collectGuardDutyDetectors (GuardDuty ListDetectors + GetDetector,
+    ListFindings[severity>=7, not archived] + GetFindings): { fetched_at,
+    regions_with_ephi:[region], regions_with_workloads:[region],
+    detectors:[{id, region, status}],
+    high_severity_findings:[{id, region, resource, age_days, severity}] }.
+    Backs the guardduty_detectors evidence type read by HIPAA §164.308(a)(5)
+    malware-protection (reads regions_with_ephi) and ISO 27001 A.5.7 threat
+    intelligence (reads regions_with_workloads); both region keys are emitted so
+    each control finds the key its rego reads. AWS does not expose which regions
+    hold sensitive/production workloads, so the collector treats the audited
+    region as in-scope (fail-closed on a missing ENABLED detector).
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    properties:
+      fetched_at: {type: string}
+      regions_with_ephi: {type: array, items: {type: string}}
+      regions_with_workloads: {type: array, items: {type: string}}
+      detectors:
+        type: array
+        items:
+          type: object
+          properties:
+            id: {type: string}
+            region: {type: string}
+            status: {type: string}
+          additionalProperties: true
+      high_severity_findings:
+        type: array
+        items:
+          type: object
+          properties:
+            id: {type: string}
+            region: {type: string}
+            resource: {type: string}
+            age_days: {type: integer}
+            severity: {type: number}
+          additionalProperties: true
+    required: [detectors, high_severity_findings]
+    additionalProperties: true
