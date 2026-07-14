@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"time"
 
 	"github.com/open-policy-agent/opa/rego"
 )
@@ -48,19 +49,33 @@ func (e *Engine) EvaluateSource(ctx context.Context, src, pkg string, input map[
 
 // EvaluateWithModules runs the deny/warn queries against pkg using every module in mods.
 // Use this when the policy imports library helpers that live in separate files.
+// It uses the real wall clock for time.now_ns() — production evaluation.
 func (e *Engine) EvaluateWithModules(ctx context.Context, mods map[string]string, pkg string, input map[string]any) (Result, error) {
-	deny, err := query(ctx, mods, fmt.Sprintf("data.%s.deny", pkg), input)
+	return e.EvaluateWithModulesAt(ctx, mods, pkg, input, time.Time{})
+}
+
+// EvaluateWithModulesAt is EvaluateWithModules with the clock that time.now_ns()
+// reads pinned to at. A zero at falls back to the real wall clock.
+//
+// This exists for fixture replay in lint/test: pinning the clock to the
+// evidence's own collection time makes freshness checks (which compare a
+// timestamp against time.now_ns()) deterministic, so a static fixture never
+// silently rots past a freshness window as real time advances. Production
+// evaluation passes a zero at and keeps using the real clock, so genuinely
+// stale evidence is still caught.
+func (e *Engine) EvaluateWithModulesAt(ctx context.Context, mods map[string]string, pkg string, input map[string]any, at time.Time) (Result, error) {
+	deny, err := query(ctx, mods, fmt.Sprintf("data.%s.deny", pkg), input, at)
 	if err != nil {
 		return Result{}, fmt.Errorf("deny query: %w", err)
 	}
-	warn, warnErr := query(ctx, mods, fmt.Sprintf("data.%s.warn", pkg), input)
+	warn, warnErr := query(ctx, mods, fmt.Sprintf("data.%s.warn", pkg), input, at)
 	if warnErr != nil {
 		// A broken warn rule shouldn't fail an otherwise-valid control (warns are
 		// advisory), but it must not vanish either — surface it as a warning so
 		// the policy author sees it.
 		warn = append(warn, fmt.Sprintf("warn rule evaluation error: %v", warnErr))
 	}
-	resources, err := queryResources(ctx, mods, fmt.Sprintf("data.%s.resource_findings", pkg), input)
+	resources, err := queryResources(ctx, mods, fmt.Sprintf("data.%s.resource_findings", pkg), input, at)
 	if err != nil {
 		return Result{}, fmt.Errorf("resource_findings query: %w", err)
 	}
@@ -69,11 +84,21 @@ func (e *Engine) EvaluateWithModules(ctx context.Context, mods map[string]string
 	return Result{Deny: deny, Warn: warn, Pass: len(deny) == 0, Resources: resources}, nil
 }
 
+// evalOptions builds the base rego options shared by every query, adding the
+// pinned clock when at is non-zero.
+func evalOptions(q string, input map[string]any, at time.Time) []func(*rego.Rego) {
+	opts := []func(*rego.Rego){rego.Query(q), rego.Input(input)}
+	if !at.IsZero() {
+		opts = append(opts, rego.Time(at))
+	}
+	return opts
+}
+
 // queryResources evaluates the optional `resource_findings` rule and decodes its
 // set of {resource, status, messages} objects. An undefined rule yields no
 // results (not an error), so control-level policies simply return nil.
-func queryResources(ctx context.Context, mods map[string]string, q string, input map[string]any) ([]ResourceVerdict, error) {
-	opts := []func(*rego.Rego){rego.Query(q), rego.Input(input)}
+func queryResources(ctx context.Context, mods map[string]string, q string, input map[string]any, at time.Time) ([]ResourceVerdict, error) {
+	opts := evalOptions(q, input, at)
 	for name, src := range mods {
 		opts = append(opts, rego.Module(name, src))
 	}
@@ -117,8 +142,8 @@ func queryResources(ctx context.Context, mods map[string]string, q string, input
 	return out, nil
 }
 
-func query(ctx context.Context, mods map[string]string, q string, input map[string]any) ([]string, error) {
-	opts := []func(*rego.Rego){rego.Query(q), rego.Input(input)}
+func query(ctx context.Context, mods map[string]string, q string, input map[string]any, at time.Time) ([]string, error) {
+	opts := evalOptions(q, input, at)
 	for name, src := range mods {
 		opts = append(opts, rego.Module(name, src))
 	}

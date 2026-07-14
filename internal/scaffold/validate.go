@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/concord-dev/concord/internal/policy"
 	apiv1 "github.com/concord-dev/concord/pkg/api/v1"
@@ -228,7 +229,12 @@ func evalFixture(ctx context.Context, engine *policy.Engine, mods map[string]str
 		return nil, fmt.Errorf("parse: %w", err)
 	}
 	input := normaliseFixture(parsed, evidenceIDs)
-	res, err := engine.EvaluateWithModules(ctx, mods, pkg, input)
+	// Pin the clock to the evidence's own collection time so freshness checks
+	// (timestamp vs time.now_ns()) are evaluated as-of collection, not as-of
+	// whenever lint happens to run. This stops static fixtures from silently
+	// rotting past a freshness window as real time advances. A fixture with no
+	// fetched_at anchor falls back to the real clock.
+	res, err := engine.EvaluateWithModulesAt(ctx, mods, pkg, input, fixtureEvalTime(input))
 	if err != nil {
 		return nil, err
 	}
@@ -238,6 +244,32 @@ func evalFixture(ctx context.Context, engine *policy.Engine, mods map[string]str
 		Deny: res.Deny,
 		Warn: res.Warn,
 	}, nil
+}
+
+// fixtureEvalTime returns the latest fetched_at found across the fixture's
+// evidence payloads, or the zero time when none carry one. Evidence is keyed by
+// id at the top level of input; a payload's fetched_at marks when that evidence
+// was collected.
+func fixtureEvalTime(input map[string]any) time.Time {
+	var latest time.Time
+	for _, payload := range input {
+		m, ok := payload.(map[string]any)
+		if !ok {
+			continue
+		}
+		s, ok := m["fetched_at"].(string)
+		if !ok {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			continue
+		}
+		if t.After(latest) {
+			latest = t
+		}
+	}
+	return latest
 }
 
 // normaliseFixture wraps raw evidence under the control's evidence IDs to

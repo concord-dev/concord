@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,6 +29,41 @@ warn contains msg if {
     msg := "no CODEOWNERS required"
 }
 `
+
+// freshnessRule denies when the reviewed_at timestamp is more than 90 days
+// before time.now_ns() — the shape every freshness control in the packs uses.
+const freshnessRule = `package concord.freshness
+
+import rego.v1
+
+deny contains msg if {
+    reviewed := time.parse_rfc3339_ns(input.reviewed_at)
+    cutoff := time.now_ns() - (90 * 86400000000000)
+    reviewed < cutoff
+    msg := "review is stale"
+}
+`
+
+// TestEvaluateWithModulesAt_PinnedClock proves the clock pin: the same fixture
+// (reviewed_at fixed) passes when evaluated as-of a time within the window and
+// fails when evaluated as-of a time past it. This is what stops static
+// freshness fixtures from rotting during lint as real wall-clock time advances.
+func TestEvaluateWithModulesAt_PinnedClock(t *testing.T) {
+	e := New()
+	mods := map[string]string{"policy.rego": freshnessRule}
+	input := map[string]any{"reviewed_at": "2026-04-15T00:00:00Z"}
+
+	// As-of 30 days later: within the 90-day window → passes.
+	withinWindow, err := e.EvaluateWithModulesAt(context.Background(), mods, "concord.freshness", input, time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	assert.True(t, withinWindow.Pass, "review 30 days old should pass")
+
+	// As-of 200 days later: past the window → fails. Without the pin this same
+	// fixture would flip from pass to fail purely as wall-clock time advanced.
+	pastWindow, err := e.EvaluateWithModulesAt(context.Background(), mods, "concord.freshness", input, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	assert.False(t, pastWindow.Pass, "review 200 days old should fail")
+}
 
 func TestEvaluateSource_Deny(t *testing.T) {
 	e := New()
