@@ -1,0 +1,38 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/api_gateway
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    API Gateway REST APIs with their exposure and request-integrity posture.
+    From the aws plugin collectAPIGateway (API Gateway GetRestApis +
+    GetResources[embed=methods] + GetStages + GetUsagePlans, and WAFv2
+    GetWebACLForResource per stage): { fetched_at, apis:[{name, public,
+    request_validation_enabled, waf_attached, waf_rule_count,
+    usage_plan_attached}] }. public is true unless the endpoint type is PRIVATE;
+    request_validation_enabled is true when every mutating (POST/PUT/PATCH)
+    method has a request validator. Backs the SOC 2 PI1.1 input-validation
+    control.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    properties:
+      fetched_at: {type: string}
+      apis:
+        type: array
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            public: {type: boolean}
+            request_validation_enabled: {type: boolean}
+            waf_attached: {type: boolean}
+            waf_rule_count: {type: integer}
+            usage_plan_attached: {type: boolean}
+          required: [name, public]
+          additionalProperties: true
+    required: [apis]
+    additionalProperties: true
