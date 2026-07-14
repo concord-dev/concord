@@ -1,0 +1,57 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/audit_trail_status
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    Comprehensive CloudTrail posture plus production log-group retention. From
+    the aws plugin collectAuditTrailStatus (CloudTrail DescribeTrails +
+    GetTrailStatus + GetEventSelectors, S3 GetPublicAccessBlock per trail bucket,
+    CloudWatch Logs DescribeLogGroups + tags): { fetched_at,
+    cloudtrail:{trails:[{name, is_logging, is_multi_region_trail,
+    log_file_validation_enabled, kms_key_id, s3_bucket_is_public,
+    include_global_service_events, include_management_events}]},
+    log_groups:[{name, is_production, retention_in_days}] }. Backs the
+    audit_trail_status evidence type read by FedRAMP AU-3/AU-9/AU-12 and PCI DSS
+    10.1/10.3/10.5, which all read the nested cloudtrail.trails shape (PCI 10.5
+    additionally reads log_groups). s3_bucket_is_public is derived from the
+    trail bucket's S3 Public Access Block.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    properties:
+      fetched_at: {type: string}
+      cloudtrail:
+        type: object
+        properties:
+          trails:
+            type: array
+            items:
+              type: object
+              properties:
+                name: {type: string}
+                is_logging: {type: boolean}
+                is_multi_region_trail: {type: boolean}
+                log_file_validation_enabled: {type: boolean}
+                kms_key_id: {type: string}
+                s3_bucket_is_public: {type: boolean}
+                include_global_service_events: {type: boolean}
+                include_management_events: {type: boolean}
+              required: [name]
+              additionalProperties: true
+        required: [trails]
+        additionalProperties: true
+      log_groups:
+        type: array
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            is_production: {type: boolean}
+            retention_in_days: {type: integer}
+          additionalProperties: true
+    required: [cloudtrail]
+    additionalProperties: true
