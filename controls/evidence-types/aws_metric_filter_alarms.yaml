@@ -1,0 +1,43 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: aws/metric_filter_alarms
+  version: v1.0.0
+spec:
+  source: aws
+  description: |
+    CloudWatch Logs metric filters linked to the alarms watching their metric
+    and the SNS topics those alarms actually notify. From the aws plugin
+    collectMetricFilterAlarms (CloudWatch Logs DescribeMetricFilters + CloudWatch
+    DescribeAlarms matched by (namespace, metric) + SNS ListSubscriptionsByTopic):
+    { fetched_at, metric_filters:[{name, filter_pattern,
+    alarms:[{name, subscribed_topics:[arn]}]}] }. subscribed_topics lists only
+    alarm-action SNS topics with at least one confirmed subscription, so an alarm
+    that can never page surfaces as an empty subscribed_topics list. Backs the
+    CIS AWS 6.x monitoring controls (e.g. 6.1 unauthorized-API-call alarm).
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    properties:
+      fetched_at: {type: string}
+      metric_filters:
+        type: array
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            filter_pattern: {type: string}
+            alarms:
+              type: array
+              items:
+                type: object
+                properties:
+                  name: {type: string}
+                  subscribed_topics: {type: array, items: {type: string}}
+                required: [name, subscribed_topics]
+                additionalProperties: true
+          required: [name, filter_pattern, alarms]
+          additionalProperties: true
+    required: [metric_filters]
+    additionalProperties: true
