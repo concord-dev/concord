@@ -14,7 +14,7 @@ concurrency:
 env:
   # Single source of truth for the toolchain. Keep in lockstep with go.mod
   # and .github/workflows/release.yml.
-  GO_VERSION: '1.25.11'
+  GO_VERSION: '1.25.12'
 
 # This repo builds ONLY the `concord` CLI + engine (and the concord-admin
 # bundle). The server, worker, Helm chart, and Kafka-backed tests live in
