@@ -1,0 +1,45 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: file/trivy_report
+  version: v1.0.0
+spec:
+  source: file
+  description: |
+    A Trivy JSON vulnerability report (Trivy Schema 2), read verbatim from a
+    local path by the file plugin (handleTrivyReport). The report is passed
+    through unchanged, so controls read Trivy's native PascalCase schema:
+    { SchemaVersion, ArtifactName, Results:[{Target, Class, Type,
+    Vulnerabilities:[{VulnerabilityID, PkgName, InstalledVersion, FixedVersion,
+    Severity, Title}]}] }. Backs SOC 2 CC7.1 and NIST 800-53 RA-5 (vulnerability
+    management). Produced earlier in CI by: trivy fs --format json -o report.json.
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    properties:
+      SchemaVersion: {type: integer}
+      ArtifactName: {type: string}
+      Results:
+        type: array
+        items:
+          type: object
+          properties:
+            Target: {type: string}
+            Class: {type: string}
+            Type: {type: string}
+            Vulnerabilities:
+              type: array
+              items:
+                type: object
+                properties:
+                  VulnerabilityID: {type: string}
+                  PkgName: {type: string}
+                  InstalledVersion: {type: string}
+                  FixedVersion: {type: string}
+                  Severity: {type: string}
+                  Title: {type: string}
+                additionalProperties: true
+          additionalProperties: true
+    required: [Results]
+    additionalProperties: true
