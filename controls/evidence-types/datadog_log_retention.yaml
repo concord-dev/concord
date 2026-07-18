@@ -1,0 +1,40 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: datadog/datadog_log_retention
+  version: v1.0.0
+spec:
+  source: datadog
+  description: |
+    Datadog log index inventory with retention configuration. From the datadog
+    plugin handleLogRetention (Datadog v1 ListLogIndexes via the official
+    datadog-api-client-go SDK): { fetched_at, indexes:[{name, compliant, reason,
+    detail:{retention_days, daily_limit, is_rate_limited, exclusion_filters}}] }.
+    The rego reads index name and detail.retention_days / is_rate_limited /
+    exclusion_filters. Backs EU AI Act Article 12 (logging / record-keeping).
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    properties:
+      fetched_at: {type: string}
+      indexes:
+        type: array
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            compliant: {type: boolean}
+            reason: {type: string}
+            detail:
+              type: object
+              properties:
+                retention_days: {type: integer}
+                daily_limit: {type: integer}
+                is_rate_limited: {type: boolean}
+                exclusion_filters: {type: integer}
+              additionalProperties: true
+          required: [name]
+          additionalProperties: true
+    required: [indexes]
+    additionalProperties: true

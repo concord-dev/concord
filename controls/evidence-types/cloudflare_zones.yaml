@@ -1,0 +1,41 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: cloudflare/cloudflare_zones
+  version: v1.0.0
+spec:
+  source: cloudflare
+  description: |
+    Cloudflare zones with their DNSSEC, minimum-TLS, and SSL-mode posture. From
+    the cloudflare plugin handleZones (Cloudflare v4 GET /zones + per-zone
+    /dnssec, /settings/min_tls_version, /settings/ssl): { fetched_at,
+    zones:[{name, compliant, reason, detail:{id, status, dnssec,
+    min_tls_version, ssl_mode, paused, plan, type}}] }. The plugin pre-evaluates
+    compliant/reason; the rego additionally reads detail.min_tls_version,
+    detail.dnssec, detail.ssl_mode. Backs NIST 800-171 §3.13.8 (crypto in
+    transit).
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    properties:
+      fetched_at: {type: string}
+      zones:
+        type: array
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            compliant: {type: boolean}
+            reason: {type: string}
+            detail:
+              type: object
+              properties:
+                min_tls_version: {type: string}
+                dnssec: {type: string}
+                ssl_mode: {type: string}
+              additionalProperties: true
+          required: [name, compliant]
+          additionalProperties: true
+    required: [zones]
+    additionalProperties: true
