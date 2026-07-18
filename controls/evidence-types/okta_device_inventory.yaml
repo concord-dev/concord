@@ -1,0 +1,36 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: okta/device_inventory
+  version: v1.0.0
+spec:
+  source: okta
+  description: |
+    Managed-device inventory with per-device disk-encryption and MDM-enrollment
+    posture. From the okta plugin collectDeviceInventory (Okta GET
+    /api/v1/devices): { fetched_at, devices:[{id, os, disk_encryption,
+    mdm_enrolled, accesses_ephi}] }. id/os/disk_encryption/mdm_enrolled come from
+    the Okta device profile. Backs HIPAA §164.310(c) workstation security. Okta
+    does not classify per-device ePHI access, so accesses_ephi is reported true
+    for every registered device (fail-closed: every managed device must be
+    encrypted and MDM-enrolled).
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    properties:
+      fetched_at: {type: string}
+      devices:
+        type: array
+        items:
+          type: object
+          properties:
+            id: {type: string}
+            os: {type: string}
+            disk_encryption: {type: boolean}
+            mdm_enrolled: {type: boolean}
+            accesses_ephi: {type: boolean}
+          required: [id]
+          additionalProperties: true
+    required: [devices]
+    additionalProperties: true

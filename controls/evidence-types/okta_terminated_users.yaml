@@ -1,0 +1,39 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: okta/terminated_users
+  version: v1.0.0
+spec:
+  source: okta
+  description: |
+    Users deactivated in the lookback window and the residual access each still
+    holds. From the okta plugin collectTerminatedUsers (Okta list users filtered
+    to SUSPENDED/DEPROVISIONED within lookback_days, plus per-user appLinks and
+    roles): { fetched_at, lookback_days, users:[{email, terminated_at,
+    has_active_session, active_application_assignments, admin_role_memberships,
+    revocation_lag_hours}] }. Backs FedRAMP PS-4 and HIPAA §164.308(a)(3)(ii)(C).
+    has_active_session is false (deactivation invalidates sessions);
+    revocation_lag_hours needs an HR-system join Okta cannot provide and is
+    omitted by the collector (the field remains allowed for HR-enriched evidence).
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    properties:
+      fetched_at: {type: string}
+      lookback_days: {type: integer}
+      users:
+        type: array
+        items:
+          type: object
+          properties:
+            email: {type: string}
+            terminated_at: {type: string}
+            has_active_session: {type: boolean}
+            active_application_assignments: {type: array}
+            admin_role_memberships: {type: array}
+            revocation_lag_hours: {type: number}
+          required: [email]
+          additionalProperties: true
+    required: [users]
+    additionalProperties: true

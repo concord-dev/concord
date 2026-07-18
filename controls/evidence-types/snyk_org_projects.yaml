@@ -1,0 +1,36 @@
+apiVersion: concord.dev/v1
+kind: EvidenceType
+metadata:
+  id: snyk/org_projects
+  version: v1.0.0
+spec:
+  source: snyk
+  description: |
+    The org's software inventory — every monitored project, whether Snyk holds a
+    dependency inventory (SBOM) for it, and how recently it was scanned. From the
+    snyk plugin collectOrgProjects (Snyk v1 GET /v1/org/{org_id}/projects, which
+    exposes totalDependencies and lastTestedDate the REST projects list omits):
+    { fetched_at, org_id, projects:[{name, active, has_sbom,
+    last_scan_age_days}] }. active = monitored; has_sbom = totalDependencies > 0;
+    last_scan_age_days is omitted for never-tested projects (has_sbom is already
+    false there). Backs NIST CSF 2.0 ID.AM-02 (software inventory).
+  compatibility: backward
+  schema:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    type: object
+    properties:
+      fetched_at: {type: string}
+      org_id: {type: string}
+      projects:
+        type: array
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            active: {type: boolean}
+            has_sbom: {type: boolean}
+            last_scan_age_days: {type: integer}
+          required: [name]
+          additionalProperties: true
+    required: [projects]
+    additionalProperties: true
